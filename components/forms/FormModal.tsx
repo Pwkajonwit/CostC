@@ -1,0 +1,3072 @@
+"use client";
+
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
+import {
+  AlertCircle,
+  ArrowRight,
+  Building2,
+  Calculator,
+  Camera,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ClipboardList,
+  Coins,
+  CreditCard,
+  FileCheck,
+  FileText,
+  Image as ImageIcon,
+  ImagePlus,
+  Plus,
+  Receipt,
+  Save,
+  Scissors,
+  Search,
+  Store,
+  Trash2,
+  X
+} from "lucide-react";
+import dynamic from "next/dynamic";
+import { TABLES } from "@/lib/config";
+import type { FieldSchema, RefOption, SheetRow } from "@/lib/types";
+import { normalizeDateToIso, parseDateStrict, toInputDateValue, getTodayDateIso } from "@/lib/utils/dates";
+import { imagePreviewUrl } from "@/components/bills/BillImageThumbnail";
+import { compressImageFiles } from "@/lib/utils/image-compressor";
+
+const ProjectBudgetAllocator = dynamic(
+  () => import("@/components/forms/ProjectBudgetAllocator").then(mod => mod.ProjectBudgetAllocator),
+  { ssr: false }
+);
+
+const BillCategoryBudgetGuardrail = dynamic(
+  () => import("@/components/forms/BillCategoryBudgetGuardrail").then(mod => mod.BillCategoryBudgetGuardrail),
+  { ssr: false }
+);
+
+const ContractLaborBudgetGuardrail = dynamic(
+  () => import("@/components/forms/ContractLaborBudgetGuardrail").then(mod => mod.ContractLaborBudgetGuardrail),
+  { ssr: false }
+);
+
+type FormPayload = {
+  tableName: string;
+  schema: FieldSchema[];
+  initialValues: SheetRow;
+  refOptions: Record<string, RefOption[]>;
+};
+
+// Global in-memory cache and in-flight request tracker for schemas & refOptions
+const formSchemaCache = new Map<string, FormPayload>();
+const formSchemaInFlight = new Map<string, Promise<FormPayload | null>>();
+
+export function clearFormSchemaCache(tableName?: string) {
+  if (tableName) {
+    const normalized = tableName.trim();
+    formSchemaCache.delete(normalized);
+  } else {
+    formSchemaCache.clear();
+  }
+}
+
+export async function prefetchFormSchema(tableName: string, forceRefresh = false): Promise<FormPayload | null> {
+  if (!tableName) return null;
+  const normalized = tableName.trim();
+  if (!forceRefresh && formSchemaCache.has(normalized)) {
+    return formSchemaCache.get(normalized)!;
+  }
+  if (formSchemaInFlight.has(normalized)) {
+    return formSchemaInFlight.get(normalized)!;
+  }
+
+  const promise = fetch(`/api/form-schema?tableName=${encodeURIComponent(normalized)}&_t=${Date.now()}`, {
+    cache: "no-store",
+    headers: { "Cache-Control": "no-cache" }
+  })
+    .then(async (res) => {
+      if (!res.ok) throw new Error("Failed to load form schema");
+      const data = (await res.json()) as FormPayload;
+      if (data && data.schema) {
+        formSchemaCache.set(normalized, data);
+        return data;
+      }
+      return null;
+    })
+    .catch((err) => {
+      console.warn(`Could not prefetch form schema for ${normalized}:`, err);
+      return null;
+    })
+    .finally(() => {
+      formSchemaInFlight.delete(normalized);
+    });
+
+  formSchemaInFlight.set(normalized, promise);
+  return promise;
+}
+
+type FormModalProps = {
+  form?: FormPayload | null;
+  tableName?: string;
+  title?: string;
+  buttonLabel?: string;
+  relaxed?: boolean;
+  submitPath?: string;
+  openEventName?: string;
+  hideLauncher?: boolean;
+  buttonClassName?: string;
+  buttonIcon?: React.ReactNode;
+};
+
+type OpenFormDetail = {
+  row?: SheetRow;
+  sheetRow?: string | number;
+};
+
+const DATA_FORM_SECTIONS: { id: string; title: string; iconName: string; fields: string[] }[] = [
+  {
+    id: "basic",
+    title: "ข้อมูลหลัก & โครงการ",
+    iconName: "ClipboardList",
+    fields: ["ลำดับ", "ID Project", "บิล", "ผู้เบิก", "ผู้สร้างบิล", "ว/ด/ป"]
+  },
+  {
+    id: "vendor",
+    title: "ร้านค้า / ผู้รับเหมา",
+    iconName: "Store",
+    fields: ["ร้านค้า/ผู้รับเหมา", "ร้านค้า", "ผู้รับเหมา", "รายละเอียดงาน", "สินค้า", "ประเภท"]
+  },
+  {
+    id: "expense",
+    title: "รายการค่าใช้จ่าย & ยอดเงิน",
+    iconName: "Coins",
+    fields: [
+      "ค่าของ", "ค่าแรง", "statusค่าแรง", "ค่าแรงคงเหลือ", "พนักงาน", "ชื่อพนักงาน",
+      "น้ำมัน", "ซ่อมรถ", "ทะเบียน", "เครื่องจักร", "เครื่องมือ", "ชื่อเครื่องมือ", "อื่นๆ", "รายการ"
+    ]
+  },
+  {
+    id: "tax",
+    title: "ภาษี & เงื่อนไขการชำระเงิน",
+    iconName: "Receipt",
+    fields: ["vat", "เครดิต", "วันได้บิล", "วันจ่าย", "หัก", "จำนวนหัก", "วันออก 3%"]
+  },
+  {
+    id: "attachment",
+    title: "หลักฐาน & เอกสารแนบ",
+    iconName: "FileCheck",
+    fields: ["รูปถ่ายบิล"]
+  }
+];
+
+type MultiLineItem = {
+  id: string;
+  category: string;       // e.g. "6.ฝ้าผนัง"
+  categoryType: string;   // e.g. "1.ค่าของ" | "7.เครื่องมือ" | "8.อื่นๆ"
+  amount: string;         // e.g. "5000"
+};
+
+function MultiLineItemsBuilder({
+  items,
+  productOptions,
+  onAdd,
+  onRemove,
+  onUpdate,
+  onCancel,
+}: {
+  items: MultiLineItem[];
+  productOptions: { label: string; value: string }[];
+  onAdd: () => void;
+  onRemove: (id: string) => void;
+  onUpdate: (id: string, field: keyof MultiLineItem, value: string) => void;
+  onCancel: () => void;
+}) {
+  const totalSum = items.reduce((s, i) => s + (Number(i.amount) || 0), 0);
+
+  return (
+    <div className="col-span-full bg-slate-50/80 border border-slate-200 rounded-xl p-3 space-y-2 font-sans animate-in fade-in duration-150">
+      <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-1.5">
+        <div className="flex items-center gap-2">
+          <span className="font-semibold text-xs text-slate-800 flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-600 inline-block" />
+            <span>รายการสินค้า ({items.length})</span>
+          </span>
+        </div>
+      </div>
+
+      {/* Minimalist Line Items Rows */}
+      <div className="space-y-1.5">
+        {items.map((item, idx) => (
+          <div
+            key={item.id}
+            className="bg-white border border-slate-200 rounded-lg p-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shadow-2xs"
+          >
+            <span className="font-mono text-[11px] text-slate-400 font-semibold w-5 shrink-0 text-center hidden sm:block">
+              {idx + 1}.
+            </span>
+
+            {/* Product Category Dropdown */}
+            <div className="flex-1 min-w-0">
+              <SearchableRefSelect
+                name={`product_category_${item.id}`}
+                value={item.category}
+                options={productOptions}
+                readOnly={false}
+                placeholder={`เลือกสินค้า (${idx + 1})...`}
+                onChange={(val) => onUpdate(item.id, "category", val)}
+              />
+            </div>
+
+            {/* Cost Type Pill Select */}
+            <div className="w-full sm:w-32 shrink-0">
+              <SearchableRefSelect
+                name={`product_cost_type_${item.id}`}
+                value={item.categoryType}
+                options={[
+                  { label: "1.ค่าของ", value: "1.ค่าของ" },
+                  { label: "7.เครื่องมือ", value: "7.เครื่องมือ" },
+                  { label: "8.อื่นๆ", value: "8.อื่นๆ" }
+                ]}
+                readOnly={false}
+                placeholder="ประเภท..."
+                onChange={(val) => onUpdate(item.id, "categoryType", val)}
+              />
+            </div>
+
+            {/* Amount Input */}
+            <div className="w-full sm:w-36 shrink-0 relative">
+              <input
+                type="number"
+                step="any"
+                value={item.amount}
+                onChange={(e) => onUpdate(item.id, "amount", e.target.value)}
+                placeholder="0.00"
+                className="w-full h-10 sm:h-9 bg-white border border-slate-300 rounded-lg text-xs sm:text-sm px-2.5 py-1.5 focus:outline-none focus:border-slate-800 text-right font-semibold text-slate-900 placeholder:text-slate-400"
+              />
+            </div>
+
+            {/* Delete Button */}
+            <button
+              type="button"
+              onClick={() => onRemove(item.id)}
+              disabled={items.length <= 1}
+              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed shrink-0 self-end sm:self-center"
+              title="ลบ"
+            >
+              <Trash2 size={15} />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* Summary Footer */}
+      <div className="flex items-center justify-between pt-1 text-xs">
+        <button
+          type="button"
+          onClick={onAdd}
+          className="text-xs text-emerald-800 hover:text-emerald-900 font-medium flex items-center gap-1 cursor-pointer"
+        >
+          <Plus size={13} className="shrink-0" />
+          <span>เพิ่มรายการ</span>
+        </button>
+
+        <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-900 px-2.5 py-1 rounded-lg border border-emerald-200 text-xs">
+          <span>รวม:</span>
+          <span className="font-bold text-emerald-950">
+            ฿{totalSum.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SectionHeaderIcon({ name }: { name: string }) {
+  switch (name) {
+    case "ClipboardList": return <ClipboardList size={16} className="text-slate-600" />;
+    case "Store": return <Store size={16} className="text-slate-600" />;
+    case "Coins": return <Coins size={16} className="text-slate-600" />;
+    case "Receipt": return <Receipt size={16} className="text-slate-600" />;
+    case "FileCheck": return <FileCheck size={16} className="text-slate-600" />;
+    default: return <FileText size={16} className="text-slate-600" />;
+  }
+}
+
+export function FormModal({
+  form,
+  tableName,
+  title = "เพิ่มข้อมูล",
+  buttonLabel = "เพิ่มรายการ",
+  relaxed = false,
+  submitPath,
+  openEventName,
+  hideLauncher = false,
+  buttonClassName,
+  buttonIcon
+}: FormModalProps) {
+  const router = useRouter();
+  const resolvedTableName = tableName || form?.tableName || "Data";
+
+  const [activeForm, setActiveForm] = useState<FormPayload | null>(() => {
+    if (form) {
+      if (form.tableName) formSchemaCache.set(form.tableName, form);
+      return form;
+    }
+    return formSchemaCache.get(resolvedTableName) || null;
+  });
+  const [loadingSchema, setLoadingSchema] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [values, setValues] = useState<Record<string, string>>(() => activeForm ? getInitialStringValues(activeForm) : {});
+  const [editSheetRow, setEditSheetRow] = useState<string | number | null>(null);
+  const [enumListSearch, setEnumListSearch] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [attachedFilesByField, setAttachedFilesByField] = useState<Record<string, File[]>>({});
+  const isEditing = editSheetRow !== null && editSheetRow !== undefined;
+  const isDataForm = resolvedTableName === TABLES.DATA || resolvedTableName === "Data" || resolvedTableName === "bills" || resolvedTableName === "DATA" || resolvedTableName === "กรอกบิล";
+  const hasSavedDuringSession = useRef(false);
+
+  function handleClose() {
+    setOpen(false);
+    setEditSheetRow(null);
+    setMultiLineItems([]);
+    setIsMultiItemMode(false);
+    setSuccessMessage("");
+    setError("");
+    if (hasSavedDuringSession.current) {
+      hasSavedDuringSession.current = false;
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("bills-data-updated"));
+        window.dispatchEvent(new CustomEvent("data-updated", { detail: { tableName: resolvedTableName } }));
+      }
+      router.refresh();
+    }
+  }
+
+  // Multi-Line Items State for Multi-category Bill Entry
+  const [multiLineItems, setMultiLineItems] = useState<MultiLineItem[]>([]);
+  const [isMultiItemMode, setIsMultiItemMode] = useState<boolean>(false);
+
+  const [resetKey, setResetKey] = useState(0);
+  const formBodyRef = useRef<HTMLDivElement>(null);
+
+  const productOptions = useMemo(() => {
+    const field = activeForm?.schema.find(f => f.name === "สินค้า");
+    const rawList: string[] = Array.isArray(field?.values) ? field.values : [];
+    return rawList.map((v: string) => ({ label: v, value: v }));
+  }, [activeForm]);
+
+  function syncMultiLineItemsToValues(items: MultiLineItem[]) {
+    if (items.length === 0) return;
+    const matSum = items.filter(i => i.categoryType === "1.ค่าของ").reduce((s, i) => s + (Number(i.amount) || 0), 0);
+    const toolSum = items.filter(i => i.categoryType === "7.เครื่องมือ").reduce((s, i) => s + (Number(i.amount) || 0), 0);
+    const otherSum = items.filter(i => i.categoryType === "8.อื่นๆ").reduce((s, i) => s + (Number(i.amount) || 0), 0);
+    const totalSum = items.reduce((s, i) => s + (Number(i.amount) || 0), 0);
+
+    setValues(current => {
+      const next = { ...current };
+      next["ค่าของ"] = matSum > 0 ? String(matSum) : "";
+      next["เครื่องมือ"] = toolSum > 0 ? String(toolSum) : "";
+      next["อื่นๆ"] = otherSum > 0 ? String(otherSum) : "";
+      next["ยอดเงิน"] = String(totalSum);
+      next["ยอดโอน"] = String(totalSum);
+      if (items[0]?.category) next["สินค้า"] = items[0].category;
+      next["ประเภท"] = items[0]?.categoryType || current["ประเภท"] || "1.ค่าของ";
+      return next;
+    });
+  }
+
+  function enableMultiItemMode() {
+    setIsMultiItemMode(true);
+    const primaryType = values["ประเภท"] || "1.ค่าของ";
+    setValues(current => ({
+      ...current,
+      "ประเภท": current["ประเภท"] || "1.ค่าของ"
+    }));
+    if (multiLineItems.length === 0) {
+      const initialItems: MultiLineItem[] = [
+        {
+          id: "1",
+          category: values["สินค้า"] || "",
+          categoryType: primaryType,
+          amount: values["ค่าของ"] || values["ยอดเงิน"] || "",
+        },
+        {
+          id: "2",
+          category: "",
+          categoryType: "1.ค่าของ",
+          amount: "",
+        }
+      ];
+      setMultiLineItems(initialItems);
+      syncMultiLineItemsToValues(initialItems);
+    }
+  }
+
+  function disableMultiItemMode() {
+    setIsMultiItemMode(false);
+    setMultiLineItems([]);
+  }
+
+  function handleAddLineItem() {
+    setMultiLineItems(prev => [
+      ...prev,
+      {
+        id: String(Date.now() + Math.random()),
+        category: "",
+        categoryType: "1.ค่าของ",
+        amount: "",
+      }
+    ]);
+  }
+
+  function handleRemoveLineItem(id: string) {
+    setMultiLineItems(prev => {
+      const next = prev.filter(item => item.id !== id);
+      syncMultiLineItemsToValues(next);
+      return next;
+    });
+  }
+
+  function handleUpdateLineItem(id: string, field: keyof MultiLineItem, val: string) {
+    setMultiLineItems(prev => {
+      const next = prev.map(item => item.id === id ? { ...item, [field]: val } : item);
+      syncMultiLineItemsToValues(next);
+      return next;
+    });
+  }
+
+  // Sync if prop form changes
+  useEffect(() => {
+    if (form) {
+      setActiveForm(form);
+      if (form.tableName) formSchemaCache.set(form.tableName, form);
+    }
+  }, [form]);
+
+  // Background prefetch schema on mount so form opens instantly with 0ms delay
+  useEffect(() => {
+    if (resolvedTableName) {
+      prefetchFormSchema(resolvedTableName).then(loaded => {
+        if (loaded) {
+          setActiveForm(loaded);
+          setValues(prev => Object.keys(prev).length === 0 ? getInitialStringValues(loaded) : prev);
+        }
+      });
+    }
+  }, [resolvedTableName]);
+
+  // Listen to global cache invalidation event (when projects, stores, contractors, staff are added)
+  useEffect(() => {
+    const handleInvalidate = () => {
+      clearFormSchemaCache();
+      if (resolvedTableName) {
+        prefetchFormSchema(resolvedTableName, true).then(loaded => {
+          if (loaded) {
+            setActiveForm(loaded);
+          }
+        });
+      }
+    };
+    window.addEventListener("schema-cache-invalidated", handleInvalidate);
+    return () => window.removeEventListener("schema-cache-invalidated", handleInvalidate);
+  }, [resolvedTableName]);
+
+  function populateFormValues(targetForm: FormPayload, detail?: OpenFormDetail) {
+    const nextValues = detail?.row
+      ? getRowStringValues(targetForm, detail.row)
+      : getInitialStringValues(targetForm);
+
+    // When creating a new entry, ensure all date fields configured for today (e.g. ว/ด/ป, วันที่) use current Thai local date
+    if (!detail?.row) {
+      const todayIso = getTodayDateIso();
+      targetForm.schema.forEach(field => {
+        if (field.initialValue === "today" || (field.type === "Date" && (field.initialValue === "today" || field.name === "ว/ด/ป" || field.name === "วันที่" || field.name === "ดู/ทำ"))) {
+          nextValues[field.name] = todayIso;
+        }
+      });
+    }
+
+    if (detail?.row) {
+      targetForm.schema.filter(f => f.type === "Ref" && f.refFill).forEach(field => {
+        const refVal = nextValues[field.name];
+        if (refVal) {
+          const options = targetForm.refOptions[field.name] || [];
+          const selectedOpt = options.find(opt =>
+            String(opt.value) === refVal ||
+            String(opt.label) === refVal ||
+            (opt.row && (
+              String(opt.row.id) === refVal ||
+              String(opt.row.id_Contractor) === refVal ||
+              String(opt.row.id_store) === refVal
+            ))
+          );
+          if (selectedOpt) {
+            Object.entries(field.refFill!).forEach(([targetField, sourceColumn]) => {
+              if (!hasValue(nextValues[targetField])) {
+                nextValues[targetField] = String(selectedOpt.row?.[sourceColumn] ?? "");
+              }
+            });
+          }
+        }
+      });
+    }
+    applyLocalFormulas(nextValues, targetForm.tableName);
+    setError("");
+    setSuccessMessage("");
+    setEnumListSearch({});
+    const targetRowKey = detail?.row?.id ?? detail?.row?.["ID Project"] ?? detail?.row?.["รหัสพนักงาน"] ?? detail?.row?.id_store ?? detail?.row?.id_Contractor ?? detail?.row?.id_Conwork ?? detail?.row?.id_bank ?? detail?.row?.id_car ?? detail?.row?.id_cus ?? detail?.row?.id_Company ?? detail?.row?.["ลำดับ"] ?? detail?.sheetRow ?? detail?.row?._sheetRow;
+    setEditSheetRow(detail?.row ? (targetRowKey !== undefined && targetRowKey !== null ? (typeof targetRowKey === "number" || typeof targetRowKey === "string" ? targetRowKey : String(targetRowKey)) : 1) : null);
+
+    if (detail?.row) {
+      const rawItems = detail.row.items || (detail.row.data as any)?.items;
+      let parsedItems: MultiLineItem[] = [];
+      if (Array.isArray(rawItems)) {
+        parsedItems = rawItems;
+      } else if (typeof rawItems === "string") {
+        try {
+          const parsed = JSON.parse(rawItems);
+          if (Array.isArray(parsed)) parsedItems = parsed;
+        } catch {}
+      }
+
+      if (parsedItems.length > 0) {
+        setMultiLineItems(parsedItems);
+        setIsMultiItemMode(true);
+      } else {
+        setMultiLineItems([]);
+        setIsMultiItemMode(false);
+      }
+    } else {
+      setMultiLineItems([]);
+      setIsMultiItemMode(false);
+    }
+
+    setValues(nextValues);
+    setResetKey(k => k + 1);
+  }
+
+  async function handleOpen(detail?: OpenFormDetail) {
+    hasSavedDuringSession.current = false;
+    setAttachedFilesByField({});
+    setError("");
+    setSuccessMessage("");
+
+    // If editing existing row, populate directly
+    if (detail?.row && activeForm) {
+      populateFormValues(activeForm, detail);
+      setOpen(true);
+      prefetchFormSchema(resolvedTableName, true).then(fresh => {
+        if (fresh) setActiveForm(fresh);
+      });
+      return;
+    }
+
+    // Open modal immediately and fetch fresh real-time sequence from server
+    setOpen(true);
+    if (activeForm) {
+      populateFormValues(activeForm, detail);
+    } else {
+      setLoadingSchema(true);
+    }
+
+    try {
+      const fresh = await prefetchFormSchema(resolvedTableName, true);
+      if (fresh) {
+        setActiveForm(fresh);
+        if (!detail?.row) {
+          const freshInitial = getInitialStringValues(fresh);
+          const todayIso = getTodayDateIso();
+          setValues(prev => {
+            const next = { ...prev };
+            if (freshInitial["ลำดับ"]) next["ลำดับ"] = freshInitial["ลำดับ"];
+            if (freshInitial["ID Project"] && !next["ID Project"]) next["ID Project"] = freshInitial["ID Project"];
+            if (freshInitial["id_Conwork"] && !next["id_Conwork"]) next["id_Conwork"] = freshInitial["id_Conwork"];
+            fresh.schema.forEach(field => {
+              if (field.initialValue === "today" || (field.type === "Date" && (field.name === "ว/ด/ป" || field.name === "วันที่" || field.name === "ดู/ทำ"))) {
+                if (!next[field.name]) {
+                  next[field.name] = todayIso;
+                }
+              }
+            });
+            return next;
+          });
+        } else {
+          populateFormValues(fresh, detail);
+        }
+      }
+    } finally {
+      setLoadingSchema(false);
+    }
+  }
+
+  const visibleFields = (activeForm?.schema || []).filter(field => {
+    if (field.type === "Hidden") return false;
+    if ((resolvedTableName === TABLES.PROJECT || resolvedTableName === "Project") && (field.name.startsWith("งบไม่เกิน") || field.name === "คุมงบประเภทงาน")) {
+      return false;
+    }
+    return isFieldVisible(field, values);
+  });
+
+  useEffect(() => {
+    if (!openEventName) return;
+    const openFromExternalButton = (event: Event) => {
+      const detail = event instanceof CustomEvent ? event.detail as OpenFormDetail | undefined : undefined;
+      handleOpen(detail);
+    };
+    window.addEventListener(openEventName, openFromExternalButton as EventListener);
+    return () => window.removeEventListener(openEventName, openFromExternalButton as EventListener);
+  }, [activeForm, openEventName, resolvedTableName]);
+
+  function updateValue(field: FieldSchema, value: string) {
+    if (!activeForm) return;
+    setValues(current => {
+      const next = { ...current, [field.name]: value };
+      applyRefFill(next, field, activeForm, value);
+      normalizeDependentValues(next, field.name, activeForm);
+      if (activeForm.tableName === TABLES.DATA && field.name === "จำนวนหัก") return next;
+      if (
+        (activeForm.tableName === TABLES.PROJECT || activeForm.tableName === "Project" || activeForm.tableName === "1. Project รวม") &&
+        field.name === "ยอดรวม vat"
+      ) {
+        return next;
+      }
+      pruneHiddenConditionalValues(next, activeForm);
+      applyLocalFormulas(next, activeForm.tableName);
+      return next;
+    });
+  }
+
+  function updateValueByName(fieldName: string, value: string) {
+    if (!activeForm) return;
+    setValues(current => {
+      const next = { ...current, [fieldName]: value };
+      const targetField = activeForm.schema.find(f => f.name === fieldName);
+      if (targetField) {
+        applyRefFill(next, targetField, activeForm, value);
+        normalizeDependentValues(next, fieldName, activeForm);
+      }
+      applyLocalFormulas(next, activeForm.tableName);
+      return next;
+    });
+  }
+
+  async function submitForm(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!submitPath || !activeForm) return;
+
+    const submitValues = sanitizeValuesForSubmit(values, activeForm);
+    if (activeForm.tableName === TABLES.DATA || activeForm.tableName === "Data") {
+      const loggedInUser = getCookie("auth_name") || getCookie("auth_employee_id");
+      if (loggedInUser && !submitValues["ผู้สร้างบิล"]) {
+        submitValues["ผู้สร้างบิล"] = loggedInUser;
+      }
+    }
+    const validationError = validateVisibleRequiredFields(submitValues, activeForm);
+    if (validationError) {
+      setError(validationError);
+      formBodyRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
+    const formElement = event.currentTarget;
+    const body = new FormData();
+    body.set("tableName", activeForm.tableName);
+    Object.entries(submitValues).forEach(([key, value]) => body.append(key, value));
+    if (isEditing && editSheetRow !== null) {
+      body.set("id", String(editSheetRow));
+      body.set("sheetRow", String(editSheetRow));
+    }
+
+    if (isDataForm && isMultiItemMode && multiLineItems.length > 0) {
+      const invalidItem = multiLineItems.find(i => !i.amount || (Number(i.amount) || 0) <= 0);
+      if (invalidItem) {
+        setError("กรุณาระบุยอดเงินสำหรับทุกรายการสินค้าในบิล");
+        formBodyRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
+
+      const matSum = multiLineItems.filter(i => i.categoryType === "1.ค่าของ").reduce((s, i) => s + (Number(i.amount) || 0), 0);
+      const toolSum = multiLineItems.filter(i => i.categoryType === "7.เครื่องมือ").reduce((s, i) => s + (Number(i.amount) || 0), 0);
+      const otherSum = multiLineItems.filter(i => i.categoryType === "8.อื่นๆ").reduce((s, i) => s + (Number(i.amount) || 0), 0);
+      const totalSum = multiLineItems.reduce((s, i) => s + (Number(i.amount) || 0), 0);
+
+      submitValues["ค่าของ"] = matSum > 0 ? String(matSum) : "";
+      submitValues["เครื่องมือ"] = toolSum > 0 ? String(toolSum) : "";
+      submitValues["อื่นๆ"] = otherSum > 0 ? String(otherSum) : "";
+      submitValues["ยอดเงิน"] = String(totalSum);
+      submitValues["ยอดโอน"] = String(totalSum);
+      submitValues["ประเภท"] = multiLineItems[0]?.categoryType || submitValues["ประเภท"] || "1.ค่าของ";
+      const prodNames = multiLineItems.map(i => i.category).filter(Boolean);
+      submitValues["สินค้า"] = prodNames.join(", ") || submitValues["สินค้า"] || "";
+      submitValues["สินค้า/ทำงาน"] = prodNames.join(", ") || submitValues["สินค้า/ทำงาน"] || "";
+      submitValues["items"] = JSON.stringify(multiLineItems);
+
+      body.set("ประเภท", submitValues["ประเภท"]);
+      body.set("ค่าของ", submitValues["ค่าของ"]);
+      body.set("เครื่องมือ", submitValues["เครื่องมือ"]);
+      body.set("อื่นๆ", submitValues["อื่นๆ"]);
+      body.set("ยอดเงิน", submitValues["ยอดเงิน"]);
+      body.set("ยอดโอน", submitValues["ยอดโอน"]);
+      body.set("สินค้า", submitValues["สินค้า"]);
+      body.set("สินค้า/ทำงาน", submitValues["สินค้า/ทำงาน"]);
+      body.set("items", JSON.stringify(multiLineItems));
+      body.delete("rows");
+    }
+
+    let hasFiles = false;
+
+    // 1. Append all attached files from state (with automatic image compression)
+    for (const [fieldName, files] of Object.entries(attachedFilesByField)) {
+      const compressed = await compressImageFiles(files, 1600, 0.8);
+      compressed.forEach(file => {
+        if (file && file.size > 0) {
+          hasFiles = true;
+          body.append(fieldName, file);
+        }
+      });
+    }
+
+    // 2. Also fallback check any native file inputs (with automatic image compression)
+    const fileInputs = Array.from(formElement.querySelectorAll<HTMLInputElement>('input[type="file"]'));
+    for (const input of fileInputs) {
+      if (!attachedFilesByField[input.name]) {
+        const rawFiles = Array.from(input.files || []).filter(f => f.size > 0);
+        const compressed = await compressImageFiles(rawFiles, 1600, 0.8);
+        compressed.forEach(file => {
+          hasFiles = true;
+          body.append(input.name, file);
+        });
+      }
+    }
+
+    setSaving(true);
+    setError("");
+    setSuccessMessage("");
+    try {
+      const response = isEditing
+        ? hasFiles
+          ? await fetch(submitPath, {
+            method: "PATCH",
+            body
+          })
+          : await fetch(submitPath, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tableName: activeForm.tableName, id: editSheetRow, sheetRow: editSheetRow, values: submitValues })
+          })
+        : await fetch(submitPath, {
+          method: "POST",
+          body
+        });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "บันทึกไม่สำเร็จ");
+      
+      hasSavedDuringSession.current = true;
+      clearFormSchemaCache();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("schema-cache-invalidated"));
+        window.dispatchEvent(new CustomEvent("bills-data-updated", { detail: { row: payload.row, rows: payload.rows } }));
+        window.dispatchEvent(new CustomEvent("data-updated", { detail: { tableName: activeForm.tableName, row: payload.row, rows: payload.rows } }));
+      }
+
+      setAttachedFilesByField({});
+
+      if (isEditing) {
+        setOpen(false);
+        setEditSheetRow(null);
+        setValues(getInitialStringValues(activeForm));
+        setMultiLineItems([]);
+        setIsMultiItemMode(false);
+        setResetKey(k => k + 1);
+        router.refresh();
+      } else {
+        // Reset form & verify fresh sequence from server for the next entry
+        formElement.reset();
+
+        const freshForm = await prefetchFormSchema(activeForm.tableName, true);
+        if (freshForm) {
+          setActiveForm(freshForm);
+        }
+
+        const lastRow = Array.isArray(payload.rows) && payload.rows.length > 0 ? payload.rows[payload.rows.length - 1] : payload.row;
+        const prevSeq = String(lastRow?.["ลำดับ"] || lastRow?.["ลำดับtest"] || submitValues["ลำดับ"] || "");
+        const prevSeqNum = Number(prevSeq);
+
+        let nextSeq = freshForm?.initialValues?.["ลำดับ"] ? String(freshForm.initialValues["ลำดับ"]) : "";
+        if (prevSeqNum > 0 && (!nextSeq || Number(nextSeq) <= prevSeqNum)) {
+          nextSeq = String(prevSeqNum + 1);
+        }
+
+        const baseValues = freshForm ? getInitialStringValues(freshForm) : getInitialStringValues(activeForm);
+        if (nextSeq && (activeForm.tableName === TABLES.DATA || activeForm.tableName === "Data" || activeForm.tableName === "bills")) {
+          baseValues["ลำดับ"] = nextSeq;
+        }
+
+        setValues(baseValues);
+        setMultiLineItems([]);
+        setIsMultiItemMode(false);
+        setEnumListSearch({});
+        setAttachedFilesByField({});
+        setError("");
+        setSuccessMessage(
+          prevSeq
+            ? `บันทึกบิลลำดับที่ ${prevSeq} สำเร็จเรียบร้อย! ระบบเตรียมเลขถัดไป (#${nextSeq || Number(prevSeq) + 1}) พร้อมกรอกต่อแล้ว`
+            : "บันทึกรายการเรียบร้อยแล้ว สามารถสร้างรายการถัดไปต่อได้เลย"
+        );
+        setResetKey(k => k + 1);
+
+        // Scroll to the very top smoothly so user sees success alert & top of form
+        setTimeout(() => {
+          formBodyRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+        }, 50);
+
+        router.refresh();
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "บันทึกไม่สำเร็จ");
+      formBodyRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Pre-calculate contract & balance summary metrics for Data form
+  const baseAmt = toNumber(values["ยอดเงิน"]);
+  const deductVal = values["หัก"];
+  const deductAmt = toNumber(values["จำนวนหัก"] || values["3เปอร์"]);
+  const netTransferAmt = toNumber(values["ยอดโอน"] || values["ยอดเงิน"]);
+
+  const isContractorBill = values["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา";
+  const { originalBalance, hasContract } = parseContractRemainingLabor(values["ค่าแรงคงเหลือ"] || "");
+  const currentLaborClaim = toNumber(values["ค่าแรง"]);
+  const netBalanceAfter = originalBalance - currentLaborClaim;
+  const isOverContract = isContractorBill && hasContract && netBalanceAfter < 0;
+
+  return (
+    <>
+      {!hideLauncher ? (
+        <div className={open ? "hidden" : ""}>
+          <button
+            type="button"
+            className={
+              buttonClassName ||
+              "px-2.5 py-1.5 border border-slate-900 bg-slate-900 hover:bg-slate-800 text-white rounded-md text-xs flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap shadow-2xs"
+            }
+            onClick={() => handleOpen()}
+            onMouseEnter={() => { if (!activeForm && resolvedTableName) prefetchFormSchema(resolvedTableName); }}
+            onTouchStart={() => { if (!activeForm && resolvedTableName) prefetchFormSchema(resolvedTableName); }}
+          >
+            {buttonIcon !== undefined ? buttonIcon : <Plus size={14} className="text-white" />}
+            <span>{buttonLabel}</span>
+          </button>
+        </div>
+      ) : null}
+      {open ? (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/65 backdrop-blur-md sm:backdrop-blur-lg animate-in fade-in duration-150" role="presentation">
+          <form
+            className={`w-full bg-white rounded-t-2xl sm:rounded-xl shadow-2xl overflow-hidden flex flex-col border border-slate-300 h-[92vh] sm:h-auto sm:max-h-[90vh] ${
+              relaxed ? "max-w-4xl" : "max-w-2xl sm:max-w-3xl"
+            }`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="form-modal-title"
+            aria-busy={saving || loadingSchema}
+            onSubmit={submitForm}
+          >
+            {/* Clean Mobile App Header */}
+            <header className="flex items-center justify-between px-4 sm:px-5 py-2.5 bg-white border-b border-slate-200 shrink-0">
+              <div>
+                <h3 id="form-modal-title" className="text-sm font-semibold text-slate-900 m-0 tracking-tight">
+                  {isEditing ? title.replace(/^เพิ่ม/, "แก้ไข") : title}
+                </h3>
+              </div>
+              <button
+                type="button"
+                className="w-7 h-7 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+                aria-label="ปิด"
+                disabled={saving}
+                onClick={handleClose}
+              >
+                <X size={16} />
+              </button>
+            </header>
+
+            {/* Sleek Top Progress Loading Indicator when Saving */}
+            {saving ? (
+              <div className="h-1 w-full bg-emerald-100 overflow-hidden shrink-0">
+                <div className="h-full bg-emerald-600 w-full animate-pulse" />
+              </div>
+            ) : null}
+
+            {/* Form Content */}
+            <div ref={formBodyRef} className="p-3 sm:p-4 overflow-y-auto overflow-x-hidden flex-1 space-y-3 bg-slate-50/70 overscroll-contain w-full min-w-0 max-w-full">
+              {loadingSchema || !activeForm ? (
+                <div className="py-16 flex flex-col items-center justify-center gap-3 text-center">
+                  <div className="w-9 h-9 border-3 border-slate-200 border-t-slate-800 rounded-full animate-spin" />
+                  <div className="text-sm text-slate-800">กำลังเตรียมฟอร์มข้อมูล...</div>
+                  <div className="text-xs text-slate-500">กำลังโหลดตัวเลือกและโครงสร้างฟอร์ม</div>
+                </div>
+              ) : (
+                <>
+                  <fieldset className={`w-full min-w-0 max-w-full space-y-3 border-0 p-0 m-0 ${saving ? "pointer-events-none opacity-80" : ""}`} disabled={saving}>
+                    {/* Top Notification Alerts */}
+                    {successMessage ? (
+                      <div className="w-full min-w-0 max-w-full p-2.5 bg-emerald-50 text-emerald-800 rounded-lg border border-emerald-200 text-xs flex items-start justify-between gap-2 animate-in fade-in duration-150 font-normal">
+                        <div className="flex items-start gap-2 min-w-0 flex-1">
+                          <CheckCircle2 size={15} className="text-emerald-600 shrink-0 mt-0.5" />
+                          <span className="break-words leading-relaxed flex-1 min-w-0">{successMessage}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSuccessMessage("")}
+                          className="text-emerald-600 hover:text-emerald-800 transition cursor-pointer p-0.5 shrink-0 ml-1"
+                          title="ปิดการแจ้งเตือน"
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                    ) : null}
+
+                    {error ? (
+                      <div className="w-full min-w-0 max-w-full p-2.5 bg-rose-50 text-rose-700 rounded-lg border border-rose-200 text-xs font-normal flex items-start justify-between gap-2 animate-in fade-in duration-150">
+                        <div className="flex items-start gap-2 min-w-0 flex-1">
+                          <AlertCircle size={15} className="text-rose-600 shrink-0 mt-0.5" />
+                          <span className="break-words leading-relaxed flex-1 min-w-0">{error}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setError("")}
+                          className="text-rose-600 hover:text-rose-800 transition cursor-pointer p-0.5 shrink-0 ml-1"
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                    ) : null}
+
+                    {/* Categorized Fields Rendering for DATA form */}
+                    {isDataForm ? (
+                      <div className="space-y-3">
+                        {DATA_FORM_SECTIONS.map(section => {
+                          const isStoreVendor = values["ร้านค้า/ผู้รับเหมา"] === "ร้านค้า";
+                          const sectionFields = visibleFields.filter(f => {
+                            if (isMultiItemMode && isStoreVendor && (f.name === "สินค้า" || f.name === "ประเภท" || f.name === "รายละเอียดงาน")) {
+                              return false;
+                            }
+                            return section.fields.includes(f.name);
+                          });
+                          if (!sectionFields.length && (section.id !== "vendor" || !isStoreVendor || !isMultiItemMode)) return null;
+
+                          const sectionGridClass =
+                            section.id === "basic"
+                              ? "grid grid-cols-1 sm:grid-cols-3 gap-2.5"
+                              : section.id === "vendor"
+                              ? "grid grid-cols-1 sm:grid-cols-3 gap-2.5"
+                              : section.id === "expense"
+                              ? "grid grid-cols-1 sm:grid-cols-2 gap-2.5"
+                              : section.id === "tax"
+                              ? "grid grid-cols-2 sm:grid-cols-4 gap-2.5"
+                              : "grid grid-cols-1 gap-2.5";
+
+                          return (
+                            <div key={section.id} className="bg-white rounded-xl p-3 sm:p-3.5 border border-slate-200/90 shadow-2xs space-y-2.5">
+                              <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-slate-100/90">
+                                <div className="flex items-center gap-1.5">
+                                  <SectionHeaderIcon name={section.iconName} />
+                                  <h4 className="text-xs text-slate-800 m-0 font-semibold">{section.title}</h4>
+                                </div>
+
+                                {section.id === "vendor" && isStoreVendor ? (
+                                  <div className="inline-flex items-center p-0.5 bg-slate-100 rounded-lg border border-slate-200 shadow-2xs">
+                                    <button
+                                      type="button"
+                                      onClick={disableMultiItemMode}
+                                      className={`h-7 sm:h-8 px-3 rounded-md text-xs sm:text-sm transition-all cursor-pointer flex items-center justify-center gap-1 ${
+                                        !isMultiItemMode
+                                          ? "bg-white text-slate-900 shadow-2xs border border-slate-200/80 font-semibold"
+                                          : "text-slate-500 hover:text-slate-800 font-medium"
+                                      }`}
+                                    >
+                                      <span>รายการเดี่ยว</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={enableMultiItemMode}
+                                      className={`h-7 sm:h-8 px-3 rounded-md text-xs sm:text-sm transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                                        isMultiItemMode
+                                          ? "bg-emerald-600 text-white shadow-2xs font-semibold"
+                                          : "text-emerald-800 hover:text-emerald-950 font-medium hover:bg-emerald-50/60"
+                                      }`}
+                                    >
+                                      <span className="text-xs sm:text-sm">📦</span>
+                                      <span>หลายรายการ</span>
+                                    </button>
+                                  </div>
+                                ) : null}
+                              </div>
+                              <div className={sectionGridClass}>
+                                {sectionFields.map(field => (
+                                  <MemoizedFormField
+                                    key={field.name}
+                                    field={field}
+                                    activeForm={activeForm}
+                                    value={values[field.name] || ""}
+                                    currentValues={values}
+                                    isEditing={isEditing}
+                                    onValueChange={value => updateValue(field, value)}
+                                    enumSearchValue={enumListSearch[field.name] || ""}
+                                    onEnumSearchChange={value => setEnumListSearch(current => ({ ...current, [field.name]: value }))}
+                                    resetKey={resetKey}
+                                    attachedFiles={attachedFilesByField[field.name] || []}
+                                    onAttachedFilesChange={files => setAttachedFilesByField(current => ({ ...current, [field.name]: files }))}
+                                  />
+                                ))}
+
+                                {section.id === "expense" ? (
+                                  <div className="space-y-1 min-w-0 w-full overflow-hidden">
+                                    <label className="text-xs font-medium text-slate-500 block">
+                                      สถานะคุมงบประมาณ
+                                    </label>
+                                    <BillCategoryBudgetGuardrail
+                                      values={values}
+                                      projectRows={(activeForm.refOptions["ID Project"] || activeForm.refOptions["ชื่อ Project"] || []).map(opt => opt.row).filter(Boolean) as SheetRow[]}
+                                    />
+                                  </div>
+                                ) : null}
+
+                                {section.id === "vendor" && isStoreVendor && isMultiItemMode ? (
+                                  <MultiLineItemsBuilder
+                                    items={multiLineItems}
+                                    productOptions={productOptions}
+                                    onAdd={handleAddLineItem}
+                                    onRemove={handleRemoveLineItem}
+                                    onUpdate={handleUpdateLineItem}
+                                    onCancel={disableMultiItemMode}
+                                  />
+                                ) : null}
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                        {/* Catch-all for any unsectioned fields */}
+                        {(() => {
+                          const assignedNames = new Set(DATA_FORM_SECTIONS.flatMap(s => s.fields));
+                          const unsectionedFields = visibleFields.filter(f => !assignedNames.has(f.name));
+                          if (!unsectionedFields.length) return null;
+                          return (
+                            <div className="bg-white rounded-xl p-3 sm:p-3.5 border border-slate-200/90 shadow-2xs space-y-2.5">
+                              <div className="flex items-center gap-1.5 pb-1.5 border-b border-slate-100/90">
+                                <FileText size={15} className="text-slate-600" />
+                                <h4 className="text-xs text-slate-800 m-0 font-semibold">ข้อมูลเพิ่มเติม</h4>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                                {unsectionedFields.map(field => (
+                                  <MemoizedFormField
+                                    key={field.name}
+                                    field={field}
+                                    activeForm={activeForm}
+                                    value={values[field.name] || ""}
+                                    currentValues={values}
+                                    isEditing={isEditing}
+                                    onValueChange={value => updateValue(field, value)}
+                                    enumSearchValue={enumListSearch[field.name] || ""}
+                                    onEnumSearchChange={value => setEnumListSearch(current => ({ ...current, [field.name]: value }))}
+                                    resetKey={resetKey}
+                                    attachedFiles={attachedFilesByField[field.name] || []}
+                                    onAttachedFilesChange={files => setAttachedFilesByField(current => ({ ...current, [field.name]: files }))}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    ) : (
+                      /* Standard Grid for Non-Data forms */
+                      <div className="bg-white rounded-lg p-4 border border-slate-200 shadow-2xs">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                          {visibleFields.map(field => {
+                            const isContractWorkForm =
+                              activeForm.tableName === TABLES.CONTRACT_WORK ||
+                              activeForm.tableName === "Contract_work" ||
+                              activeForm.tableName === "contract_works" ||
+                              activeForm.tableName === "งานรับเหมา";
+                            const isHireAmountField = isContractWorkForm && field.name === "ยอดเงินจ้าง";
+
+                            return (
+                              <Fragment key={field.name}>
+                                <div
+                                  className={`${getFieldClassName(field)} min-w-0 w-full overflow-hidden`}
+                                >
+                                  <MemoizedFormField
+                                    field={field}
+                                    activeForm={activeForm}
+                                    value={values[field.name] || ""}
+                                    currentValues={values}
+                                    isEditing={isEditing}
+                                    onValueChange={value => updateValue(field, value)}
+                                    enumSearchValue={enumListSearch[field.name] || ""}
+                                    onEnumSearchChange={value => setEnumListSearch(current => ({ ...current, [field.name]: value }))}
+                                    resetKey={resetKey}
+                                    attachedFiles={attachedFilesByField[field.name] || []}
+                                    onAttachedFilesChange={files => setAttachedFilesByField(current => ({ ...current, [field.name]: files }))}
+                                  />
+                                </div>
+
+                                {isHireAmountField && (
+                                  <div className="col-span-1 sm:col-span-2 lg:col-span-2 flex flex-col justify-end">
+                                    <ContractLaborBudgetGuardrail
+                                      projectId={values["ID Project"]}
+                                      currentHireAmount={values["ยอดเงินจ้าง"]}
+                                      excludeConworkId={isEditing ? String(editSheetRow || values["id_Conwork"] || "") : undefined}
+                                      projectRow={
+                                        activeForm.refOptions["ID Project"]?.find(
+                                          opt => String(opt.value) === String(values["ID Project"]) || String(opt.label) === String(values["ID Project"])
+                                        )?.row
+                                      }
+                                    />
+                                  </div>
+                                )}
+                              </Fragment>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {activeForm.tableName === TABLES.PROJECT || activeForm.tableName === "Project" ? (
+                      <ProjectBudgetAllocator values={values} onChange={updateValueByName} />
+                    ) : null}
+                  </fieldset>
+                </>
+              )}
+            </div>
+
+            {/* Action Footer Bar (Mobile Full-Width Buttons & Summary) */}
+            <footer className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 px-4 sm:px-5 py-2.5 sm:py-3 bg-white border-t border-slate-200 shrink-0 shadow-lg sm:shadow-none">
+              {isDataForm && baseAmt > 0 ? (
+                <div className="flex items-center justify-between sm:justify-start gap-2 text-xs bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 font-sans w-full sm:w-auto min-w-0 max-w-full overflow-hidden">
+                  <span className="text-slate-500 font-medium">ยอดเงิน: <strong className="text-slate-900 font-semibold">{baseAmt.toLocaleString("th-TH", { minimumFractionDigits: 2 })} ฿</strong></span>
+                  {deductAmt > 0 ? (
+                    <>
+                      <span className="text-slate-300">|</span>
+                      <span className="text-slate-500 font-medium">หัก: <strong className="text-amber-700 font-semibold">-{deductAmt.toLocaleString("th-TH", { minimumFractionDigits: 2 })} ฿</strong></span>
+                    </>
+                  ) : null}
+                  <span className="text-slate-300">|</span>
+                  <span className="text-slate-700 font-medium">ยอดโอน: <strong className="text-emerald-700 font-semibold">{netTransferAmt.toLocaleString("th-TH", { minimumFractionDigits: 2 })} ฿</strong></span>
+                </div>
+              ) : <div />}
+
+              <div className="flex items-center gap-2 w-full sm:w-auto sm:ml-auto">
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={handleClose}
+                  className="w-1/3 sm:w-auto h-9 sm:h-9.5 px-4 rounded-lg text-xs sm:text-sm text-slate-700 hover:bg-slate-100 border border-slate-300 bg-white transition cursor-pointer active:bg-slate-200 flex items-center justify-center font-medium"
+                >
+                  {hasSavedDuringSession.current ? "ปิดฟอร์ม" : "ยกเลิก"}
+                </button>
+                <button
+                  type={submitPath ? "submit" : "button"}
+                  disabled={saving || loadingSchema || !activeForm || !submitPath}
+                  className="flex-1 sm:flex-initial h-9 sm:h-9.5 inline-flex items-center justify-center gap-1.5 px-5 rounded-lg text-xs sm:text-sm font-medium text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-75 transition cursor-pointer shadow-xs active:scale-[0.99]"
+                >
+                  {saving ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin shrink-0" />
+                      <span>กำลังบันทึก...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save size={15} />
+                      <span>{isEditing ? "บันทึกการแก้ไข" : (isDataForm ? "บันทึกรายการบิล" : "บันทึกข้อมูล")}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </footer>
+          </form>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function ImageFileFieldInput({
+  field,
+  value,
+  readOnly,
+  onChange,
+  attachedFiles = [],
+  onAttachedFilesChange,
+  resetKey = 0
+}: {
+  field: FieldSchema;
+  value: string;
+  readOnly: boolean;
+  onChange: (value: string) => void;
+  attachedFiles?: File[];
+  onAttachedFilesChange: (files: File[]) => void;
+  resetKey?: number;
+}) {
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+
+  // Existing image URLs from database (comma-separated string)
+  const existingUrls = value
+    ? value
+        .split(/\s*,\s*|\s*;\s*|\n+/)
+        .map(u => u.trim())
+        .filter(Boolean)
+    : [];
+
+  // Local object URLs for previewing newly attached files
+  const [filePreviews, setFilePreviews] = useState<Array<{ file: File; url: string }>>([]);
+  const [compressing, setCompressing] = useState(false);
+
+  useEffect(() => {
+    const previews = attachedFiles.map(file => ({
+      file,
+      url: URL.createObjectURL(file)
+    }));
+    setFilePreviews(previews);
+
+    return () => {
+      previews.forEach(p => URL.revokeObjectURL(p.url));
+    };
+  }, [attachedFiles, resetKey]);
+
+  const handleFilesAdded = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawFiles = Array.from(e.target.files || []);
+    if (!rawFiles.length) return;
+    if (cameraInputRef.current) cameraInputRef.current.value = "";
+    if (galleryInputRef.current) galleryInputRef.current.value = "";
+    setCompressing(true);
+    try {
+      const compressed = await compressImageFiles(rawFiles, 1920, 0.82);
+      onAttachedFilesChange([...attachedFiles, ...compressed]);
+    } catch (err) {
+      console.warn("Image compression failed, using original:", err);
+      onAttachedFilesChange([...attachedFiles, ...rawFiles]);
+    } finally {
+      setCompressing(false);
+    }
+  };
+
+  const handleRemoveExisting = (indexToRemove: number) => {
+    const updated = existingUrls.filter((_, idx) => idx !== indexToRemove);
+    onChange(updated.join(", "));
+  };
+
+  const handleRemoveNewFile = (indexToRemove: number) => {
+    const updated = attachedFiles.filter((_, idx) => idx !== indexToRemove);
+    onAttachedFilesChange(updated);
+  };
+
+  const totalImageCount = existingUrls.length + attachedFiles.length;
+
+  return (
+    <div className="space-y-2.5">
+      {/* 1. Direct Native Camera Input (Opens Camera on Android & iOS) */}
+      <input
+        ref={cameraInputRef}
+        type="file"
+        name={`${field.name}_camera`}
+        accept="image/*"
+        capture="environment"
+        disabled={readOnly || compressing}
+        onChange={handleFilesAdded}
+        className="hidden"
+      />
+
+      {/* 2. Media / Photo Gallery Input (Allows multi-image picking) */}
+      <input
+        ref={galleryInputRef}
+        type="file"
+        name={`${field.name}_gallery`}
+        accept="image/*"
+        multiple
+        disabled={readOnly || compressing}
+        onChange={handleFilesAdded}
+        className="hidden"
+      />
+
+      {compressing ? (
+        <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-600 flex items-center justify-center gap-2 animate-pulse">
+          <div className="w-3.5 h-3.5 border-2 border-slate-400 border-t-slate-800 rounded-full animate-spin" />
+          <span>กำลังปรับขนาดและบีบอัดรูปภาพให้เหมาะสม...</span>
+        </div>
+      ) : null}
+
+      {/* Grid of All Photos (Existing + Newly Attached) */}
+      {totalImageCount > 0 ? (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-xs text-slate-600 font-normal">
+            <span className="flex items-center gap-1.5">
+              <Camera size={14} className="text-slate-500" />
+              <span>รูปภาพที่แนบทั้งหมด ({totalImageCount} รูป)</span>
+            </span>
+            {existingUrls.length > 0 && attachedFiles.length > 0 ? (
+              <span className="text-[11px] text-slate-400 font-normal">
+                (รูปเดิม {existingUrls.length} รูป + รูปใหม่ {attachedFiles.length} รูป)
+              </span>
+            ) : null}
+          </div>
+
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 p-2 bg-slate-50 border border-slate-200 rounded-lg">
+            {/* 1. Existing Uploaded Images */}
+            {existingUrls.map((url, idx) => {
+              const preview = imagePreviewUrl(url);
+              return (
+                <div
+                  key={`existing-img-${url}-${idx}`}
+                  className="group relative aspect-square rounded-md overflow-hidden border border-slate-300 bg-slate-100 flex flex-col justify-between"
+                >
+                  <img
+                    src={preview || url}
+                    alt={`รูปเดิม ${idx + 1}`}
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute top-1 left-1 bg-slate-900/80 text-white text-[9px] px-1 py-0.2 rounded font-mono">
+                    เดิม #{idx + 1}
+                  </div>
+                  {!readOnly && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveExisting(idx)}
+                      className="absolute top-1 right-1 w-5 h-5 bg-rose-600 hover:bg-rose-700 text-white rounded-full flex items-center justify-center transition cursor-pointer active:scale-90"
+                      title="ลบรูปนี้"
+                    >
+                      <X size={11} />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* 2. Newly Attached Files (Pending Upload) */}
+            {filePreviews.map(({ file, url }, idx) => (
+              <div
+                key={`new-file-${file.name}-${idx}`}
+                className="group relative aspect-square rounded-md overflow-hidden border border-sky-400 bg-sky-50 flex flex-col justify-between animate-in fade-in zoom-in-95 duration-100"
+              >
+                <img
+                  src={url}
+                  alt={`รูปใหม่ ${idx + 1}`}
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute top-1 left-1 bg-sky-700 text-white text-[9px] px-1 py-0.2 rounded font-normal">
+                  ใหม่ #{idx + 1}
+                </div>
+                {!readOnly && (
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveNewFile(idx)}
+                    className="absolute top-1 right-1 w-5 h-5 bg-rose-600 hover:bg-rose-700 text-white rounded-full flex items-center justify-center transition cursor-pointer active:scale-90"
+                    title="ลบรูปนี้"
+                  >
+                    <X size={11} />
+                  </button>
+                )}
+              </div>
+            ))}
+
+            {/* Quick Action Tiles inside the grid */}
+            {!readOnly && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => cameraInputRef.current?.click()}
+                  className="aspect-square rounded-md border-2 border-dashed border-slate-300 hover:border-slate-800 hover:bg-white bg-slate-100/60 flex flex-col items-center justify-center gap-1 text-slate-500 hover:text-slate-900 transition cursor-pointer active:scale-95"
+                  title="ถ่ายรูปจากกล้อง"
+                >
+                  <Camera size={16} />
+                  <span className="text-[10px] text-center leading-tight font-normal">ถ่ายรูป</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => galleryInputRef.current?.click()}
+                  className="aspect-square rounded-md border-2 border-dashed border-slate-300 hover:border-slate-800 hover:bg-white bg-slate-100/60 flex flex-col items-center justify-center gap-1 text-slate-500 hover:text-slate-900 transition cursor-pointer active:scale-95"
+                  title="เลือกรูปเพิ่มจากเครื่อง"
+                >
+                  <Plus size={16} />
+                  <span className="text-[10px] text-center leading-tight font-normal">แนบเพิ่ม</span>
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Main Upload Buttons (Shown when no images attached yet) */}
+      {!readOnly && totalImageCount === 0 && (
+        <div className="grid grid-cols-2 gap-2.5">
+          <button
+            type="button"
+            onClick={() => cameraInputRef.current?.click()}
+            className="p-3.5 bg-white hover:bg-slate-50 border border-slate-300 hover:border-slate-800 rounded-xl flex flex-col items-center justify-center gap-1.5 transition cursor-pointer active:scale-98 text-slate-800 shadow-2xs group"
+          >
+            <div className="w-9 h-9 rounded-full bg-slate-100 group-hover:bg-slate-200 text-slate-700 flex items-center justify-center transition-colors">
+              <Camera size={18} />
+            </div>
+            <span className="text-xs font-normal">ถ่ายรูปจากกล้อง</span>
+            <span className="text-[10px] text-slate-400 font-normal">เปิดกล้องถ่ายสด</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => galleryInputRef.current?.click()}
+            className="p-3.5 bg-white hover:bg-slate-50 border border-slate-300 hover:border-slate-800 rounded-xl flex flex-col items-center justify-center gap-1.5 transition cursor-pointer active:scale-98 text-slate-800 shadow-2xs group"
+          >
+            <div className="w-9 h-9 rounded-full bg-slate-100 group-hover:bg-slate-200 text-slate-700 flex items-center justify-center transition-colors">
+              <ImagePlus size={18} />
+            </div>
+            <span className="text-xs font-normal">เลือกรูปจากเครื่อง</span>
+            <span className="text-[10px] text-slate-400 font-normal">เลือกรูปเดี่ยว/หลายรูป</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+type EnumListFieldInputProps = {
+  field: FieldSchema;
+  value: string;
+  options: RefOption[];
+  readOnly: boolean;
+  onChange: (value: string) => void;
+  enumSearchValue: string;
+  onEnumSearchChange: (value: string) => void;
+};
+
+function EnumListFieldInput({
+  field,
+  value,
+  options,
+  readOnly,
+  onChange,
+  enumSearchValue,
+  onEnumSearchChange,
+}: EnumListFieldInputProps) {
+  const [draftInput, setDraftInput] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const selectedValues = useMemo(() => splitEnumListValue(value), [value]);
+  const optionValues = useMemo(() => new Set(options.map(option => String(option.value))), [options]);
+
+  const normalizedSearch = enumSearchValue.trim().toLowerCase();
+  const filteredOptions = useMemo(() => {
+    return normalizedSearch
+      ? options.filter(option => `${String(option.value)} ${String(option.label)}`.toLowerCase().includes(normalizedSearch))
+      : options;
+  }, [options, normalizedSearch]);
+
+  const commitTags = useCallback((rawText: string) => {
+    if (!rawText) return;
+    const tokens = rawText
+      .split(/[,，;|\n\r]+/)
+      .map(t => t.trim())
+      .filter(Boolean);
+
+    if (tokens.length === 0) return;
+
+    // Deduplicate against existing selectedValues
+    const existing = new Set(selectedValues);
+    const toAdd = tokens.filter(t => !existing.has(t));
+    if (toAdd.length > 0) {
+      onChange([...selectedValues, ...toAdd].join(", "));
+    }
+  }, [selectedValues, onChange]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    // When user types or pastes comma, full-width comma, semicolon, pipe, or newline
+    if (/[,，;|\n\r]/.test(val)) {
+      commitTags(val);
+      setDraftInput("");
+    } else {
+      setDraftInput(val);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (draftInput.trim()) {
+        commitTags(draftInput);
+        setDraftInput("");
+      }
+    }
+  };
+
+  const handleBlur = () => {
+    if (draftInput.trim()) {
+      commitTags(draftInput);
+      setDraftInput("");
+    }
+  };
+
+  const handleAddClick = () => {
+    if (draftInput.trim()) {
+      commitTags(draftInput);
+      setDraftInput("");
+      inputRef.current?.focus();
+    }
+  };
+
+  const handleToggleOption = (optValue: string, checked: boolean) => {
+    let next: string[];
+    if (checked) {
+      next = selectedValues.includes(optValue) ? selectedValues : [...selectedValues, optValue];
+    } else {
+      next = selectedValues.filter(item => item !== optValue);
+    }
+    onChange(next.join(", "));
+  };
+
+  const handleRemoveTag = (tagToRemove: string) => {
+    const next = selectedValues.filter(item => item !== tagToRemove);
+    onChange(next.join(", "));
+  };
+
+  const handleClearAll = () => {
+    onChange("");
+    setDraftInput("");
+  };
+
+  return (
+    <div className="space-y-2.5 border border-slate-300 rounded-xl p-3.5 bg-slate-50/70">
+      <input type="hidden" name={field.name} value={value} />
+
+      {/* Selected Tags Chips Header */}
+      <div className="space-y-1.5 pb-2 border-b border-slate-200/80">
+        <div className="flex items-center justify-between gap-2 text-xs">
+          <span className="text-slate-600 font-medium flex items-center gap-1.5">
+            <span>รายการที่เลือก</span>
+            <span className="text-xs font-normal text-slate-500 bg-slate-200/70 px-2 py-0.5 rounded-full">
+              {selectedValues.length} {options.length > 0 ? `/ ${options.length}` : "รายการ"}
+            </span>
+          </span>
+          {!readOnly && selectedValues.length > 0 && (
+            <button
+              type="button"
+              onClick={handleClearAll}
+              className="text-[11px] text-slate-400 hover:text-rose-600 transition cursor-pointer"
+              title="ล้างรายการที่เลือกทั้งหมด"
+            >
+              ล้างทั้งหมด
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-wrap gap-1.5 min-h-[30px] items-center" aria-live="polite">
+          {selectedValues.length ? (
+            selectedValues.map((selectedValue, index) => {
+              const isCustom = !optionValues.has(selectedValue);
+              return (
+                <span
+                  key={`${selectedValue}-${index}`}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition-all select-none ${
+                    isCustom
+                      ? "bg-amber-50 text-amber-950 border-amber-300/80 shadow-2xs"
+                      : "bg-white text-slate-800 border-slate-300 shadow-2xs"
+                  }`}
+                >
+                  <span>{selectedValue}</span>
+                  {isCustom && (
+                    <span className="text-[10px] bg-amber-200/80 text-amber-900 px-1 py-0.2 rounded font-normal leading-none">
+                      ระบุเอง
+                    </span>
+                  )}
+                  {!readOnly ? (
+                    <button
+                      type="button"
+                      className="hover:text-rose-600 text-slate-400 hover:bg-slate-100 rounded p-0.5 transition cursor-pointer ml-0.5"
+                      aria-label={`ลบ ${selectedValue}`}
+                      onClick={() => handleRemoveTag(selectedValue)}
+                    >
+                      <X size={12} />
+                    </button>
+                  ) : null}
+                </span>
+              );
+            })
+          ) : (
+            <span className="text-slate-400 font-normal italic text-xs">ยังไม่ได้เลือกรายการ</span>
+          )}
+        </div>
+      </div>
+
+      {/* Predefined Options Search */}
+      <div className="relative">
+        <input
+          type="text"
+          className="w-full h-8.5 pl-8 pr-7 bg-white border border-slate-300 focus:border-slate-800 focus:outline-none rounded-lg text-xs font-normal text-slate-800 placeholder:text-slate-400 transition-all"
+          value={enumSearchValue}
+          readOnly={readOnly}
+          placeholder="ค้นหาตัวเลือกในรายการ..."
+          onChange={event => onEnumSearchChange(event.target.value)}
+        />
+        <Search size={13} className="absolute left-2.5 top-2.5 text-slate-400 pointer-events-none" />
+        {enumSearchValue ? (
+          <button
+            type="button"
+            onClick={() => onEnumSearchChange("")}
+            className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 cursor-pointer"
+            title="ล้างคำค้นหา"
+          >
+            <X size={13} />
+          </button>
+        ) : null}
+      </div>
+
+      {/* Predefined Options Checkbox List */}
+      <div
+        className="max-h-44 overflow-y-auto space-y-0.5 bg-white p-2 border border-slate-300 rounded-lg"
+        role="group"
+        aria-label={field.name}
+      >
+        {filteredOptions.map((option, index) => {
+          const optionValue = String(option.value);
+          const checked = selectedValues.includes(optionValue);
+          return (
+            <label
+              key={`${optionValue}-${index}`}
+              className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs cursor-pointer transition select-none ${
+                checked
+                  ? "bg-slate-100 text-slate-900 font-medium"
+                  : "hover:bg-slate-50 text-slate-700 font-normal"
+              }`}
+            >
+              <input
+                type="checkbox"
+                value={optionValue}
+                checked={checked}
+                disabled={readOnly}
+                className="w-4 h-4 rounded border-slate-300 accent-slate-800 cursor-pointer"
+                onChange={event => handleToggleOption(optionValue, event.target.checked)}
+              />
+              <span className="flex-1 truncate">{String(option.label || option.value)}</span>
+            </label>
+          );
+        })}
+        {!filteredOptions.length ? (
+          <div className="p-3 text-center text-slate-400 text-xs font-normal">
+            ไม่พบตัวเลือกที่ตรงกับคำค้นหา
+          </div>
+        ) : null}
+      </div>
+
+      {/* Add Custom / Multiple Tags Input */}
+      {!readOnly && (
+        <div className="space-y-1 pt-1">
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <input
+                ref={inputRef}
+                type="text"
+                className="w-full h-8.5 px-3 bg-white border border-slate-300 focus:border-slate-800 focus:ring-1 focus:ring-slate-800 focus:outline-none rounded-lg text-xs font-normal text-slate-800 placeholder:text-slate-400 transition-all"
+                value={draftInput}
+                placeholder="พิมพ์เพิ่มงานอื่น แล้วกด Enter หรือพิมพ์ comma (,) หรือวางหลายรายการ..."
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+                onBlur={handleBlur}
+              />
+              {draftInput ? (
+                <button
+                  type="button"
+                  onClick={() => setDraftInput("")}
+                  className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  title="ล้างข้อความ"
+                >
+                  <X size={13} />
+                </button>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              disabled={!draftInput.trim()}
+              onClick={handleAddClick}
+              className="h-8.5 px-3 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5 transition cursor-pointer shrink-0 active:scale-95 shadow-2xs"
+              title="เพิ่มแท็ก"
+            >
+              <Plus size={14} />
+              <span>เพิ่มแท็ก</span>
+            </button>
+          </div>
+          <div className="flex items-center justify-between gap-2 px-1 text-[11px] text-slate-500">
+            <span className="flex items-center gap-1">
+              <span>💡</span>
+              <span>กด <b>Enter</b> หรือพิมพ์ <b>,</b> (comma) เพื่อสร้างแท็กทันที หรือวางหลายรายการคั่นด้วย comma</span>
+            </span>
+            {draftInput.trim() && (
+              <span className="text-emerald-700 font-medium shrink-0">
+                พร้อมเพิ่ม: &quot;{draftInput.trim()}&quot;
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function renderField(
+  field: FieldSchema,
+  form: FormPayload,
+  value: string,
+  currentValues: Record<string, string>,
+  isEditing: boolean,
+  onChange: (value: string) => void,
+  enumSearchValue = "",
+  onEnumSearchChange: (value: string) => void = () => {},
+  resetKey = 0,
+  attachedFiles: File[] = [],
+  onAttachedFilesChange: (files: File[]) => void = () => {}
+) {
+  const readOnly = Boolean(field.readonly || (isEditing && field.readonlyOnEdit));
+  if (field.type === "Image" || field.type === "File") {
+    return (
+      <ImageFileFieldInput
+        field={field}
+        value={value}
+        readOnly={readOnly}
+        onChange={onChange}
+        attachedFiles={attachedFiles}
+        onAttachedFilesChange={onAttachedFilesChange}
+        resetKey={resetKey}
+      />
+    );
+  }
+
+  if (field.type === "Ref" || field.type === "Enum" || field.type === "EnumList") {
+    const options = getFieldOptions(field, form, currentValues);
+    if (field.type === "Ref" && field.name === "ร้านค้า") {
+      return (
+        <SearchableRefSelect
+          name={field.name}
+          value={value}
+          options={options}
+          readOnly={readOnly}
+          placeholder="พิมพ์ชื่อร้านค้า หรือรหัสร้านค้า"
+          onChange={onChange}
+        />
+      );
+    }
+
+    if (field.type === "EnumList" && field.inputMode === "buttons") {
+      const selectedValues = splitEnumListValue(value);
+
+      function toggleOption(optionValue: string) {
+        if (readOnly) return;
+        const exists = selectedValues.includes(optionValue);
+        const next = exists
+          ? selectedValues.filter(v => v !== optionValue)
+          : [...selectedValues, optionValue];
+        onChange(next.join(", "));
+      }
+
+      return (
+        <div className="space-y-2">
+          <input type="hidden" name={field.name} value={value} />
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label={field.name}>
+            {options.map((option, index) => {
+              const optionValue = String(option.value);
+              const checked = selectedValues.includes(optionValue);
+              const buttonStyle = getOptionButtonStyle(field.name, optionValue, checked);
+              return (
+                <button
+                  type="button"
+                  key={`${optionValue}-${index}`}
+                  disabled={readOnly}
+                  onClick={() => toggleOption(optionValue)}
+                  className={`h-10 sm:h-9 px-3 sm:px-3.5 rounded-lg border text-xs sm:text-sm font-medium cursor-pointer transition-all inline-flex items-center justify-center gap-1.5 select-none ${buttonStyle}`}
+                >
+                  <span className={`w-3.5 h-3.5 rounded flex items-center justify-center text-[10px] shrink-0 border transition-all ${
+                    checked
+                      ? "bg-white/20 border-white text-white font-bold"
+                      : "bg-slate-50 border-slate-300 text-transparent"
+                  }`}>
+                    ✓
+                  </span>
+                  <span>{getFieldOptionLabel(field.name, String(option.label || option.value))}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    if (field.type === "EnumList") {
+      return (
+        <EnumListFieldInput
+          field={field}
+          value={value}
+          options={options}
+          readOnly={readOnly}
+          onChange={onChange}
+          enumSearchValue={enumSearchValue}
+          onEnumSearchChange={onEnumSearchChange}
+        />
+      );
+    }
+
+  if (field.inputMode === "buttons") {
+    const optionValues = new Set(options.map(option => String(option.value)));
+    const customChoice = customChoiceConfig(field.name);
+    
+    const strVal = String(value ?? "").trim();
+    const isZeroOrEmpty = strVal === "" || strVal === "0" || strVal === "0.00";
+
+    const customValue = customChoice && !isZeroOrEmpty && strVal !== customChoice.optionValue && !optionValues.has(strVal) ? strVal : "";
+    const choiceValue = customChoice ? (customValue ? customChoice.optionValue : (isZeroOrEmpty ? "" : strVal)) : strVal;
+      const isColorField = field.name === "color" || field.name === "COLOR";
+      return (
+        <div className="space-y-2">
+          <div
+            className={
+              isColorField
+                ? "grid grid-cols-3 gap-1.5 w-full"
+                : "flex flex-wrap gap-1.5"
+            }
+            role="radiogroup"
+            aria-label={field.name}
+          >
+            {options.map((option, index) => {
+              const optionValue = String(option.value);
+              const checked = choiceValue === optionValue;
+              const buttonStyle = getOptionButtonStyle(field.name, optionValue, checked);
+              return (
+                <label
+                  className={`${
+                    isColorField
+                      ? "min-h-[42px] sm:min-h-[38px] px-1 py-1 text-center w-full"
+                      : "h-10 sm:h-9 px-3 sm:px-3.5 text-xs sm:text-sm font-medium"
+                  } rounded-lg border cursor-pointer transition-all inline-flex items-center justify-center select-none ${buttonStyle}`}
+                  key={`${optionValue}-${index}`}
+                  title={getFieldOptionLabel(field.name, String(option.label || option.value))}
+                  onClick={(e) => {
+                    if (readOnly) return;
+                    if (checked && !field.required) {
+                      e.preventDefault();
+                      onChange("");
+                    }
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name={field.name}
+                    value={optionValue}
+                    checked={checked}
+                    disabled={readOnly}
+                    className="sr-only"
+                    onChange={event => {
+                      if (customChoice && event.target.value === customChoice.optionValue) {
+                        onChange(customValue || customChoice.optionValue);
+                        return;
+                      }
+                      onChange(event.target.value);
+                    }}
+                  />
+                  {isColorField ? (
+                    <div className="flex flex-col items-center justify-center leading-tight min-w-0 w-full">
+                      <div className="flex items-center gap-1 justify-center">
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${
+                          checked
+                            ? "bg-white shadow-xs"
+                            : optionValue.toLowerCase() === "red"
+                              ? "bg-rose-500"
+                              : optionValue.toLowerCase() === "green"
+                                ? "bg-emerald-500"
+                                : "bg-slate-900"
+                        }`} />
+                        <span className="font-bold text-[11px] sm:text-xs">
+                          {optionValue.toLowerCase() === "red" ? "Red" : optionValue.toLowerCase() === "green" ? "Green" : "Black"}
+                        </span>
+                      </div>
+                      <span className={`text-[10px] leading-none mt-0.5 ${checked ? "text-white/90" : "opacity-75"}`}>
+                        {optionValue.toLowerCase() === "red" ? "งานใหญ่" : optionValue.toLowerCase() === "green" ? "งานเล็ก" : "เสร็จแล้ว"}
+                      </span>
+                    </div>
+                  ) : (
+                    <span>
+                      {getFieldOptionLabel(field.name, String(option.label || option.value))}
+                    </span>
+                  )}
+                </label>
+              );
+            })}
+          </div>
+          {customChoice && choiceValue === customChoice.optionValue ? (
+            <input
+              type="number"
+              className="w-full h-10 sm:h-9 px-3 bg-white border border-slate-300 focus:border-slate-800 focus:outline-none rounded-lg text-xs sm:text-sm font-normal text-slate-800 placeholder:text-slate-400"
+              value={customValue}
+              readOnly={readOnly}
+              placeholder={customChoice.placeholder}
+              onChange={event => onChange(event.target.value)}
+            />
+          ) : null}
+        </div>
+      );
+    }
+
+    if (field.type === "Enum") {
+      return (
+        <SearchableRefSelect
+          name={field.name}
+          value={value}
+          options={options}
+          readOnly={readOnly}
+          placeholder={`เลือก${field.name}...`}
+          onChange={onChange}
+        />
+      );
+    }
+
+    return (
+      <SearchableRefSelect
+        name={field.name}
+        value={value}
+        options={options}
+        readOnly={readOnly}
+        placeholder={`เลือก${field.name}...`}
+        onChange={onChange}
+      />
+    );
+  }
+
+  if (field.type === "LongText") {
+    return (
+      <textarea
+        name={field.name}
+        value={value}
+        readOnly={readOnly}
+        rows={3}
+        onChange={event => onChange(event.target.value)}
+        className="w-full min-w-0 max-w-full box-border p-3 bg-white border border-slate-300 focus:border-slate-800 focus:outline-none rounded-lg text-xs sm:text-sm font-normal text-slate-800 placeholder:text-slate-400 transition-all resize-y"
+      />
+    );
+  }
+
+  const isDateField = field.type === "Date";
+  const type = isDateField ? "date" : field.type === "Decimal" || field.type === "Number" ? "number" : "text";
+  const inputMode = field.type === "Decimal" ? "decimal" : field.type === "Number" ? "numeric" : undefined;
+
+  const isProjectTable = form.tableName === TABLES.PROJECT || form.tableName === "Project" || form.tableName === "1. Project รวม";
+  const isProjectVatTotal = isProjectTable && field.name === "ยอดรวม vat";
+  const workAmount = isProjectTable ? toNumber(currentValues["ยอดงาน"]) : 0;
+  const totalVatNum = isProjectTable ? toNumber(value || (workAmount ? workAmount * 1.07 : 0)) : 0;
+  const vatAmount = workAmount > 0 ? Math.max(0, Math.round((totalVatNum - workAmount) * 100) / 100) : 0;
+
+  return (
+    <div className="space-y-1 w-full min-w-0 max-w-full">
+      <input
+        type={type}
+        name={field.name}
+        value={isDateField ? toDateInputValue(value) : value}
+        readOnly={readOnly}
+        inputMode={inputMode}
+        lang={isDateField ? "th-TH" : undefined}
+        onChange={event => onChange(isDateField ? normalizeBillDateInput(event.target.value) : event.target.value)}
+        className="w-full min-w-0 max-w-full block box-border h-10 sm:h-9 px-3 bg-white border border-slate-300 focus:border-slate-800 focus:outline-none rounded-lg text-xs sm:text-sm font-normal text-slate-800 placeholder:text-slate-400 transition-all appearance-none cursor-pointer"
+      />
+      {isProjectVatTotal && workAmount > 0 ? (
+        <div className="flex items-center justify-between text-[11px] bg-emerald-50 text-emerald-800 px-2.5 py-1 rounded-md border border-emerald-200">
+          <span>ภาษี VAT 7%: <strong className="font-semibold text-emerald-700">฿{vatAmount.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+          <span className="text-slate-500 text-[10px]">(ยอดงาน ฿{workAmount.toLocaleString("th-TH", { minimumFractionDigits: 2 })} + VAT ฿{vatAmount.toLocaleString("th-TH", { minimumFractionDigits: 2 })})</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SearchableRefSelect({
+  name,
+  value,
+  options,
+  readOnly,
+  placeholder,
+  onChange
+}: {
+  name: string;
+  value: string;
+  options: RefOption[];
+  readOnly: boolean;
+  placeholder: string;
+  onChange: (value: string) => void;
+}) {
+  const selectedOption = value ? options.find(option =>
+    String(option.value) === value ||
+    String(option.label) === value ||
+    (option.row && (
+      String(option.row.id) === value ||
+      String(option.row.id_store) === value ||
+      String(option.row["ชื่อร้านค้า"]) === value ||
+      String(option.row.id_Contractor) === value ||
+      String(option.row["ชื่อเล่น"]) === value ||
+      String(option.row["ชื่อ-นามสกุล"]) === value ||
+      Object.values(option.row).some(v => v !== null && v !== undefined && String(v).trim() !== "" && String(v) === value)
+    ))
+  ) : undefined;
+
+  const rawLabel = selectedOption ? optionLabel(selectedOption, name) : value;
+  const selectedLabel = (name === "id_Contractor" || name === "id_contractor" || name === "ผู้รับเหมา" || name === "ช่าง") && rawLabel.includes(" - ")
+    ? rawLabel.split(" - ").slice(1).join(" - ").trim() || rawLabel
+    : rawLabel;
+  const selectedImgUrl = (selectedOption?.row?.image || selectedOption?.row?.image_url || "") as string;
+
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
+  const [brokenImg, setBrokenImg] = useState(false);
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Detect mobile screen width (< 640px)
+  useEffect(() => {
+    function checkMobile() {
+      setIsMobile(typeof window !== "undefined" && window.innerWidth < 640);
+    }
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+
+  useEffect(() => {
+    setBrokenImg(false);
+  }, [selectedImgUrl]);
+
+  // Filter options based on search text
+  const normalizedSearch = search.trim().toLowerCase();
+  const filteredOptions = normalizedSearch
+    ? options.filter(option => optionSearchText(option, name).includes(normalizedSearch))
+    : options;
+
+  function handleOpen() {
+    if (readOnly) return;
+    setSearch("");
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const fitsBelow = window.innerHeight - rect.bottom >= 220;
+      setMenuPos({
+        top: fitsBelow ? rect.bottom + 4 : Math.max(8, rect.top - 248),
+        left: rect.left,
+        width: rect.width,
+      });
+    }
+    setOpen(true);
+  }
+
+  function handleSelect(option: RefOption) {
+    onChange(String(option.value));
+    setOpen(false);
+    setSearch("");
+  }
+
+  function handleClear(e: React.MouseEvent) {
+    e.stopPropagation();
+    onChange("");
+    setSearch("");
+  }
+
+  const showSelectedImg = isValidImgUrl(selectedImgUrl) && !brokenImg;
+  const hasValue = Boolean(value && selectedLabel);
+
+  return (
+    <div className="relative w-full min-w-0 max-w-full">
+      <input type="hidden" name={name} value={value} />
+
+      {/* Standardized Trigger Box */}
+      <div
+        ref={triggerRef}
+        onClick={handleOpen}
+        className={`w-full min-w-0 max-w-full box-border h-10 sm:h-9 px-3 bg-white border rounded-lg text-xs sm:text-sm font-normal flex items-center justify-between gap-2 transition-all select-none ${
+          readOnly
+            ? "bg-slate-50 border-slate-200 text-slate-400 cursor-not-allowed"
+            : open
+            ? "border-slate-800 ring-2 ring-slate-800/10 cursor-pointer"
+            : "border-slate-300 hover:border-slate-400 text-slate-800 cursor-pointer active:bg-slate-50"
+        }`}
+      >
+        <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+          {showSelectedImg ? (
+            <img
+              src={selectedImgUrl}
+              alt=""
+              className="w-5 h-5 rounded object-cover border border-slate-200 shrink-0"
+              onError={() => setBrokenImg(true)}
+            />
+          ) : null}
+          <span className={`truncate ${hasValue ? "text-slate-800 font-normal" : "text-slate-400 font-normal"}`}>
+            {hasValue ? selectedLabel : placeholder}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-1 shrink-0 text-slate-400">
+          {!readOnly && hasValue ? (
+            <button
+              type="button"
+              onClick={handleClear}
+              className="w-5 h-5 rounded-full hover:bg-slate-100 hover:text-slate-700 flex items-center justify-center transition cursor-pointer"
+              title="ล้างค่า"
+            >
+              <X size={12} />
+            </button>
+          ) : null}
+          <ChevronDown
+            size={16}
+            className={`transition-transform duration-200 ${open ? "rotate-180 text-slate-700" : "text-slate-400"}`}
+          />
+        </div>
+      </div>
+
+      {/* Overlay & Dropdown / Bottom Sheet Menu */}
+      {open && !readOnly && typeof document !== "undefined"
+        ? createPortal(
+            isMobile ? (
+              /* MOBILE BOTTOM SHEET */
+              <div
+                className="fixed inset-0 z-[99999] bg-slate-900/50 backdrop-blur-xs flex flex-col justify-end animate-in fade-in duration-150"
+                onClick={() => setOpen(false)}
+              >
+                <div
+                  className="bg-white rounded-t-2xl max-h-[82vh] flex flex-col shadow-2xl animate-in slide-in-from-bottom duration-200 overflow-hidden"
+                  onClick={e => e.stopPropagation()}
+                >
+                  {/* Top drag handle */}
+                  <div className="w-10 h-1 bg-slate-300 rounded-full mx-auto mt-2.5 mb-1" />
+
+                  {/* Mobile Header */}
+                  <div className="px-4 py-2.5 border-b border-slate-100 flex items-center justify-between gap-2">
+                    <span className="font-semibold text-sm text-slate-800">
+                      {placeholder.replace(/\.\.\.$/, "") || `เลือก${name}`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setOpen(false)}
+                      className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition"
+                    >
+                      <X size={15} />
+                    </button>
+                  </div>
+
+                  {/* Search bar inside sheet (if > 3 options) */}
+                  {options.length > 3 ? (
+                    <div className="px-3 pt-2.5 pb-1">
+                      <div className="relative">
+                        <input
+                          ref={searchInputRef}
+                          type="text"
+                          value={search}
+                          onChange={e => setSearch(e.target.value)}
+                          placeholder={`พิมพ์ค้นหา${placeholder.replace(/^เลือก/, "").replace(/\.\.\.$/, "")}...`}
+                          className="w-full h-10 pl-9 pr-8 bg-slate-100 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-slate-800 focus:outline-none transition-all"
+                        />
+                        <Search size={15} className="absolute left-3 top-3 text-slate-400 pointer-events-none" />
+                        {search ? (
+                          <button
+                            type="button"
+                            onClick={() => setSearch("")}
+                            className="absolute right-2.5 top-2.5 w-5 h-5 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-600 flex items-center justify-center transition"
+                          >
+                            <X size={11} />
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {/* Scrollable list */}
+                  <div className="flex-1 overflow-y-auto px-2 py-2 divide-y divide-slate-100 space-y-0.5">
+                    {filteredOptions.length ? (
+                      filteredOptions.map((option, index) => {
+                        const optionValue = String(option.value);
+                        const rawImg = option.row?.image || option.row?.image_url || "";
+                        const imgUrl = isValidImgUrl(typeof rawImg === "string" ? rawImg.trim() : "");
+                        const isActive = optionValue === value;
+                        const label = optionLabel(option, name);
+                        return (
+                          <button
+                            key={`${optionValue}-${index}`}
+                            type="button"
+                            onClick={() => handleSelect(option)}
+                            className={`w-full min-h-[46px] py-2.5 px-3 rounded-xl flex items-center justify-between gap-3 text-left transition cursor-pointer active:scale-[0.99] ${
+                              isActive
+                                ? "bg-slate-100 text-slate-900 font-semibold"
+                                : "hover:bg-slate-50 text-slate-800 font-normal"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                              {imgUrl ? (
+                                <img
+                                  src={imgUrl}
+                                  alt=""
+                                  className="w-7 h-7 rounded-lg object-cover border border-slate-200 shrink-0"
+                                />
+                              ) : null}
+                              <span className="text-xs sm:text-sm truncate">{label}</span>
+                            </div>
+                            {isActive ? (
+                              <span className="flex items-center gap-1 text-[11px] font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full shrink-0">
+                                <Check size={12} />
+                                <span>เลือกอยู่</span>
+                              </span>
+                            ) : null}
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <div className="p-8 text-center text-slate-400 text-xs">
+                        🔍 ไม่พบข้อมูลที่ตรงกับคำค้นหา
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* DESKTOP FLOATING DROPDOWN */
+              <div
+                className="fixed inset-0 z-[9999]"
+                onClick={() => setOpen(false)}
+              >
+                <div
+                  className="bg-white border border-slate-300 rounded-xl shadow-2xl max-h-64 overflow-y-auto p-1.5 font-sans animate-in fade-in zoom-in-95 duration-100 flex flex-col"
+                  style={{
+                    position: "fixed",
+                    top: menuPos?.top ?? 0,
+                    left: menuPos?.left ?? 0,
+                    width: menuPos?.width ?? 280,
+                    zIndex: 99999,
+                  }}
+                  onClick={e => e.stopPropagation()}
+                >
+                  {options.length > 5 ? (
+                    <div className="p-1 pb-1.5 border-b border-slate-100">
+                      <div className="relative">
+                        <input
+                          ref={searchInputRef}
+                          autoFocus
+                          type="text"
+                          value={search}
+                          onChange={e => setSearch(e.target.value)}
+                          placeholder="พิมพ์ค้นหา..."
+                          className="w-full h-8 pl-7 pr-6 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-slate-800 focus:outline-none transition-all"
+                        />
+                        <Search size={13} className="absolute left-2.5 top-2.5 text-slate-400 pointer-events-none" />
+                        {search ? (
+                          <button
+                            type="button"
+                            onClick={() => setSearch("")}
+                            className="absolute right-2 top-2 text-slate-400 hover:text-slate-700"
+                          >
+                            <X size={12} />
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="overflow-y-auto max-h-52 space-y-0.5 pt-1">
+                    {filteredOptions.length ? (
+                      filteredOptions.map((option, index) => {
+                        const optionValue = String(option.value);
+                        const rawImg = option.row?.image || option.row?.image_url || "";
+                        const imgUrl = isValidImgUrl(typeof rawImg === "string" ? rawImg.trim() : "");
+                        const isActive = optionValue === value;
+                        return (
+                          <DropdownOption
+                            key={`${optionValue}-${index}`}
+                            option={option}
+                            fieldName={name}
+                            optionValue={optionValue}
+                            imgUrl={imgUrl}
+                            isActive={isActive}
+                            onSelect={handleSelect}
+                          />
+                        );
+                      })
+                    ) : (
+                      <div className="p-3 text-center text-slate-400 text-xs font-normal">
+                        ไม่พบข้อมูล
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ),
+            document.body
+          )
+        : null}
+    </div>
+  );
+}
+
+function DropdownOption({
+  option, fieldName, optionValue, imgUrl, isActive, onSelect
+}: {
+  option: RefOption;
+  fieldName: string;
+  optionValue: string;
+  imgUrl: string;
+  isActive: boolean;
+  onSelect: (o: RefOption) => void;
+}) {
+  const [broken, setBroken] = useState(false);
+  const showImg = imgUrl && !broken;
+  return (
+    <button
+      type="button"
+      className={`w-full px-2.5 py-1.5 text-left text-xs font-normal flex items-center justify-between rounded-md cursor-pointer transition-colors ${
+        isActive
+          ? "bg-slate-100 text-slate-900 font-medium"
+          : "text-slate-700 hover:bg-slate-100/70 hover:text-slate-900"
+      }`}
+      role="option"
+      aria-selected={isActive}
+      onClick={() => onSelect(option)}
+    >
+      <div className="flex items-center gap-2 min-w-0 flex-1">
+        {showImg ? (
+          <img
+            src={imgUrl}
+            alt=""
+            className="w-5 h-5 rounded object-cover border border-slate-200 shrink-0"
+            onError={() => setBroken(true)}
+          />
+        ) : null}
+        <span className="truncate text-slate-800 font-normal">{optionLabel(option, fieldName)}</span>
+      </div>
+      {isActive ? <Check size={14} className="text-emerald-600 shrink-0 ml-1" /> : null}
+    </button>
+  );
+}
+
+function optionLabel(option: RefOption | undefined, fieldName?: string) {
+  if (!option) return "";
+  const val = String(option.value || "").trim();
+  const rawLabel = String(option.label || option.value || "").trim();
+
+  if (
+    fieldName === "id_Contractor" ||
+    fieldName === "id_contractor" ||
+    fieldName === "ผู้รับเหมา" ||
+    fieldName === "ช่าง" ||
+    fieldName === "contractor" ||
+    fieldName === "id_Contractor_name"
+  ) {
+    if (rawLabel.includes(" - ")) {
+      const parts = rawLabel.split(" - ");
+      return parts.slice(1).join(" - ").trim() || rawLabel;
+    }
+    return rawLabel;
+  }
+
+  if (fieldName === "ทะเบียน" || fieldName === "ทะเบียนรถ") {
+    if (rawLabel.includes(" - ")) {
+      const parts = rawLabel.split(" - ");
+      return parts.slice(1).join(" - ").trim() || rawLabel;
+    }
+    return rawLabel;
+  }
+
+  if (fieldName === "ผู้เบิก") {
+    const loggedInId = getCookie("auth_employee_id").trim();
+    const loggedInName = getCookie("auth_name").trim();
+    if (loggedInName && (val === loggedInId || rawLabel.includes(loggedInId) || val === loggedInName)) {
+      return loggedInName;
+    }
+    if (rawLabel.includes(" - ")) {
+      const parts = rawLabel.split(" - ");
+      return parts.slice(1).join(" - ").trim() || rawLabel;
+    }
+    return rawLabel;
+  }
+
+  if (fieldName === "ธนาคาร" || fieldName === "bank" || fieldName === "bank_name" || fieldName === "id_bank") {
+    if (rawLabel.includes(" - ")) {
+      const parts = rawLabel.split(" - ");
+      return parts.slice(1).join(" - ").trim() || rawLabel;
+    }
+    const cleanBank = rawLabel.replace(/^Ba\d+\s*[-–—]?\s*/i, "").trim();
+    if (cleanBank) return cleanBank;
+    if (option.row?.["ชื่อธนาคาร"]) return String(option.row["ชื่อธนาคาร"]).trim();
+    if (option.row?.name) return String(option.row.name).trim();
+    return rawLabel;
+  }
+
+  if (!val) return rawLabel;
+  if (!rawLabel || rawLabel === val) return val;
+  if (rawLabel.startsWith(val)) return rawLabel;
+  return `${val} - ${rawLabel}`;
+}
+
+function optionSearchText(option: RefOption, fieldName?: string) {
+  return `${String(option.value || "")} ${optionLabel(option, fieldName)}`.toLowerCase();
+}
+
+/** กรองและดึง URL รูปภาพที่ถูกต้อง (HTTP/HTTPS, Data URL) */
+function isValidImgUrl(url: string): string {
+  return imagePreviewUrl(url);
+}
+
+function customChoiceConfig(fieldName: string) {
+  if (fieldName === "vat") return { optionValue: "ระบุเอง", placeholder: "กำหนด VAT เอง" };
+  if (fieldName === "หัก") return { optionValue: "ระบุเอง", placeholder: "กำหนดเปอร์เซ็นต์หักเอง" };
+  if (fieldName === "เครดิต") return { optionValue: "ระบุเอง", placeholder: "กำหนดเครดิตเอง (วัน)" };
+  return null;
+}
+
+function getFieldOptionLabel(fieldName: string, label: string): string {
+  if (fieldName === "color" || fieldName === "COLOR") {
+    const val = label.trim().toLowerCase();
+    if (val === "red" || val.includes("แดง") || val.includes("ใหญ่")) return "Red (งานใหญ่)";
+    if (val === "green" || val.includes("เขียว") || val.includes("เล็ก")) return "Green (งานเล็ก)";
+    if (val === "black" || val.includes("ดำ") || val.includes("เสร็จ")) return "Black (งานเสร็จแล้ว)";
+  }
+  return label;
+}
+
+function getOptionButtonStyle(fieldName: string, optionValue: string, checked: boolean): string {
+  if (fieldName === "สิทธิ์การใช้งาน") {
+    const val = optionValue.trim();
+    if (val.includes("เจ้าของ") || val.includes("Owner")) {
+      return checked
+        ? "bg-amber-500 text-white border-amber-600 shadow-xs font-semibold ring-1 ring-amber-400"
+        : "bg-amber-50/70 text-amber-900 border-amber-200 hover:bg-amber-100 font-medium";
+    }
+    if (val.includes("อนุมัติ") || val.includes("Approver")) {
+      return checked
+        ? "bg-emerald-600 text-white border-emerald-600 shadow-xs font-semibold ring-1 ring-emerald-400"
+        : "bg-emerald-50/70 text-emerald-900 border-emerald-200 hover:bg-emerald-100 font-medium";
+    }
+    if (val.includes("การเงิน") || val.includes("Finance") || val.includes("ปิดบิล")) {
+      return checked
+        ? "bg-blue-600 text-white border-blue-600 shadow-xs font-semibold ring-1 ring-blue-400"
+        : "bg-blue-50/70 text-blue-900 border-blue-200 hover:bg-blue-100 font-medium";
+    }
+    if (val.includes("ลบ") || val.includes("Delete")) {
+      return checked
+        ? "bg-slate-900 text-white border-slate-900 shadow-xs font-semibold ring-1 ring-slate-400"
+        : "bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200 font-medium";
+    }
+  }
+
+  if (fieldName === "color" || fieldName === "COLOR") {
+    const val = optionValue.trim().toLowerCase();
+    if (val === "red" || val.includes("แดง") || val.includes("ใหญ่")) {
+      return checked
+        ? "bg-rose-600 text-white border-rose-600 shadow-xs ring-2 ring-rose-300"
+        : "bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100 font-medium";
+    }
+    if (val === "green" || val.includes("เขียว") || val.includes("เล็ก")) {
+      return checked
+        ? "bg-emerald-600 text-white border-emerald-600 shadow-xs ring-2 ring-emerald-300"
+        : "bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100 font-medium";
+    }
+    if (val === "black" || val.includes("ดำ") || val.includes("เสร็จ")) {
+      return checked
+        ? "bg-slate-900 text-white border-slate-900 shadow-xs ring-2 ring-slate-400"
+        : "bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200 font-medium";
+    }
+  }
+
+  return checked
+    ? "bg-slate-800 text-white border-slate-800 font-medium"
+    : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50";
+}
+
+function getCookie(name: string): string {
+  if (typeof document === "undefined") return "";
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return decodeURIComponent(parts.pop()!.split(";").shift() || "");
+  return "";
+}
+
+function getInitialStringValues(form: FormPayload) {
+  const todayIso = getTodayDateIso();
+  const values = Object.fromEntries(
+    form.schema.map(field => {
+      if (field.initialValue === "today" || (field.type === "Date" && (field.initialValue === "today" || field.name === "ว/ด/ป" || field.name === "วันที่" || field.name === "ดู/ทำ"))) {
+        return [field.name, todayIso];
+      }
+      return [field.name, String(form.initialValues[field.name] ?? "")];
+    })
+  );
+  if (form.tableName === TABLES.DATA || form.tableName === "Data") {
+    const loggedInEmployeeId = getCookie("auth_employee_id");
+    const loggedInName = getCookie("auth_name");
+    if (loggedInEmployeeId || loggedInName) {
+      const requesterOptions = form.refOptions["ผู้เบิก"] || [];
+
+      // 1. Match by logged-in display name first (e.g. "คุณแมน")
+      const matchedByName = loggedInName ? requesterOptions.find(opt =>
+        String(opt.label).trim().toLowerCase() === loggedInName.trim().toLowerCase() ||
+        String(opt.value).trim().toLowerCase() === loggedInName.trim().toLowerCase() ||
+        (opt.row && (
+          String(opt.row["ชื่อเล่น"] || "").trim().toLowerCase() === loggedInName.trim().toLowerCase() ||
+          String(opt.row["ชื่อ-นามสกุล"] || "").trim().toLowerCase() === loggedInName.trim().toLowerCase() ||
+          String(opt.row["name"] || "").trim().toLowerCase() === loggedInName.trim().toLowerCase()
+        ))
+      ) : undefined;
+
+      // 2. Fallback: match by employee ID / username (e.g. "PT101")
+      const matchedById = loggedInEmployeeId ? requesterOptions.find(opt =>
+        String(opt.value) === loggedInEmployeeId ||
+        String(opt.row?.id) === loggedInEmployeeId ||
+        String(opt.row?.employee_id) === loggedInEmployeeId ||
+        String(opt.row?.user_id) === loggedInEmployeeId ||
+        String(opt.row?.username) === loggedInEmployeeId
+      ) : undefined;
+
+      const matchedUserOption = matchedByName || matchedById;
+
+      if (matchedUserOption) {
+        values["ผู้เบิก"] = String(matchedUserOption.value);
+      } else if (loggedInName) {
+        values["ผู้เบิก"] = loggedInName;
+      } else if (loggedInEmployeeId) {
+        values["ผู้เบิก"] = loggedInEmployeeId;
+      }
+
+      const loggedInUser = loggedInName || loggedInEmployeeId;
+      if (loggedInUser) {
+        values["ผู้สร้างบิล"] = loggedInUser;
+      }
+    }
+  }
+  return values;
+}
+
+function firstNonEmpty(...vals: unknown[]): string {
+  for (const v of vals) {
+    if (v !== null && v !== undefined && String(v).trim() !== "") {
+      return String(v).trim();
+    }
+  }
+  return "";
+}
+
+function getRowStringValues(form: FormPayload, row: SheetRow) {
+  const values: Record<string, string> = {};
+
+  const rawCategory = String(row["ประเภท"] || row.category || "").trim();
+  const rawLaborStatus = String(row["statusค่าแรง"] || row.labor_status || "").trim();
+  const hasLaborCost = Number(row["ค่าแรง"] || row.labor_cost || 0) > 0;
+  const rawVendorType = firstNonEmpty(row["ร้านค้า/ผู้รับเหมา"], row.vendor_type);
+  const isContractor =
+    rawVendorType === "ผู้รับเหมา" ||
+    Boolean(firstNonEmpty(row["ผู้รับเหมา"], row.contractor_id)) ||
+    Boolean(firstNonEmpty(row["id_Conwork"], row["งานรับเหมา"])) ||
+    rawCategory.startsWith("2.") ||
+    rawCategory.includes("ค่าแรง") ||
+    rawCategory.includes("จ้าง") ||
+    Boolean(rawLaborStatus) ||
+    hasLaborCost;
+
+  const vendorType = isContractor ? "ผู้รับเหมา" : (rawVendorType || "ร้านค้า");
+
+  form.schema.forEach(field => {
+    let rawVal = firstNonEmpty(
+      row[field.name],
+      (field.name === "รหัสพนักงาน" ? row.id : undefined),
+      (field.name === "id_store" ? row.id : undefined),
+      (field.name === "id_Contractor" ? row.id : undefined),
+      (field.name === "id_bank" ? row.id : undefined),
+      (field.name === "id_car" ? row.id : undefined),
+      (field.name === "id_cus" ? row.id : undefined),
+      (field.name === "id_Company" ? row.id : undefined),
+      (field.name === "id_Conwork" ? row.id : undefined),
+      (field.name === "ID Project" ? (row["ID Project"] || row.id || row.project_id) : undefined),
+      form.initialValues[field.name]
+    );
+
+    if (form.tableName === TABLES.DATA || form.tableName === "Data") {
+      if (field.name === "ร้านค้า/ผู้รับเหมา") {
+        rawVal = vendorType;
+      } else if (field.name === "ร้านค้า") {
+        rawVal = vendorType === "ร้านค้า" ? firstNonEmpty(row["ร้านค้า"], row.store_id, row["ร้าน/บุคคล"], row.vendor_or_person) : "";
+      } else if (field.name === "ผู้รับเหมา") {
+        rawVal = vendorType === "ผู้รับเหมา" ? firstNonEmpty(row["ผู้รับเหมา"], row.contractor_id, row["ร้าน/บุคคล"], row.vendor_or_person) : "";
+      } else if (field.name === "สินค้า") {
+        rawVal = vendorType === "ร้านค้า" ? firstNonEmpty(row["สินค้า"], row.product, row["สินค้า/ทำงาน"], row.description) : "";
+      } else if (field.name === "รายละเอียดงาน") {
+        rawVal = vendorType === "ผู้รับเหมา" ? firstNonEmpty(row["รายละเอียดงาน"], row.work_details, row["สินค้า/ทำงาน"], row.description) : "";
+      } else if (field.name === "รายการ") {
+        rawVal = firstNonEmpty(row["รายการ"], row.sub_category, row.item_name);
+      } else if (field.name === "ชื่อเครื่องมือ") {
+        rawVal = firstNonEmpty(row["ชื่อเครื่องมือ"], row.tool_name);
+      } else if (field.name === "ทะเบียน") {
+        rawVal = firstNonEmpty(row["ทะเบียน"], row.plate_no);
+      } else if (field.name === "ชื่อพนักงาน") {
+        rawVal = firstNonEmpty(row["ชื่อพนักงาน"], row.staff_name);
+      } else if (field.name === "statusค่าแรง") {
+        rawVal = firstNonEmpty(row["statusค่าแรง"], row.labor_status);
+      } else if (["ค่าของ", "ค่าแรง", "พนักงาน", "น้ำมัน", "ซ่อมรถ", "เครื่องจักร", "เครื่องมือ", "อื่นๆ"].includes(field.name)) {
+        const rowType = String(row["ประเภท"] || row.category || "").toLowerCase();
+        const rowAmount = firstNonEmpty(row[field.name], row["ยอดเงิน"], row.amount);
+        if (!hasValue(rawVal) && hasValue(rowAmount) && rowType.includes(field.name.toLowerCase())) {
+          rawVal = String(rowAmount);
+        }
+      }
+    }
+
+    if (field.name === "สิทธิ์การใช้งาน") {
+      const active: string[] = [];
+      const permStr = String(row["สิทธิ์การใช้งาน"] || "");
+      const d = (row.data && typeof row.data === "object") ? row.data : {};
+      const hasOwner = permStr.includes("Owner") || permStr.includes("เจ้าของระบบ") || Boolean(row.is_owner) || Boolean(row["เจ้าของระบบ"]) || Boolean(d.is_owner) || Boolean(d["เจ้าของระบบ"]);
+      const hasApprover = permStr.includes("Approver") || permStr.includes("อนุมัติบิล") || Boolean(row.can_close_bill) || Boolean(row["อนุมัติบิล"]) || Boolean(d.can_close_bill) || Boolean(d["อนุมัติบิล"]);
+      const hasFinance = permStr.includes("Finance") || permStr.includes("ฝ่ายการเงิน") || permStr.includes("ปิดบิล") || Boolean(row.can_approve) || Boolean(row["ฝ่ายการเงิน"]) || Boolean(d.can_approve) || Boolean(d["ฝ่ายการเงิน"]);
+      const hasDelete = permStr.includes("Delete") || permStr.includes("ลบข้อมูล") || Boolean(row.can_delete) || Boolean(row["สิทธิ์ลบข้อมูล"]) || Boolean(d.can_delete) || Boolean(d["สิทธิ์ลบข้อมูล"]);
+
+      if (hasOwner) active.push("เจ้าของระบบ (Owner)");
+      if (hasApprover) active.push("อนุมัติบิล (Approver)");
+      if (hasFinance) active.push("ฝ่ายการเงิน (Finance)");
+      if (hasDelete) active.push("ลบข้อมูล (Delete)");
+
+      rawVal = active.join(", ");
+    } else if (field.name === "LINE User ID" || field.name === "LINE") {
+      const d = (row.data && typeof row.data === "object") ? row.data : {};
+      rawVal = String(row["LINE User ID"] || row["LINE"] || row.line_user_id || d.line_user_id || d["LINE User ID"] || d["LINE"] || "").trim();
+    }
+
+    if ((field.name === "vat" || field.name === "หัก" || field.name === "เครดิต") && (rawVal === "0" || rawVal === "0.00" || String(rawVal) === "0")) {
+      rawVal = "";
+    }
+
+    if (field.type === "Date" && rawVal) {
+      values[field.name] = toInputDateValue(rawVal);
+    } else if (field.type === "Ref" && rawVal) {
+      const options = form.refOptions[field.name] || [];
+      const match = options.find(opt =>
+        String(opt.value) === rawVal ||
+        String(opt.label) === rawVal ||
+        (opt.row && (
+          String(opt.row.id) === rawVal ||
+          String(opt.row.id_store) === rawVal ||
+          String(opt.row.id_Conwork) === rawVal ||
+          String(opt.row["ชื่อร้านค้า"]) === rawVal ||
+          String(opt.row["ชื่อเล่น"]) === rawVal ||
+          String(opt.row["ชื่อ-นามสกุล"]) === rawVal ||
+          Object.values(opt.row).some(v => String(v) === rawVal)
+        ))
+      );
+      values[field.name] = match ? String(match.value) : rawVal;
+    } else if (field.name === "สินค้า" && rawVal) {
+      const enumOpts = field.values || [];
+      const match = enumOpts.find(opt => opt === rawVal || opt.endsWith(rawVal) || rawVal.endsWith(opt) || opt.includes(rawVal));
+      values[field.name] = match || rawVal;
+    } else if (field.name === "รายการ" && rawVal) {
+      const enumOpts = field.values || [];
+      const match = enumOpts.find(opt => opt === rawVal || opt.trim() === rawVal.trim());
+      values[field.name] = match || rawVal;
+    } else {
+      values[field.name] = rawVal;
+    }
+  });
+  return values;
+}
+
+function splitEnumListValue(value: string) {
+  return value.split(",").map(item => item.trim()).filter(Boolean);
+}
+
+function getFieldOptions(field: FieldSchema, form: FormPayload, values: Record<string, string>) {
+  if (field.type === "Ref") {
+    return filterRefOptions(field, form.refOptions[field.name] || [], values);
+  }
+
+  return getEnumValues(field, values).map(value => ({ value, label: value }));
+}
+
+function filterRefOptions(field: FieldSchema, options: RefOption[], values: Record<string, string>) {
+  if (!field.filterBy) return options;
+  const expectedValue = values[field.filterBy.field] || "";
+  return options.filter(option => {
+    if (expectedValue && String(option.row?.[field.filterBy!.column] ?? "") !== expectedValue) return false;
+    if (!field.filterBy!.openContract) return true;
+    return toNumber(option.row?.["ยอดเงินจ้าง"]) > toNumber(option.row?.["ยอดเงินจ่าย"]);
+  });
+}
+
+function getEnumValues(field: FieldSchema, values: Record<string, string>) {
+  const defaultValues = field.values || [];
+  if (field.dynamicValues !== "billTypeOptions" || !field.dynamicOptionSets) return defaultValues;
+
+  let dynamicList: string[] = [];
+  if (values["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา") {
+    dynamicList = field.dynamicOptionSets.contractor || [];
+  } else if (hasValue(values["สินค้า"])) {
+    dynamicList = field.dynamicOptionSets.storeWithItem || [];
+  } else {
+    dynamicList = field.dynamicOptionSets.storeDefault || [];
+  }
+
+  return dynamicList.length > 0 ? dynamicList : defaultValues;
+}
+
+function calculateDueDate(baseDateStr: string, days: number): string {
+  const parsed = parseDateStrict(baseDateStr);
+  if (!parsed || isNaN(days) || days <= 0) return "";
+  const dt = new Date(parsed.year, parsed.month - 1, parsed.day);
+  dt.setDate(dt.getDate() + days);
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, "0");
+  const d = String(dt.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function normalizeDependentValues(values: Record<string, string>, changedField: string, form: FormPayload) {
+  if (changedField === "ร้านค้า/ผู้รับเหมา") {
+    if (values[changedField] === "ร้านค้า") {
+      values["ผู้รับเหมา"] = "";
+      values["รายละเอียดงาน"] = "";
+      values["ค่าแรงคงเหลือ"] = "";
+    } else {
+      values["ร้านค้า"] = "";
+      values["สินค้า"] = "";
+    }
+    values["ประเภท"] = "";
+  }
+
+  if (changedField === "สินค้า") {
+    const typeField = form.schema.find(field => field.name === "ประเภท");
+    if (typeField && values["ประเภท"] && !getEnumValues(typeField, values).includes(values["ประเภท"])) {
+      values["ประเภท"] = "";
+    }
+  }
+
+  if (changedField === "vat" && !isVatActive(values["vat"])) {
+    values["วันได้บิล"] = "";
+    values["เครดิต"] = "";
+    values["วันจ่าย"] = "";
+  }
+
+  // หากเลือกเครดิต จะเคลียข้อมูลวันที่ได้บิล และคำนวณวันจ่ายจาก ว/ด/ป (หรือ วันที่) + เครดิต
+  if (changedField === "เครดิต") {
+    const creditDays = parseCreditDays(values["เครดิต"]);
+    if (creditDays > 0) {
+      values["วันได้บิล"] = ""; // เคลียร์ข้อมูลวันที่ได้บิลทันที
+      const baseDate = values["ว/ด/ป"] || values["วันที่"] || getTodayDateIso();
+      const dueDate = calculateDueDate(baseDate, creditDays);
+      if (dueDate) {
+        values["วันจ่าย"] = dueDate;
+      }
+    } else {
+      values["วันจ่าย"] = "";
+    }
+  }
+
+  if (changedField === "หัก" && !hasValue(values["หัก"])) {
+    values["จำนวนหัก"] = "";
+    values["วันออก 3%"] = "";
+  }
+
+  // Auto-calculate "วันจ่าย" from "ว/ด/ป" + "เครดิต"
+  if (changedField === "ว/ด/ป" || changedField === "วันที่") {
+    const creditDays = parseCreditDays(values["เครดิต"]);
+    if (creditDays > 0) {
+      const baseDate = values["ว/ด/ป"] || values["วันที่"];
+      if (hasValue(baseDate)) {
+        const dueDate = calculateDueDate(baseDate, creditDays);
+        if (dueDate) {
+          values["วันจ่าย"] = dueDate;
+        }
+      }
+    }
+  }
+
+  const typeField = form.schema.find(field => field.name === "ประเภท");
+  if (typeField && values["ประเภท"] && !getEnumValues(typeField, values).includes(values["ประเภท"])) {
+    values["ประเภท"] = "";
+  }
+}
+
+function parseCreditDays(value: unknown): number {
+  if (value === null || value === undefined) return 0;
+  const str = String(value).trim();
+  if (str === "เงินสด" || str === "ไม่มี" || str === "0" || str === "" || str === "false") return 0;
+  const match = str.match(/\d+/);
+  return match ? parseInt(match[0], 10) : 0;
+}
+
+function parseDeductPercent(value: unknown): number {
+  if (value === null || value === undefined) return 0;
+  const str = String(value).trim();
+  if (str === "ไม่มี" || str === "0" || str === "0%" || str === "" || str === "false") return 0;
+  const match = str.match(/\d+(\.\d+)?/);
+  return match ? parseFloat(match[0]) : 0;
+}
+
+function applyLocalFormulas(values: Record<string, string>, tableName: string) {
+  if (tableName === TABLES.PROJECT || tableName === "Project" || tableName === "1. Project รวม") {
+    if (hasValue(values["ยอดงาน"])) {
+      const workNum = toNumber(values["ยอดงาน"]);
+      const vatTotal = Math.round(workNum * 1.07 * 100) / 100;
+      values["ยอดรวม vat"] = String(vatTotal);
+    }
+    return;
+  }
+  if (tableName === TABLES.DATA) {
+    applyBillDeductAmount(values);
+    return;
+  }
+  if (tableName !== TABLES.CONTRACT_WORK) return;
+  const hireAmount = toNumber(values["ยอดเงินจ้าง"]);
+  const paidAmount = toNumber(values["ยอดเงินจ่าย"]);
+  if (hasValue(values["ยอดเงินจ้าง"]) || hasValue(values["ยอดเงินจ่าย"])) {
+    values["ยอดเงินจ่าย"] = String(paidAmount);
+    values["ค่าแรงคงเหลือ"] = String(hireAmount - paidAmount);
+  }
+}
+
+function parseContractRemainingLabor(rawVal: string): { originalBalance: number; hasContract: boolean } {
+  if (!rawVal) return { originalBalance: 0, hasContract: false };
+  const firstPart = rawVal.split("จาก")[0] || rawVal;
+  const num = toNumber(firstPart);
+  return { originalBalance: num, hasContract: true };
+}
+
+function isVatActive(vatValue: unknown): boolean {
+  if (vatValue === null || vatValue === undefined) return false;
+  const str = String(vatValue).trim().toLowerCase();
+  return str !== "" && str !== "0" && str !== "0.00" && str !== "0%" && str !== "ไม่มี" && str !== "ไม่มี vat" && str !== "false" && str !== "no";
+}
+
+function applyBillDeductAmount(values: Record<string, string>) {
+  // Sum up active expense breakdown categories (EXCLUDE "ค่าแรงคงเหลือ"!)
+  const expenseFields = ["ค่าของ", "ค่าแรง", "พนักงาน", "น้ำมัน", "ซ่อมรถ", "เครื่องจักร", "เครื่องมือ", "อื่นๆ"];
+  const totalExpense = expenseFields.reduce((sum, field) => sum + toNumber(values[field]), 0);
+  const baseAmount = totalExpense > 0 ? totalExpense : toNumber(values["ยอดเงิน"]);
+
+  if (baseAmount > 0) {
+    values["ยอดเงิน"] = String(baseAmount);
+  }
+
+  const deductValue = values["หัก"];
+  const deductPercent = parseDeductPercent(deductValue);
+  let deductAmount = 0;
+
+  const hasVat = isVatActive(values["vat"]);
+  const hasDeduct = hasValue(deductValue) && deductPercent > 0;
+
+  if (!hasDeduct) {
+    values["จำนวนหัก"] = "";
+    values["3เปอร์"] = "";
+    deductAmount = 0;
+  } else {
+    // If VAT is active (7% included in baseAmount), calculate deduction on pre-VAT amount
+    if (hasVat) {
+      const preVatAmount = baseAmount / 1.07;
+      deductAmount = (preVatAmount * deductPercent) / 100;
+    } else {
+      // If NO VAT selected, calculate deduction directly on baseAmount (e.g. 3% of baseAmount)
+      deductAmount = (baseAmount * deductPercent) / 100;
+    }
+    values["จำนวนหัก"] = deductAmount > 0 ? formatDecimal(deductAmount) : "";
+    values["3เปอร์"] = values["จำนวนหัก"];
+  }
+
+  let netTransfer = baseAmount;
+
+  if (hasVat && hasDeduct) {
+    netTransfer = baseAmount - deductAmount;
+  } else if (hasDeduct) {
+    // Withholding Tax without VAT: baseAmount - deductAmount (e.g. 20,000 - 600 = 19,400)
+    netTransfer = baseAmount - deductAmount;
+  } else {
+    netTransfer = baseAmount;
+  }
+
+  values["ยอดโอน"] = netTransfer > 0 ? formatDecimal(netTransfer) : (baseAmount > 0 ? String(baseAmount) : "");
+
+  // Auto-calculate "วันจ่าย" from "วันได้บิล" (or "ว/ด/ป") + "เครดิต"
+  const creditDays = parseCreditDays(values["เครดิต"]);
+  if (creditDays > 0) {
+    const baseDate = values["วันได้บิล"] || values["ว/ด/ป"] || values["วันที่"];
+    if (hasValue(baseDate)) {
+      const dueDate = calculateDueDate(baseDate, creditDays);
+      if (dueDate) {
+        values["วันจ่าย"] = dueDate;
+      }
+    }
+  }
+}
+
+function applyRefFill(values: Record<string, string>, field: FieldSchema, form: FormPayload, value: string) {
+  if (field.type !== "Ref" || !field.refFill) return;
+  const selectedOption = (form.refOptions[field.name] || []).find(option => String(option.value) === value);
+  Object.entries(field.refFill).forEach(([targetField, sourceColumn]) => {
+    if (sourceColumn.includes("{")) {
+      values[targetField] = selectedOption ? sourceColumn.replace(/\{([^}]+)\}/g, (_, key) => {
+        const val = selectedOption.row?.[key];
+        if (typeof val === "number") return new Intl.NumberFormat("th-TH").format(val);
+        if (typeof val === "string" && !isNaN(Number(val)) && val.trim() !== "") return new Intl.NumberFormat("th-TH").format(Number(val));
+        return String(val ?? "");
+      }) : "";
+    } else {
+      values[targetField] = selectedOption ? String(selectedOption.row?.[sourceColumn] ?? "") : "";
+    }
+  });
+}
+
+function sanitizeValuesForSubmit(values: Record<string, string>, form: FormPayload) {
+  const next = { ...values };
+  pruneHiddenConditionalValues(next, form);
+  applyLocalFormulas(next, form.tableName);
+  return next;
+}
+
+function validateVisibleRequiredFields(values: Record<string, string>, form: FormPayload) {
+  const missingField = form.schema.find(field => {
+    if (!field.required || field.type === "Hidden" || field.readonly) return false;
+    if (!isFieldVisible(field, values)) return false;
+    return !hasValue(values[field.name]);
+  });
+
+  return missingField ? `กรุณากรอก ${getFieldLabel(missingField)}` : "";
+}
+
+function pruneHiddenConditionalValues(values: Record<string, string>, form: FormPayload) {
+  form.schema.forEach(field => {
+    if (field.type === "Hidden") return;
+    if (isFieldVisible(field, values)) return;
+    values[field.name] = "";
+  });
+}
+
+function isFieldVisible(field: FieldSchema, values: Record<string, string>) {
+  if (field.name === "วันได้บิล") {
+    // วันที่ได้บิลทำงานร่วมกับ vat โดยยังไม่เลือกเครดิต (หากเลือกเครดิต จะซ่อนและเคลียข้อมูล)
+    const hasVat = isVatActive(values["vat"]);
+    const hasCredit = parseCreditDays(values["เครดิต"]) > 0;
+    return hasVat && !hasCredit;
+  }
+  if (field.name === "vat" && values["ร้านค้า/ผู้รับเหมา"] === "ร้านค้า") {
+    return true;
+  }
+  if (!field.showIf) return true;
+  const actual = values[field.showIf.column] || "";
+  if (field.showIf.equals !== undefined) return actual === field.showIf.equals;
+  if (field.showIf.in) return field.showIf.in.includes(actual);
+  if (field.showIf.notBlank) {
+    if (field.showIf.column === "vat") return isVatActive(actual);
+    if (field.showIf.column === "หัก") return parseDeductPercent(actual) > 0;
+    if (field.showIf.column === "เครดิต") return parseCreditDays(actual) > 0;
+    return hasValue(actual);
+  }
+  return true;
+}
+
+function getFieldClassName(field: FieldSchema) {
+  if (field.type === "LongText" || field.type === "Image" || field.type === "File" || field.type === "EnumList" || field.name === "รายละเอียดงาน") {
+    return "col-span-full";
+  }
+  if (field.name === "ชื่อ Project" || field.name === "ร้านค้า" || field.name === "ผู้รับเหมา" || field.name === "ประเภท") {
+    return "col-span-1 sm:col-span-2 lg:col-span-2";
+  }
+  return "col-span-1";
+}
+
+function getFieldLabel(field: FieldSchema) {
+  if (field.name === "LINE User ID" || field.name === "LINE") return "LINE User ID (ไอดีไลน์สำหรับแจ้งเตือน)";
+  if (field.name === "วันออก 3%") return "วันออก";
+  if (field.name === "id_Contractor" || field.name === "id_contractor") return "ผู้รับเหมา";
+  if (field.name === "id_Conwork" || field.name === "id_conwork") return "รหัสสัญญา";
+  if (field.name === "color" || field.name === "COLOR") return "color (ประเภทงาน)";
+  return field.name;
+}
+
+function hasValue(value: unknown) {
+  return value !== null && value !== undefined && String(value).trim() !== "";
+}
+
+function toDateInputValue(value: string) {
+  return toInputDateValue(value);
+}
+
+function normalizeBillDateInput(value: string) {
+  return normalizeDateToIso(value);
+}
+
+function toNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") return 0;
+  if (typeof value === "number") return value;
+  const parsed = Number(String(value).replace(/,/g, ""));
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function formatDecimal(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
+type MemoizedFormFieldProps = {
+  field: FieldSchema;
+  activeForm: FormPayload;
+  value: string;
+  currentValues: Record<string, string>;
+  isEditing: boolean;
+  onValueChange: (value: string) => void;
+  enumSearchValue?: string;
+  onEnumSearchChange?: (value: string) => void;
+  resetKey?: number;
+  attachedFiles?: File[];
+  onAttachedFilesChange?: (files: File[]) => void;
+};
+
+const MemoizedFormField = memo(function MemoizedFormField({
+  field,
+  activeForm,
+  value,
+  currentValues,
+  isEditing,
+  onValueChange,
+  enumSearchValue = "",
+  onEnumSearchChange = () => {},
+  resetKey = 0,
+  attachedFiles = [],
+  onAttachedFilesChange = () => {},
+}: MemoizedFormFieldProps) {
+  return (
+    <div className={`${getFieldClassName(field)} space-y-1 min-w-0 w-full overflow-hidden`} key={field.name}>
+      <label className="text-xs font-medium text-slate-700 block">
+        {getFieldLabel(field)}
+        {field.required ? <span className="text-rose-600 font-medium ml-0.5">*</span> : ""}
+      </label>
+      {renderField(
+        field,
+        activeForm,
+        value,
+        currentValues,
+        isEditing,
+        onValueChange,
+        enumSearchValue,
+        onEnumSearchChange,
+        resetKey,
+        attachedFiles,
+        onAttachedFilesChange
+      )}
+    </div>
+  );
+}, (prev, next) => {
+  return (
+    prev.field === next.field &&
+    prev.value === next.value &&
+    prev.isEditing === next.isEditing &&
+    prev.enumSearchValue === next.enumSearchValue &&
+    prev.resetKey === next.resetKey &&
+    prev.attachedFiles === next.attachedFiles &&
+    prev.currentValues[prev.field.showIf?.column || ""] === next.currentValues[next.field.showIf?.column || ""] &&
+    prev.currentValues[prev.field.filterBy?.column || ""] === next.currentValues[next.field.filterBy?.column || ""]
+  );
+});
+
