@@ -1,0 +1,1259 @@
+@import "tailwindcss";
+
+@theme {
+  --color-app-bg: #f4f7f6;
+  --color-app-panel: #ffffff;
+  --color-app-line: #e2e8f0;
+  --color-app-text: #0f172a;
+  --color-app-muted: #64748b;
+  --color-app-primary: #0b3531;
+  --color-app-accent: #d4f54e;
+  --font-mono: inherit;
+}
+
+@layer base {
+  :root {
+    --bg: var(--color-app-bg);
+    --panel: var(--color-app-panel);
+    --line: var(--color-app-line);
+    --line-strong: #cbd5e1;
+    --text: var(--color-app-text);
+    --muted: var(--color-app-muted);
+    --primary: var(--color-app-primary);
+    --primary-strong: #062e2b;
+    --accent: var(--color-app-accent);
+    --soft: #f8fafc;
+    --mobile-green: var(--color-app-primary);
+    --mobile-green-strong: #062e2b;
+    --sidebar: var(--mobile-green);
+    --mobile-topbar-height: 56px;
+    --mobile-bottomnav-height: 60px;
+    --mobile-topbar-offset: calc(var(--mobile-topbar-height) + env(safe-area-inset-top, 0px));
+    --mobile-bottomnav-offset: calc(var(--mobile-bottomnav-height) + env(safe-area-inset-bottom, 0px));
+    --shadow: 0 10px 28px rgb(11 53 49 / 0.07);
+    --shadow-soft: 0 3px 10px rgb(11 53 49 / 0.05);
+  }
+
+  html,
+  body {
+    min-height: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+    touch-action: manipulation;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.45;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  .font-mono {
+    font-family: inherit !important;
+  }
+
+  .font-num {
+    font-family: inherit !important;
+  }
+
+  /* Minimum font size guarantee: ensure no text renders smaller than 11px */
+  .text-\[9px\],
+  .text-\[10px\] {
+    font-size: 11px !important;
+  }
+
+  button,
+  input,
+  select,
+  textarea,
+  table,
+  th,
+  td,
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  strong,
+  b {
+    font: inherit;
+    font-family: inherit;
+    font-weight: 400;
+  }
+
+  .font-semibold,
+  .font-bold,
+  .font-extrabold,
+  .font-black,
+  strong,
+  b {
+    font-weight: 400 !important;
+  }
+
+  small {
+    font-size: 0.75rem;
+  }
+}
+
+/* Prevent Mobile Input Auto-Zoom on iOS Safari & Mobile Webviews when tapping fields */
+@media screen and (max-width: 768px) {
+
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+    touch-action: manipulation;
+  }
+}
+
+/* AppShell Layout Alignment Fix (DualSidebar: Expanded 260px / Collapsed 60px) */
+.app-shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr) !important;
+  align-items: stretch;
+  transition: grid-template-columns 200ms ease;
+}
+
+.app-shell.is-sidebar-collapsed {
+  grid-template-columns: 60px minmax(0, 1fr) !important;
+}
+
+/* ==========================================================================
+   CRISP SIDEBAR & CONTENT SEPARATOR LINE (เส้นแบ่ง SIDEBAR และ CONTENT)
+   ========================================================================== */
+.dual-sidebar {
+  border-right: 2px solid #e2e8f0 !important;
+  /* Crisp Slate 200 Vertical Separator Line */
+  box-shadow: 2px 0 10px rgba(15, 23, 42, 0.04) !important;
+}
+
+/* ==========================================================================
+   ZERO-GAP FULL FLUSH TABLE VIEWPORT (ส่วนท้ายตรึงชิดขอบล่างสุด 100%)
+   ========================================================================== */
+.workspace {
+  height: 100vh !important;
+  height: 100dvh !important;
+  min-height: 100vh !important;
+  min-height: 100dvh !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+}
+
+.content.table-view,
+.table-view,
+.manage-view {
+  flex: 1 1 auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: space-between !important;
+  gap: 0 !important;
+  min-height: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.table-shell,
+.manage-table-shell {
+  flex: 1 1 auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: space-between !important;
+  min-height: 100% !important;
+  height: 100% !important;
+  border-radius: 0 !important;
+  border: none !important;
+  box-shadow: none !important;
+  background: #ffffff !important;
+  margin: 0 !important;
+}
+
+/* ==========================================================================
+   SIDEBAR-THEMED LIGHT EXECUTIVE HEADER BANNER
+   ========================================================================== */
+.table-toolbar,
+.manage-toolbar {
+  border-radius: 0 !important;
+  border-left: none !important;
+  border-right: none !important;
+  border-top: none !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  padding: 12px 24px !important;
+  background: #ffffff !important;
+  color: #0f172a !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04) !important;
+  margin: 0 !important;
+  flex-shrink: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+}
+
+.table-toolbar h3,
+.manage-toolbar h3 {
+  color: #0f172a !important;
+  font-size: 16px !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.01em !important;
+  margin: 0 !important;
+}
+
+.table-toolbar>div>span,
+.manage-toolbar>div>span {
+  color: #64748b !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+}
+
+/* Reset legacy input/button background overrides inside manage-actions & table-toolbar */
+.table-toolbar button,
+.manage-toolbar button,
+.manage-actions button {
+  min-height: 0 !important;
+}
+
+.manage-search-box input {
+  background: transparent !important;
+  border: none !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  box-shadow: none !important;
+  outline: none !important;
+  color: #0f172a !important;
+}
+
+.manage-search-box input::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* ==========================================================================
+   SMART TABLE BODY & DYNAMIC COLUMN WIDTH OPTIMIZATION
+   ========================================================================== */
+.table-wrap,
+.manage-table-wrap {
+  width: 100% !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: auto !important;
+  border-radius: 0 !important;
+  border: none !important;
+  background: #ffffff !important;
+  margin: 0 !important;
+}
+
+.table-wrap table,
+.manage-table-wrap table {
+  width: 100% !important;
+  table-layout: auto !important;
+  border-collapse: collapse !important;
+  font-size: 13px !important;
+  color: #0f172a !important;
+  font-family: inherit;
+}
+
+.table-wrap table th,
+.manage-table-wrap table th,
+table th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background-color: #0b3531 !important;
+  color: #ffffff !important;
+  font-weight: 800 !important;
+  font-size: 11px !important;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 4px 8px !important;
+  height: 34px !important;
+  line-height: 1.2 !important;
+  border-bottom: 2px solid #062e2b !important;
+  border-right: 1px solid #062e2b !important;
+  white-space: nowrap !important;
+}
+
+.table-wrap table th:last-child,
+.manage-table-wrap table th:last-child,
+table th:last-child {
+  border-right: none !important;
+}
+
+.table-wrap table td,
+.manage-table-wrap table td,
+table td {
+  position: static !important;
+  left: auto !important;
+  padding: 4px 8px !important;
+  height: 34px !important;
+  line-height: 1.2 !important;
+  color: #0f172a !important;
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  border-bottom: 1px solid #f1f5f9 !important;
+  border-right: 1px solid #f8fafc !important;
+  vertical-align: middle !important;
+}
+
+.table-wrap table td:last-child,
+.manage-table-wrap table td:last-child {
+  border-right: none !important;
+}
+
+.table-wrap table tr:hover td,
+.manage-table-wrap table tr:hover td {
+  background-color: #f1f5f9 !important;
+}
+
+.table-wrap table tr:last-child td,
+.manage-table-wrap table tr:last-child td {
+  border-bottom: none !important;
+}
+
+/* Zebra Striping (Alternating Rows Across Full Width Including Sticky Columns) */
+.table-wrap table tr:nth-child(even) td,
+.manage-table-wrap table tr:nth-child(even) td {
+  background-color: #f8fafc !important;
+}
+
+.table-wrap table tr:nth-child(odd) td,
+.manage-table-wrap table tr:nth-child(odd) td {
+  background-color: #ffffff !important;
+}
+
+/* --- SMART COLUMN WIDTH CUSTOM RULES --- */
+/* Checkbox Column */
+.table-wrap table th.manage-select-col,
+.table-wrap table td.manage-select-col,
+.manage-table-wrap table th.manage-select-col,
+.manage-table-wrap table td.manage-select-col {
+  width: 40px !important;
+  min-width: 40px !important;
+  text-align: center !important;
+}
+
+/* Manage/Action Column */
+.table-wrap table th.manage-detail-col,
+.table-wrap table td.manage-detail-col,
+.manage-table-wrap table th.manage-detail-col,
+.manage-table-wrap table td.manage-detail-col {
+  width: 80px !important;
+  min-width: 80px !important;
+  text-align: center !important;
+  white-space: nowrap !important;
+}
+
+/* Status Column (Normal Flow, Centered Text) */
+.table-wrap table th[data-label="สถานะ"],
+.table-wrap table td[data-label="สถานะ"],
+.manage-table-wrap table th[data-label="สถานะ"],
+.manage-table-wrap table td[data-label="สถานะ"] {
+  position: static !important;
+  width: 90px !important;
+  min-width: 90px !important;
+  max-width: 90px !important;
+  text-align: center !important;
+  white-space: nowrap !important;
+  box-shadow: none !important;
+}
+
+/* Sticky Action / Manage Right Column (Never pushes off screen) */
+.table-wrap table th:last-child,
+.manage-table-wrap table th:last-child,
+.table-wrap table th[data-label="จัดการ"],
+.manage-table-wrap table th[data-label="จัดการ"] {
+  position: sticky !important;
+  right: 0 !important;
+  z-index: 20 !important;
+  background-color: #0b3531 !important;
+  color: #ffffff !important;
+  box-shadow: -4px 0 10px rgba(0, 0, 0, 0.05) !important;
+  border-left: 1px solid #062e2b !important;
+  width: 90px !important;
+  min-width: 90px !important;
+  max-width: 90px !important;
+  text-align: center !important;
+}
+
+.table-wrap table td:last-child,
+.manage-table-wrap table td:last-child,
+.table-wrap table td[data-label="จัดการ"],
+.manage-table-wrap table td[data-label="จัดการ"] {
+  position: sticky !important;
+  right: 0 !important;
+  z-index: 15 !important;
+  box-shadow: -4px 0 10px rgba(0, 0, 0, 0.05) !important;
+  border-left: 1px solid #f1f5f9 !important;
+  width: 90px !important;
+  min-width: 90px !important;
+  max-width: 90px !important;
+  padding: 2px 4px !important;
+  text-align: center !important;
+}
+
+.manage-action-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 26px !important;
+  height: 26px !important;
+  min-width: 26px !important;
+  min-height: 26px !important;
+  max-width: 26px !important;
+  max-height: 26px !important;
+  padding: 0 !important;
+  border-radius: 6px !important;
+  flex-shrink: 0 !important;
+  box-sizing: border-box !important;
+}
+
+.table-wrap table tr:nth-child(odd) td:last-child,
+.manage-table-wrap table tr:nth-child(odd) td:last-child,
+.table-wrap table tr:nth-child(odd) td[data-label="จัดการ"],
+.manage-table-wrap table tr:nth-child(odd) td[data-label="จัดการ"] {
+  background-color: #ffffff !important;
+}
+
+.table-wrap table tr:nth-child(even) td:last-child,
+.manage-table-wrap table tr:nth-child(even) td:last-child,
+.table-wrap table tr:nth-child(even) td[data-label="จัดการ"],
+.manage-table-wrap table tr:nth-child(even) td[data-label="จัดการ"] {
+  background-color: #f8fafc !important;
+}
+
+.table-wrap table tr:hover td:last-child,
+.manage-table-wrap table tr:hover td:last-child,
+.table-wrap table tr:hover td[data-label="จัดการ"],
+.manage-table-wrap table tr:hover td[data-label="จัดการ"] {
+  background-color: #f1f5f9 !important;
+}
+
+/* Column Width & Alignment Rules */
+.table-wrap table th[data-label="ลำดับ"],
+.table-wrap table td[data-label="ลำดับ"],
+.manage-table-wrap table th[data-label="ลำดับ"],
+.manage-table-wrap table td[data-label="ลำดับ"] {
+  width: 70px !important;
+  min-width: 70px !important;
+  text-align: center !important;
+  white-space: nowrap !important;
+}
+
+.table-wrap table th[data-label="ID Project"],
+.table-wrap table td[data-label="ID Project"],
+.manage-table-wrap table th[data-label="ID Project"],
+.manage-table-wrap table td[data-label="ID Project"] {
+  width: 85px !important;
+  min-width: 85px !important;
+  text-align: center !important;
+  white-space: nowrap !important;
+}
+
+.table-wrap table th[data-label="ID"],
+.table-wrap table td[data-label="ID"],
+.table-wrap table th[data-label="color"],
+.table-wrap table td[data-label="color"],
+.table-wrap table th[data-label="รับผิดชอบ"],
+.table-wrap table td[data-label="รับผิดชอบ"],
+.table-wrap table th[data-label="รวม ALL"],
+.table-wrap table td[data-label="รวม ALL"],
+.manage-table-wrap table th[data-label="ID"],
+.manage-table-wrap table td[data-label="ID"],
+.manage-table-wrap table th[data-label="color"],
+.manage-table-wrap table td[data-label="color"],
+.manage-table-wrap table th[data-label="รับผิดชอบ"],
+.manage-table-wrap table td[data-label="รับผิดชอบ"],
+.manage-table-wrap table th[data-label="รวม ALL"],
+.manage-table-wrap table td[data-label="รวม ALL"] {
+  white-space: nowrap !important;
+  width: 75px !important;
+  min-width: 75px !important;
+  text-align: center !important;
+}
+
+/* Explicit Alignment Rules */
+.table-wrap table th.text-center,
+.table-wrap table td.text-center,
+.manage-table-wrap table th.text-center,
+.manage-table-wrap table td.text-center {
+  text-align: center !important;
+}
+
+.table-wrap table th.text-left,
+.table-wrap table td.text-left,
+.manage-table-wrap table th.text-left,
+.manage-table-wrap table td.text-left {
+  text-align: left !important;
+}
+
+.table-wrap table th.text-right,
+.table-wrap table td.text-right,
+.manage-table-wrap table th.text-right,
+.manage-table-wrap table td.text-right {
+  text-align: right !important;
+}
+
+/* Numeric / Currency / Amount Columns */
+.table-wrap table th.numeric-cell,
+.table-wrap table td.numeric-cell,
+.manage-table-wrap table th.numeric-cell,
+.manage-table-wrap table td.numeric-cell {
+  white-space: nowrap !important;
+  text-align: right !important;
+  min-width: 95px !important;
+}
+
+/* Text-Heavy Columns (Project Name, Customer Name, Company Name, Descriptions) */
+.table-wrap table th[data-label*="ชื่อ Project"],
+.table-wrap table td[data-label*="ชื่อ Project"],
+.manage-table-wrap table th[data-label*="ชื่อ Project"],
+.manage-table-wrap table td[data-label*="ชื่อ Project"] {
+  min-width: 200px !important;
+  max-width: 320px !important;
+  white-space: nowrap !important;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  text-align: left !important;
+}
+
+.table-wrap table th[data-label*="ชื่อลูกค้า"],
+.table-wrap table td[data-label*="ชื่อลูกค้า"],
+.table-wrap table th[data-label*="ชื่อบริษัท"],
+.table-wrap table td[data-label*="ชื่อบริษัท"],
+.table-wrap table th[data-label*="ร้าน/บุคคล"],
+.table-wrap table td[data-label*="ร้าน/บุคคล"],
+.table-wrap table th[data-label*="สินค้า/ทำงาน"],
+.table-wrap table td[data-label*="สินค้า/ทำงาน"],
+.table-wrap table th[data-label*="รายละเอียด"],
+.table-wrap table td[data-label*="รายละเอียด"],
+.manage-table-wrap table th[data-label*="ชื่อลูกค้า"],
+.manage-table-wrap table td[data-label*="ชื่อลูกค้า"],
+.manage-table-wrap table th[data-label*="ชื่อบริษัท"],
+.manage-table-wrap table td[data-label*="ชื่อบริษัท"],
+.manage-table-wrap table th[data-label*="ร้าน/บุคคล"],
+.manage-table-wrap table td[data-label*="ร้าน/บุคคล"],
+.manage-table-wrap table th[data-label*="สินค้า/ทำงาน"],
+.manage-table-wrap table td[data-label*="สินค้า/ทำงาน"],
+.manage-table-wrap table th[data-label*="รายละเอียด"],
+.manage-table-wrap table td[data-label*="รายละเอียด"] {
+  min-width: 140px !important;
+  max-width: 240px !important;
+  white-space: nowrap !important;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  text-align: left !important;
+}
+
+/* Project Name Link Formatting */
+.table-wrap table td[data-label*="ชื่อ Project"] a,
+.manage-table-wrap table td[data-label*="ชื่อ Project"] a {
+  display: inline-block !important;
+  max-width: 100% !important;
+  white-space: normal !important;
+  line-height: 1.35 !important;
+}
+
+/* ==========================================================================
+   SIDEBAR-THEMED PAGINATION & FOOTER BUTTONS
+   ========================================================================== */
+.table-pagination,
+.manage-footer {
+  border-top: 1px solid #e2e8f0 !important;
+  border-bottom: none !important;
+  border-left: none !important;
+  border-right: none !important;
+  border-radius: 0 0 12px 12px !important;
+  padding: 10px 20px !important;
+  background: #f8fafc !important;
+  margin: 0 !important;
+  margin-top: auto !important;
+  position: sticky !important;
+  bottom: 0 !important;
+  z-index: 20 !important;
+  flex-shrink: 0 !important;
+}
+
+.table-pagination button,
+.manage-footer button,
+.page-size-switch button,
+.pagination-controls button,
+.pagination-controls .page-nav-link {
+  background: #ffffff !important;
+  color: #334155 !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 8px !important;
+  font-weight: 600 !important;
+  font-size: 12px !important;
+  padding: 4px 10px !important;
+  min-height: 0 !important;
+  transition: all 0.15s ease !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03) !important;
+}
+
+.table-pagination button:hover,
+.manage-footer button:hover,
+.page-size-switch button:hover,
+.pagination-controls button:hover,
+.pagination-controls .page-nav-link:hover {
+  background: #f1f5f9 !important;
+  border-color: #94a3b8 !important;
+  color: #0f172a !important;
+}
+
+/* Active Page & Page Size Button Theme (Matches Executive Slate) */
+.table-pagination button.active,
+.manage-footer button.active,
+.page-size-switch button.active,
+.pagination-controls button.active,
+.pagination-controls button[aria-current="page"] {
+  background: #0f172a !important;
+  /* Deep Executive Slate */
+  color: #ffffff !important;
+  border-color: #0f172a !important;
+  font-weight: 800 !important;
+  box-shadow: 0 2px 5px rgba(15, 23, 42, 0.18) !important;
+}
+
+.table-pagination button:disabled,
+.manage-footer button:disabled,
+.pagination-controls button:disabled {
+  opacity: 0.4 !important;
+  cursor: not-allowed !important;
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+  color: #94a3b8 !important;
+}
+
+/* Mobile layout fixes for panel headers */
+.dash-panel header,
+.dashboard-main-program .dash-panel header {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  text-align: left !important;
+  width: 100% !important;
+  gap: 8px !important;
+}
+
+.dash-panel header>div {
+  text-align: left !important;
+}
+
+/* Sidebar head profile button overrides */
+.sidebar-head button.sidebar-profile-btn {
+  background: rgba(255, 255, 255, 0.12) !important;
+  border: 1px solid rgba(255, 255, 255, 0.22) !important;
+  min-height: 0 !important;
+  padding: 6px 10px !important;
+  color: #ffffff !important;
+  border-radius: 8px !important;
+}
+
+.sidebar-head button.sidebar-profile-btn:hover {
+  background: rgba(255, 255, 255, 0.22) !important;
+  border-color: rgba(255, 255, 255, 0.35) !important;
+  color: #ffffff !important;
+}
+
+/* Executive Modern Sidebar Nav Styling */
+.nav {
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+/* ==========================================================================
+   PROFESSIONAL FORM MODAL UI — Premium Design System
+   ========================================================================== */
+
+/* Backdrop: soft frosted glass */
+.modal-backdrop {
+  background: rgba(10, 16, 28, 0.55) !important;
+  backdrop-filter: blur(6px) !important;
+  -webkit-backdrop-filter: blur(6px) !important;
+}
+
+/* Card: elevated with rounded corners */
+.modal-card {
+  border-radius: 16px !important;
+  border: 1px solid rgba(226, 232, 240, 0.8) !important;
+  box-shadow:
+    0 32px 64px rgba(10, 16, 28, 0.28),
+    0 8px 24px rgba(10, 16, 28, 0.12),
+    0 0 0 1px rgba(255, 255, 255, 0.06) !important;
+  background: #ffffff !important;
+}
+
+/* Header: clean white with strong title */
+.modal-header {
+  background: #ffffff !important;
+  border-bottom: 1px solid #f1f5f9 !important;
+  padding: 18px 24px !important;
+  gap: 12px !important;
+}
+
+.modal-header h3 {
+  font-size: 17px !important;
+  font-weight: 800 !important;
+  color: #0f172a !important;
+  letter-spacing: -0.02em !important;
+  margin: 0 !important;
+}
+
+.modal-header span {
+  font-size: 12px !important;
+  color: #94a3b8 !important;
+  font-weight: 500 !important;
+  margin-top: 2px !important;
+}
+
+/* Body: subtle warm background */
+.modal-body {
+  background: #f8fafc !important;
+  padding: 22px 24px 24px !important;
+}
+
+/* Footer */
+.modal-footer {
+  background: #ffffff !important;
+  border-top: 1px solid #f1f5f9 !important;
+  padding: 14px 24px !important;
+  gap: 10px !important;
+}
+
+/* Close button */
+.icon-button {
+  background: #f1f5f9 !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 10px !important;
+  color: #64748b !important;
+  transition: all 0.15s ease !important;
+}
+
+.icon-button:hover {
+  background: #fee2e2 !important;
+  border-color: #fca5a5 !important;
+  color: #dc2626 !important;
+}
+
+/* Form grid */
+.modal-card-relaxed .form-grid,
+.modal-card-relaxed .manage-form-grid {
+  gap: 16px 18px !important;
+}
+
+/* Field label */
+.modal-card-relaxed .field,
+.modal-card-relaxed .manage-form-field {
+  gap: 6px !important;
+}
+
+.modal-card-relaxed .field>label,
+.modal-card-relaxed .manage-form-field>span,
+.modal-card-relaxed .field>span {
+  font-size: 11.5px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+  color: #64748b !important;
+}
+
+/* Inputs, selects, textareas */
+.modal-card-relaxed .field input,
+.modal-card-relaxed .field select,
+.modal-card-relaxed .field textarea,
+.modal-card-relaxed .manage-form-field input,
+.modal-card-relaxed .manage-form-field select,
+.modal-card-relaxed .manage-form-field textarea {
+  width: 100% !important;
+  min-height: 40px !important;
+  padding: 9px 12px !important;
+  border: 1.5px solid #e2e8f0 !important;
+  border-radius: 10px !important;
+  background: #ffffff !important;
+  color: #0f172a !important;
+  font-size: 13.5px !important;
+  font-weight: 500 !important;
+  transition: border-color 0.15s, box-shadow 0.15s !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+}
+
+.modal-card-relaxed .field input:focus,
+.modal-card-relaxed .field select:focus,
+.modal-card-relaxed .field textarea:focus,
+.modal-card-relaxed .manage-form-field input:focus,
+.modal-card-relaxed .manage-form-field select:focus,
+.modal-card-relaxed .manage-form-field textarea:focus {
+  outline: none !important;
+  border-color: #00570f !important;
+  box-shadow: 0 0 0 3px rgba(0, 87, 15, 0.12) !important;
+}
+
+.modal-card-relaxed .field input[readonly],
+.modal-card-relaxed .manage-form-field input[readonly] {
+  background: #f8fafc !important;
+  color: #94a3b8 !important;
+  cursor: default !important;
+}
+
+.modal-card-relaxed .field textarea,
+.modal-card-relaxed .manage-form-field textarea {
+  min-height: 90px !important;
+  resize: vertical !important;
+}
+
+/* SearchableRef input */
+.modal-card-relaxed .searchable-ref-input,
+.searchable-ref-input {
+  width: 100% !important;
+  min-height: 40px !important;
+  padding: 9px 12px !important;
+  border: 1.5px solid #e2e8f0 !important;
+  border-radius: 10px !important;
+  background: #ffffff !important;
+  color: #0f172a !important;
+  font-size: 13.5px !important;
+  font-weight: 500 !important;
+  transition: border-color 0.15s, box-shadow 0.15s !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+}
+
+.modal-card-relaxed .searchable-ref-input:focus,
+.searchable-ref-input:focus {
+  outline: none !important;
+  border-color: #00570f !important;
+  box-shadow: 0 0 0 3px rgba(0, 87, 15, 0.12) !important;
+}
+
+/* Dropdown menu */
+.searchable-ref-menu {
+  border-radius: 12px !important;
+  border: 1.5px solid #e2e8f0 !important;
+  box-shadow: 0 20px 40px rgba(10, 16, 28, 0.16) !important;
+  background: #ffffff !important;
+  overflow: hidden !important;
+  max-height: 260px !important;
+}
+
+/* Dropdown options */
+.searchable-ref-option {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  min-height: 0 !important;
+  height: 34px !important;
+  padding: 0 14px !important;
+  border-bottom: 1px solid #f1f5f9 !important;
+  font-size: 13px !important;
+  color: #1e293b !important;
+  font-weight: 500 !important;
+  transition: background 0.1s !important;
+  cursor: pointer !important;
+  text-align: left !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+}
+
+.searchable-ref-option:last-child {
+  border-bottom: 0 !important;
+}
+
+.searchable-ref-option:hover {
+  background: #f0fdf4 !important;
+}
+
+.searchable-ref-option.is-active {
+  background: #dcfce7 !important;
+  color: #14532d !important;
+}
+
+.searchable-ref-option strong {
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  flex: 1 !important;
+}
+
+.ref-option-img {
+  width: 20px !important;
+  height: 20px !important;
+  border-radius: 4px !important;
+  object-fit: contain !important;
+  flex-shrink: 0 !important;
+  border: 1px solid #f1f5f9 !important;
+}
+
+/* Footer buttons */
+.modal-footer button {
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  border-radius: 6px !important;
+  padding: 5px 14px !important;
+  min-height: 32px !important;
+  transition: all 0.15s ease !important;
+}
+
+/* ==========================================================================
+   COMPACT & HIGH-EFFICIENCY FORM MODAL SYSTEM (กระชับ ดูง่าย เหมาะกับการทำงานจริง)
+   ========================================================================== */
+
+/* Modal Card Container */
+.modal-card {
+  width: min(840px, calc(100vw - 24px)) !important;
+  max-height: calc(100vh - 32px) !important;
+  border-radius: 12px !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25) !important;
+}
+
+.modal-header {
+  padding: 8px 14px !important;
+  min-height: 44px !important;
+  background: #f8fafc !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+
+.modal-header h3 {
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  color: #0f172a !important;
+}
+
+.modal-header span {
+  font-size: 11px !important;
+  margin-top: 0 !important;
+}
+
+.modal-body {
+  padding: 10px 14px 12px !important;
+  background: #ffffff !important;
+}
+
+.modal-footer {
+  padding: 8px 14px !important;
+  min-height: 48px !important;
+  background: #f8fafc !important;
+  border-top: 1px solid #e2e8f0 !important;
+}
+
+/* Compact 2-Column Responsive Grid */
+.modal-fieldset {
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+}
+
+.form-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 6px 12px !important;
+}
+
+@media (max-width: 640px) {
+  .form-grid {
+    grid-template-columns: 1fr !important;
+    gap: 6px !important;
+  }
+}
+
+/* Full Width Spanners (Wide Fields, Buttons, Choice Group) */
+.field.field-wide,
+.field.field-vendor-mode,
+.field.field-choice,
+.field:has(.choice-control) {
+  grid-column: 1 / -1 !important;
+}
+
+/* Compact Field Containers */
+.field {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+  margin-bottom: 0 !important;
+}
+
+.field label {
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  color: #334155 !important;
+  line-height: 1.2 !important;
+  margin-bottom: 1px !important;
+}
+
+.field small {
+  font-size: 10px !important;
+  color: #64748b !important;
+  margin-top: 1px !important;
+}
+
+/* Compact Inputs, Selects, and Ref Fields */
+.field input[type="text"],
+.field input[type="number"],
+.field input[type="date"],
+.field input[type="search"],
+.field select,
+.searchable-ref-input {
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 3px 8px !important;
+  font-size: 12px !important;
+  border-radius: 6px !important;
+  border: 1px solid #cbd5e1 !important;
+  background: #ffffff !important;
+  color: #0f172a !important;
+  box-sizing: border-box !important;
+  max-width: 100% !important;
+}
+
+/* Fix iOS WebKit date input expanding beyond container */
+input[type="date"] {
+  -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+  appearance: none !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+input[type="date"]::-webkit-date-and-time-value {
+  text-align: left;
+}
+
+.field input:focus,
+.field select:focus,
+.searchable-ref-input:focus {
+  border-color: #00570f !important;
+  box-shadow: 0 0 0 2px rgba(0, 87, 15, 0.1) !important;
+}
+
+/* Compact Choice Button Controls (ร้านค้า/ผู้รับเหมา, ประเภท, vat, หัก, เครดิต) */
+.choice-control {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 6px !important;
+}
+
+.choice-control button {
+  min-height: 36px !important;
+  height: 36px !important;
+  padding: 0 14px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  border-radius: 8px !important;
+  border: 1px solid #cbd5e1 !important;
+  background: #f8fafc !important;
+  color: #334155 !important;
+  transition: all 0.1s ease !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.choice-control button:hover {
+  background: #f1f5f9 !important;
+  border-color: #94a3b8 !important;
+}
+
+.choice-control button.is-active,
+.choice-control button[aria-pressed="true"] {
+  background: #00570f !important;
+  border-color: #00570f !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+}
+
+/* Compact Summary Bar (ยอดเงินรวม, หัก, ยอดโอน) */
+.modal-body .mb-4.p-3 {
+  padding: 6px 12px !important;
+  margin-bottom: 8px !important;
+  border-radius: 8px !important;
+}
+
+.modal-body .mb-4.p-3 .text-base {
+  font-size: 14px !important;
+}
+
+/* Ensure Add Button (+ เพิ่มบิล) is always prominently visible */
+.module-bar {
+  display: inline-flex !important;
+  align-items: center !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.module-open-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  padding: 7px 16px !important;
+  background-color: #0f172a !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  font-size: 13px !important;
+  border-radius: 12px !important;
+  border: 1px solid #1e293b !important;
+  cursor: pointer !important;
+  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.15) !important;
+  transition: all 0.15s ease !important;
+  min-height: 36px !important;
+  white-space: nowrap !important;
+}
+
+.module-open-button:hover {
+  background-color: #1e293b !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 8px rgba(15, 23, 42, 0.2) !important;
+}
+
+.module-bar-hidden {
+  display: none !important;
+}
+
+/* ==========================================================================
+   SYSTEM-WIDE COMPACT & HIGH-EFFICIENCY FORM DESIGN SYSTEM (ทุกฟอร์มในระบบ)
+   ========================================================================== */
+
+/* 1. Manage Modal & Generic Modals (.manage-modal, .manage-form-grid, .manage-form-field) */
+.manage-modal {
+  width: min(840px, calc(100vw - 24px)) !important;
+  max-height: calc(100vh - 32px) !important;
+  border-radius: 12px !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25) !important;
+}
+
+.manage-form-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 6px 12px !important;
+}
+
+@media (max-width: 640px) {
+  .manage-form-grid {
+    grid-template-columns: 1fr !important;
+    gap: 6px !important;
+  }
+}
+
+.manage-form-field {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+  margin-bottom: 0 !important;
+}
+
+.manage-form-field span,
+.manage-form-field label {
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  color: #334155 !important;
+  line-height: 1.2 !important;
+  margin-bottom: 1px !important;
+}
+
+.manage-form-field input,
+.manage-form-field select,
+.manage-form-field textarea {
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 3px 8px !important;
+  font-size: 12px !important;
+  border-radius: 6px !important;
+  border: 1px solid #cbd5e1 !important;
+  background: #ffffff !important;
+  color: #0f172a !important;
+}
+
+/* 2. Inline Table Cell Edit Controls (.manage-cell-input) */
+.manage-cell-input {
+  min-height: 28px !important;
+  height: 28px !important;
+  padding: 2px 6px !important;
+  font-size: 12px !important;
+  border-radius: 5px !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+/* 3. Toolbar, Filter Forms & Search Bars (.bills-search-form, .contract-search-form, .filter-form) */
+.bills-search-form,
+.contract-search-form,
+.filter-form,
+.bills-compact-bar,
+.contract-compact-bar {
+  gap: 8px !important;
+  padding: 8px 10px !important;
+}
+
+.bills-search-form input,
+.contract-search-form input,
+.filter-form input {
+  min-height: 32px !important;
+  height: 32px !important;
+  padding: 3px 10px !important;
+  font-size: 12px !important;
+  border-radius: 6px !important;
+}
+
+.bills-search-form button,
+.bills-clear-link,
+.contract-search-form button,
+.filter-form button {
+  min-height: 32px !important;
+  height: 32px !important;
+  padding: 4px 12px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  border-radius: 6px !important;
+}
+
+/* ==========================================================================
+   CUSTOM SLEEK & MODERN THIN SCROLLBAR (ปรับ SCROLLBAR ให้เล็ก มินิมอล เข้ากับธีม)
+   ========================================================================== */
+/* WebKit browsers (Chrome, Edge, Safari) */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+  transition: background 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #059669;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
