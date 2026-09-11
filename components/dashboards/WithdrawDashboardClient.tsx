@@ -101,7 +101,7 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
     tables: ["bills"],
     onSync: () => router.refresh(),
     debounceMs: 700,
-    pollingIntervalMs: 8_000,
+    pollingIntervalMs: 60_000,
   });
 
   const requesterNames = useMemo(() => requesterNameMap(peopleRows), [peopleRows]);

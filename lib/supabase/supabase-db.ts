@@ -1,4 +1,4 @@
-﻿import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
+import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 export { supabaseAdmin };
 import { normalizeDateToIso, formatDateDisplay, getTodayDateIso } from "@/lib/utils/dates";
 import { cached, clearCache } from "@/lib/utils/cache";
@@ -293,7 +293,17 @@ export function mapSupabaseRowToSheetRow(dbTable: string, row: Record<string, an
     res["บัตรประจำตัวประชาชน"] = row.id_card ?? row["บัตรประจำตัวประชาชน"];
     res["เบอร์โทรศัพท์"] = row.phone ?? row["เบอร์โทรศัพท์"];
     res["ที่อยู่"] = row.address ?? row["ที่อยู่"];
-    res["จำกัดยอด/ปี"] = row.annual_limit ?? row["จำกัดยอด/ปี"];
+    const cFull = String(row.full_name ?? row["ชื่อ-นามสกุล"] ?? dataObj["ชื่อ-นามสกุล"] ?? "");
+    const cNick = String(row.nickname ?? row["ชื่อเล่น"] ?? dataObj["ชื่อเล่น"] ?? "");
+    const isCorp = /บริษัท|หจก|บจก|จำกัด|corporation|company/i.test(cFull + " " + cNick);
+    const resolvedType = (row.contractor_type || row["ประเภท"] || dataObj["ประเภท"] || dataObj["contractor_type"] || (isCorp ? "นิติบุคคล" : "บุคคลธรรมดา")) as string;
+    res["ประเภท"] = resolvedType;
+
+    let limit = toNumber(row.annual_limit ?? row["จำกัดยอด/ปี"] ?? dataObj["จำกัดยอด/ปี"]);
+    if (limit <= 0) {
+      limit = resolvedType === "นิติบุคคล" ? 2_000_000 : 1_200_000;
+    }
+    res["จำกัดยอด/ปี"] = limit;
   } else if (dbTable === "contract_works") {
     res["id_Conwork"] = row.id ?? row["id_Conwork"];
     res["_sheetRow"] = row.id ?? row._sheetRow;
@@ -633,6 +643,12 @@ export function mapSheetRowToSupabaseRow(tableName: string, row: Record<string, 
     if (row["เบอร์โทรศัพท์"] !== undefined) dbRow.phone = row["เบอร์โทรศัพท์"];
     if (row["ที่อยู่"] !== undefined) dbRow.address = row["ที่อยู่"];
     if (row["จำกัดยอด/ปี"] !== undefined) dbRow.annual_limit = row["จำกัดยอด/ปี"];
+    if (row["ประเภท"] !== undefined || row["contractor_type"] !== undefined) {
+      const typeVal = row["ประเภท"] ?? row["contractor_type"];
+      if (!dbRow.data) dbRow.data = {};
+      dbRow.data["ประเภท"] = typeVal;
+      dbRow.data["contractor_type"] = typeVal;
+    }
   } else if (dbTable === "banks") {
     if (row["id_bank"] !== undefined || row["id"] !== undefined) {
       dbRow.id = row["id_bank"] ?? row["id"];

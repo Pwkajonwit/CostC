@@ -127,7 +127,7 @@ export function BillFollowDashboardClient({
     tables: ["bills"],
     onSync: () => router.refresh(),
     debounceMs: 500,
-    pollingIntervalMs: 8_000,
+    pollingIntervalMs: 60_000,
     customEvents: ["bills-data-updated", "data-updated"]
   });
 

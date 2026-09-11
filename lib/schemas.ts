@@ -127,13 +127,14 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
   [TABLES.CONTRACTOR]: [
     { name: "id_Contractor", type: "Text", key: true, initialValue: "nextContractorId", required: true },
     { name: "ชื่อเล่น", type: "Text", required: true },
+    { name: "ประเภท", type: "Enum", values: ["บุคคลธรรมดา", "นิติบุคคล"], inputMode: "buttons", initialValue: "บุคคลธรรมดา", required: true },
     { name: "ชื่อ-นามสกุล", type: "Text" },
     { name: "เลขบัญชี", type: "Text" },
     { name: "ธนาคาร", type: "Ref", refTable: TABLES.BANK, refKey: "id_bank", refLabel: "ชื่อธนาคาร" },
     { name: "บัตรประจำตัวประชาชน", type: "Text" },
     { name: "เบอร์โทรศัพท์", type: "Text" },
     { name: "ที่อยู่", type: "LongText" },
-    { name: "จำกัดยอด/ปี", type: "Decimal" }
+    { name: "จำกัดยอด/ปี", type: "Decimal", initialValue: "1200000" }
   ],
   [TABLES.PEOPLE]: [
     { name: "รหัสพนักงาน", type: "Text", key: true, initialValue: "nextPeopleId", required: true },

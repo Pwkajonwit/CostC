@@ -88,6 +88,9 @@ const LINE_MANUAL_ITEMS: ManualItem[] = [
   { id: "m11", category: "finance", categoryName: "สรุปการเงิน & เบิกเงิน", keyword: "อนุมัติบิลหลักของ:", syntax: "อนุมัติบิลหลักของ: [ชื่อ]", description: "อนุมัติรายการบิลหลักทั้งหมดของโครงการ (เฉพาะสิทธิ์ Admin / Approver)", example: "อนุมัติบิลหลักของ: โครงการบ้านพฤกษา" },
   { id: "m12", category: "finance", categoryName: "สรุปการเงิน & เบิกเงิน", keyword: "อนุมัติเงินสดบิลย่อยของ:", syntax: "อนุมัติเงินสดบิลย่อยของ: [ชื่อ]", description: "อนุมัติและจ่ายเงินสดสำหรับบิลย่อยของสมาชิก", example: "อนุมัติเงินสดบิลย่อยของ: สมชาย" },
   { id: "m13", category: "finance", categoryName: "สรุปการเงิน & เบิกเงิน", keyword: "ปิดงานบิลหลักลำดับที่:", syntax: "ปิดงานบิลหลักลำดับที่: [เลขบิล]", description: "เปลี่ยนสถานะบิลหลักเป็นชำระเงินสำเร็จและปิดงานบิล", example: "ปิดงานบิลหลักลำดับที่: 104" },
+  { id: "m13_1", category: "finance", categoryName: "สรุปการเงิน & เบิกเงิน", keyword: "ยอดโอนวันนี้ / โอนวันนี้", syntax: "ยอดโอนวันนี้", description: "แสดงการ์ด Flex สรุปยอดเงินที่ต้องโอนของบิลที่ปิดงานแล้ววันนี้ โดยรวมบิลร้านค้า/ผู้รับเหมาเดียวกันเป็นยอดเดียว พร้อมแสดงเลขบัญชีและยอดรวมสุทธิ", example: "ยอดโอนวันนี้" },
+  { id: "m13_2", category: "finance", categoryName: "สรุปการเงิน & เบิกเงิน", keyword: "ยอดโอนทั้งหมด / โอนทั้งหมด", syntax: "ยอดโอนทั้งหมด", description: "แสดงการ์ด Flex สรุปยอดเงินที่ต้องโอนของบิลที่ปิดงานแล้วล่าสุดทั้งหมด โดยรวมบิลผู้รับ/บัญชีเดียวกัน", example: "ยอดโอนทั้งหมด" },
+  { id: "m13_3", category: "finance", categoryName: "สรุปการเงิน & เบิกเงิน", keyword: "รอปิดงาน / รอจ่าย / อนุมัติแล้ว", syntax: "รอปิดงาน", description: "ดึงรายการบิลที่ผู้อนุมัติกดอนุมัติแล้ว และอยู่ระหว่างรอฝ่ายการเงินกดปิดงานและชำระเงิน", example: "รอปิดงาน" },
 
   // Task & PW Category
   { id: "m14", category: "task", categoryName: "งาน & PW มอบหมาย", keyword: "งาน2: [ชื่อ]", syntax: "งาน2: [ชื่อพนักงาน]", description: "เรียกดูตารางงานที่ได้รับมอบหมายและสถานะความคืบหน้าของพนักงานรายคน", example: "งาน2: วิชัย" },
@@ -378,6 +381,42 @@ export function LineSystemDashboardClient() {
         setTestResult({ success: true, message: "ส่งการ์ดสรุปผลงาน & การเงินช่วงเย็นเข้า LINE กลุ่มสรุป เรียบร้อยแล้ว!" });
       } else {
         setTestResult({ success: false, message: data.error || "เกิดข้อผิดพลาดในการยิงสรุปงานเย็น" });
+      }
+    } catch (e: any) {
+      setTestResult({ success: false, message: e.message || "ไม่สามารถเรียกใช้งาน API ได้" });
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  async function handleTestTransferSummary() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const billsRes = await fetch("/api/bills?pageSize=100&status=เบิกแล้ว");
+      const billsData = await billsRes.json().catch(() => ({}));
+      const closedBills = Array.isArray(billsData.rows) ? billsData.rows : [];
+
+      if (closedBills.length === 0) {
+        setTestResult({ success: false, message: "ไม่พบบิลที่มีสถานะ 'เบิกแล้ว' ในระบบเพื่อนำมาทดสอบส่งยอดโอน" });
+        setTesting(false);
+        return;
+      }
+
+      const res = await fetch("/api/line/notify-withdraw-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rows: closedBills.slice(0, 25),
+          targetRole: "transfer_summary",
+          title: "💸 ทดสอบส่งยอดโอนประจำวัน (ปิดงานแล้ว)"
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setTestResult({ success: true, message: `ส่งการ์ดสรุปยอดโอน (${closedBills.length} บิลปิดงาน) เข้า LINE สำเร็จ!` });
+      } else {
+        setTestResult({ success: false, message: data.error || "เกิดข้อผิดพลาดในการส่งสรุปยอดโอน" });
       }
     } catch (e: any) {
       setTestResult({ success: false, message: e.message || "ไม่สามารถเรียกใช้งาน API ได้" });
@@ -1156,12 +1195,38 @@ export function LineSystemDashboardClient() {
                   </button>
                 </div>
               </div>
+
+              {/* Transfer Summary Schedule / Test */}
+              <div className="sm:col-span-2 p-3 rounded border border-emerald-300 bg-emerald-50/50 space-y-2">
+                <div className="flex items-center justify-between border-b border-emerald-200 pb-1.5">
+                  <span className="text-emerald-950 text-xs flex items-center gap-1.5 font-medium">
+                    💸 สรุปยอดเงินโอนประจำวัน (Daily Transfer Summary Flex)
+                  </span>
+                  <span className="px-2 py-0.5 rounded text-xs bg-emerald-200 text-emerald-900 border border-emerald-300">
+                    รวมตามบัญชี / ผู้รับ
+                  </span>
+                </div>
+                <p className="text-emerald-800 text-xs leading-relaxed">
+                  สรุปบิลที่ปิดงานแล้วทั้งหมด รวมบิลร้านค้า/ผู้รับเหมาเดียวกันเป็น 1 รายการโอน พร้อมเลขบัญชีธนาคารและยอดรวมสุทธิ
+                </p>
+                <div className="pt-1 flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={testing}
+                    onClick={handleTestTransferSummary}
+                    className="w-full py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded transition flex items-center justify-center gap-1 text-xs cursor-pointer disabled:opacity-50"
+                  >
+                    {testing ? <RefreshCw size={13} className="animate-spin" /> : <Send size={13} />}
+                    <span>ทดสอบยิง Flex ยอดโอนวันนี้เข้า LINE (บิลปิดงานล่าสุด)</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* TAB 3: Manual (63 Commands) */}
+      {/* TAB 3: Manual (Commands Reference) */}
       {activeTab === "manual" && (
         <div className="space-y-3">
           {/* Manual Filter Topbar */}

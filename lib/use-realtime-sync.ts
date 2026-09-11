@@ -63,15 +63,23 @@ export function useRealtimeSync({
       document.addEventListener("visibilitychange", handleVisibilityOrFocus);
     }
 
-    // 3. Smart Background Auto-Polling Fallback (Only runs when tab is active)
+    // 3. Smart Background Auto-Polling Management (Backs off when WebSocket is connected)
     let pollInterval: NodeJS.Timeout | null = null;
-    if (pollingIntervalMs > 0) {
+    const startPolling = (intervalMs: number) => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+      if (intervalMs <= 0) return;
       pollInterval = setInterval(() => {
         if (typeof document !== "undefined" && document.visibilityState === "visible") {
-          onSyncRef.current();
+          triggerDebouncedSync();
         }
-      }, pollingIntervalMs);
-    }
+      }, intervalMs);
+    };
+
+    // Start with fallback polling interval
+    startPolling(pollingIntervalMs > 0 ? pollingIntervalMs : 60_000);
 
     // 4. Subscribe to Supabase Realtime Channels (PostgreSQL changes)
     const supabase = getSupabaseBrowserClient();
@@ -91,9 +99,18 @@ export function useRealtimeSync({
           );
         });
 
-        channel.subscribe();
+        channel.subscribe((status: string) => {
+          if (status === "SUBSCRIBED") {
+            // WebSocket is active and listening: relax background polling to 60s
+            startPolling(Math.max(60_000, pollingIntervalMs));
+          } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+            // If WebSocket connection drops, use active fallback polling (20s)
+            startPolling(20_000);
+          }
+        });
       } catch (err) {
         console.warn(`[useRealtimeSync] Realtime subscribe error for ${channelName}:`, err);
+        startPolling(20_000);
       }
     }
 

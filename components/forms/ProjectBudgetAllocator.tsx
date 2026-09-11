@@ -77,7 +77,7 @@ export function ProjectBudgetAllocator({
 
   // ยอดงบค่าของ (ถ้ามีกรอกย่อยจะสะท้อนตามยอดรวมสินค้าย่อย หรือตามค่าที่ระบุไว้)
   const rawMaterialCap = toNumber(values["งบไม่เกินค่าของ"]);
-  const materialBudget = materialSubTotal > 0 ? materialSubTotal : rawMaterialCap;
+  const materialBudget = Math.max(rawMaterialCap, materialSubTotal);
 
   // ยอดงบค่าแรง
   const laborDirect = toNumber(values["งบไม่เกินค่าแรง"]);

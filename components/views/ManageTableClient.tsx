@@ -3,11 +3,13 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { ChevronLeft, ChevronRight, List, Pencil, Plus, Save, Trash2, X, Search, ArrowDownUp, Download, Upload, FileSpreadsheet, Loader2, Crown, Check, CheckCheck, User, MessageSquare } from "lucide-react";
+import { ChevronLeft, ChevronRight, List, Pencil, Plus, Save, Trash2, X, Search, ArrowDownUp, Download, Upload, FileSpreadsheet, Loader2, Crown, Check, CheckCheck, User, MessageSquare, Building, AlertTriangle, AlertCircle, CheckCircle2, Sparkles, Briefcase } from "lucide-react";
 import { BillImageThumbnail } from "@/components/bills/BillImageThumbnail";
 import { showConfirm, showToast } from "@/components/shared/ToastProvider";
 import type { RowValue, SheetRow } from "@/lib/types";
 import { formatDateDisplay, toInputDateValue } from "@/lib/utils/dates";
+import { TABLES } from "@/lib/config";
+import { toNumber } from "@/lib/utils/numbers";
 
 type BusyState = "add" | "edit" | "delete" | "import" | null;
 const PAGE_SIZE_OPTIONS = [20, 50, 100, 200];
@@ -94,6 +96,29 @@ export function ManageTableClient({
     }
     return result;
   }, [rows, localSearch, sortDesc]);
+
+  const isContractorTable = tableName === TABLES.CONTRACTOR || tableName === "contractors" || tableName === "รับเหมา" || viewName.includes("รับเหมา");
+
+  const contractorStats = useMemo(() => {
+    if (!isContractorTable) return null;
+    const total = rows.length;
+    const individualCount = rows.filter(r => (r["ประเภท"] || r.contractor_type) === "บุคคลธรรมดา").length;
+    const corporateCount = rows.filter(r => (r["ประเภท"] || r.contractor_type) === "นิติบุคคล").length;
+    const overlimitCount = rows.filter(r => r._limitStatus === "เกินโควตา" || Number(r["คงเหลือ"]) < 0).length;
+    const warningCount = rows.filter(r => r._limitStatus === "ใกล้เต็ม").length;
+    const totalSpentThisYear = rows.reduce((sum, r) => sum + (Number(r["ยอดเบิกจ่ายปีนี้"]) || 0), 0);
+    const targetYear = rows[0]?._targetYear || new Date().getFullYear();
+
+    return {
+      total,
+      individualCount,
+      corporateCount,
+      overlimitCount,
+      warningCount,
+      totalSpentThisYear,
+      targetYear
+    };
+  }, [isContractorTable, rows]);
 
   const totalPages = Math.max(1, Math.ceil(filteredAndSortedRows.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -496,6 +521,86 @@ export function ManageTableClient({
 
   return (
     <div className="w-full flex flex-col gap-3 p-3 sm:p-4 max-w-[1600px] mx-auto font-sans text-xs text-slate-800">
+      {/* CONTRACTOR ANNUAL LIMIT KPI STRIP */}
+      {contractorStats && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
+          <div className="p-3 bg-white border border-slate-200 rounded-lg shadow-2xs flex flex-col justify-between">
+            <div className="flex items-center justify-between text-slate-500">
+              <span className="text-2xs font-medium">ผู้รับเหมาทั้งหมด</span>
+              <Briefcase size={14} className="text-slate-400" />
+            </div>
+            <div className="mt-1 flex items-baseline gap-1.5">
+              <span className="text-lg font-bold text-slate-900 font-mono">{contractorStats.total}</span>
+              <span className="text-2xs text-slate-400">ราย</span>
+            </div>
+          </div>
+
+          <div className="p-3 bg-white border border-sky-200 bg-sky-50/20 rounded-lg shadow-2xs flex flex-col justify-between">
+            <div className="flex items-center justify-between text-sky-700">
+              <span className="text-2xs font-medium">บุคคลธรรมดา (1.2M)</span>
+              <User size={14} className="text-sky-500" />
+            </div>
+            <div className="mt-1 flex items-baseline gap-1.5">
+              <span className="text-lg font-bold text-sky-900 font-mono">{contractorStats.individualCount}</span>
+              <span className="text-2xs text-sky-600">ราย</span>
+            </div>
+          </div>
+
+          <div className="p-3 bg-white border border-purple-200 bg-purple-50/20 rounded-lg shadow-2xs flex flex-col justify-between">
+            <div className="flex items-center justify-between text-purple-700">
+              <span className="text-2xs font-medium">นิติบุคคล (2-5M)</span>
+              <Building size={14} className="text-purple-500" />
+            </div>
+            <div className="mt-1 flex items-baseline gap-1.5">
+              <span className="text-lg font-bold text-purple-900 font-mono">{contractorStats.corporateCount}</span>
+              <span className="text-2xs text-purple-600">ราย</span>
+            </div>
+          </div>
+
+          <div className="p-3 bg-white border border-emerald-200 bg-emerald-50/20 rounded-lg shadow-2xs flex flex-col justify-between">
+            <div className="flex items-center justify-between text-emerald-700">
+              <span className="text-2xs font-medium">ยอดเบิกจ่ายปี {contractorStats.targetYear}</span>
+              <Sparkles size={14} className="text-emerald-500" />
+            </div>
+            <div className="mt-1 flex items-baseline gap-1">
+              <span className="text-base font-bold text-emerald-900 font-mono">฿{contractorStats.totalSpentThisYear.toLocaleString()}</span>
+            </div>
+          </div>
+
+          <div className={`p-3 border rounded-lg shadow-2xs flex flex-col justify-between ${
+            contractorStats.overlimitCount > 0
+              ? "bg-rose-50/50 border-rose-300"
+              : contractorStats.warningCount > 0
+                ? "bg-amber-50/50 border-amber-300"
+                : "bg-white border-slate-200"
+          }`}>
+            <div className="flex items-center justify-between">
+              <span className="text-2xs font-medium text-slate-600">เตือนโควตารายปี</span>
+              {contractorStats.overlimitCount > 0 ? (
+                <AlertTriangle size={14} className="text-rose-600" />
+              ) : (
+                <CheckCircle2 size={14} className="text-emerald-500" />
+              )}
+            </div>
+            <div className="mt-1 flex items-baseline gap-2">
+              {contractorStats.overlimitCount > 0 ? (
+                <span className="text-sm font-bold text-rose-700">
+                  เกินโควตา {contractorStats.overlimitCount} ราย
+                </span>
+              ) : contractorStats.warningCount > 0 ? (
+                <span className="text-sm font-bold text-amber-700">
+                  ใกล้เต็ม {contractorStats.warningCount} ราย
+                </span>
+              ) : (
+                <span className="text-xs font-semibold text-emerald-700">
+                  อยู่ในเกณฑ์ปกติทั้งหมด
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* FILTER & ACTION TOOLBAR (With View Name & Count) */}
       <div className="border border-slate-200 rounded-md p-2.5 sm:p-3 bg-white flex flex-col lg:flex-row lg:items-center justify-between gap-3 shadow-2xs">
         {/* Left Side: Title & Live Search */}
@@ -1059,6 +1164,102 @@ function renderDisplayCell(column: string, value: RowValue | undefined, displayL
   if (isImageColumn(column)) return <BillImageThumbnail value={value} />;
   if (column === "color") return <ColorDot value={value} />;
 
+  // 1.5 Contractor Annual Limits & Quota
+  if (column === "ประเภท" && (value === "บุคคลธรรมดา" || value === "นิติบุคคล" || row?.["id_Contractor"])) {
+    const typeStr = String(value || row?.["ประเภท"] || "").trim();
+    if (typeStr === "นิติบุคคล") {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-200 text-xs font-semibold shadow-2xs whitespace-nowrap">
+          <Building size={12} className="text-purple-600 shrink-0" />
+          <span>นิติบุคคล</span>
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-sky-50 text-sky-700 border border-sky-200 text-xs font-semibold shadow-2xs whitespace-nowrap">
+        <User size={12} className="text-sky-600 shrink-0" />
+        <span>บุคคลธรรมดา</span>
+      </span>
+    );
+  }
+
+  if (column === "จำกัดยอด/ปี" || column === "annual_limit") {
+    const num = toNumber(value);
+    return (
+      <span className="font-mono font-medium text-slate-800 whitespace-nowrap">
+        {num > 0 ? `฿${num.toLocaleString()}` : "-"}
+      </span>
+    );
+  }
+
+  if (column === "ยอดเบิกจ่ายปีนี้") {
+    const spent = toNumber(value);
+    const limit = toNumber(row?.["จำกัดยอด/ปี"] || row?.annual_limit);
+    const percent = row?._spentPercent !== undefined ? Number(row._spentPercent) : (limit > 0 ? (spent / limit) * 100 : 0);
+    const cappedPercent = Math.min(100, Math.max(0, percent));
+    const isOver = percent >= 100;
+    const isNear = percent >= 70 && !isOver;
+
+    const barColor = isOver ? "bg-rose-500" : isNear ? "bg-amber-500" : "bg-emerald-500";
+    const textColor = isOver ? "text-rose-700 font-bold" : isNear ? "text-amber-700 font-semibold" : "text-slate-800 font-medium";
+
+    return (
+      <div className="w-full min-w-[130px] flex flex-col gap-1 py-0.5">
+        <div className="flex items-center justify-between text-2xs gap-1.5">
+          <span className={`font-mono text-xs ${textColor}`}>฿{spent.toLocaleString()}</span>
+          <span className={`px-1.5 py-0.2 rounded text-2xs font-semibold shrink-0 ${
+            isOver ? "bg-rose-100 text-rose-700 border border-rose-200" : isNear ? "bg-amber-100 text-amber-800 border border-amber-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+          }`}>
+            {percent.toFixed(1)}%
+          </span>
+        </div>
+        <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden border border-slate-200/80">
+          <div
+            className={`h-full rounded-full transition-all duration-300 ${barColor}`}
+            style={{ width: `${cappedPercent}%` }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (column === "คงเหลือ") {
+    const rem = toNumber(value);
+    const isOver = rem < 0;
+    return (
+      <span className={`font-mono text-xs font-semibold whitespace-nowrap ${isOver ? "text-rose-600 flex items-center gap-1" : "text-emerald-700"}`}>
+        {isOver ? <AlertTriangle size={12} className="text-rose-600 shrink-0" /> : null}
+        <span>{rem < 0 ? `-฿${Math.abs(rem).toLocaleString()}` : `฿${rem.toLocaleString()}`}</span>
+      </span>
+    );
+  }
+
+  if (column === "สถานะ" && (row?._limitStatus || row?.["id_Contractor"])) {
+    const status = String(value || row?._limitStatus || "ปกติ").trim();
+    if (status === "เกินโควตา") {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200 text-2xs font-bold shadow-2xs whitespace-nowrap">
+          <AlertTriangle size={11} className="text-rose-600 shrink-0" />
+          <span>เกินโควตา</span>
+        </span>
+      );
+    }
+    if (status === "ใกล้เต็ม") {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 text-2xs font-semibold shadow-2xs whitespace-nowrap">
+          <AlertCircle size={11} className="text-amber-600 shrink-0" />
+          <span>ใกล้เต็ม (&gt;70%)</span>
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-2xs font-medium shadow-2xs whitespace-nowrap">
+        <CheckCircle2 size={11} className="text-emerald-600 shrink-0" />
+        <span>ปกติ</span>
+      </span>
+    );
+  }
+
   // 1. LINE Column Display with Icon
   if (column === "LINE" || column === "LINE User ID" || column === "สถานะ LINE") {
     const lineUserId = String(row?.line_user_id || row?.["LINE User ID"] || row?.["LINE"] || value || "").trim();
@@ -1202,7 +1403,7 @@ function isDateColumn(column: string) {
 }
 
 function isCenterColumn(column: string) {
-  return column === "color" || column === "COLOR" || column === "จัดการ";
+  return column === "color" || column === "COLOR" || column === "จัดการ" || column === "ประเภท" || column === "สถานะ";
 }
 
 function formatDateThai(value: string): string {

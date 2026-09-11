@@ -1,4 +1,4 @@
-﻿import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
+import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 import { LINE_CONFIG } from "@/lib/line/config";
 import { cached } from "@/lib/utils/cache";
 
@@ -407,24 +407,31 @@ export function createBillNotificationFlex(bill: {
   account_name?: string;
   data?: any;
 }, bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>): Record<string, any> {
-  const formattedAmount = Number(bill.amount || 0).toLocaleString("th-TH", {
+  const rawAmount = bill.amount ?? (bill as any)["ยอดเงิน"] ?? (bill as any).total ?? 0;
+  const formattedAmount = Number(rawAmount || 0).toLocaleString("th-TH", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
 
-  const rawItems = bill.items || bill.data?.items;
+  const rawItems = bill.items || bill.data?.items || (bill as any)["รายการสินค้า"] || (bill as any).line_items;
   let lineItems: Array<{ category?: string; categoryType?: string; amount?: string | number; name?: string; type?: string; price?: string | number; total?: string | number }> = [];
   if (Array.isArray(rawItems) && rawItems.length > 0) {
-    lineItems = rawItems;
+    lineItems = rawItems.filter(Boolean);
   } else if (typeof rawItems === "string" && rawItems.trim().startsWith("[")) {
     try {
       const parsed = JSON.parse(rawItems);
-      if (Array.isArray(parsed) && parsed.length > 0) lineItems = parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) lineItems = parsed.filter(Boolean);
     } catch {}
   }
 
   const bankInfo = resolveBankInfo(bill, bankInfoMap);
   const isSubBill = isSubBillRecord(bill);
+
+  const billStatus = bill.status || (bill as any)["สถานะ"] || "ตั้งเบิก";
+  const projectName = bill.project_name || (bill as any)["ชื่อ Project"] || (bill as any)["โครงการ"] || "-";
+  const vendorCandidate = bill.vendor_or_person || (bill as any)["ร้าน/บุคคล"] || (bill as any)["ร้านค้า"] || (bill as any)["ผู้รับเหมา"] || (bill as any).store_name || "-";
+  const requesterName = bill.requester || (bill as any)["ผู้เบิก"] || "-";
+  const billDescription = bill.description || (bill as any)["สินค้า/ทำงาน"] || (bill as any)["รายละเอียด"] || "-";
 
   return {
     type: "bubble",
@@ -444,7 +451,7 @@ export function createBillNotificationFlex(bill: {
         },
         {
           type: "text",
-          text: `สถานะ: ${bill.status || "ตั้งเบิก"}`,
+          text: `สถานะ: ${billStatus}`,
           color: "#94A3B8",
           size: "xs",
           margin: "xs",
@@ -467,7 +474,7 @@ export function createBillNotificationFlex(bill: {
               layout: "baseline",
               contents: [
                 { type: "text", text: "โครงการ:", color: "#64748B", size: "xs", flex: 2 },
-                { type: "text", text: bill.project_name || "-", weight: "bold", color: "#1E293B", size: "xs", flex: 5, wrap: true },
+                { type: "text", text: projectName, weight: "bold", color: "#1E293B", size: "xs", flex: 5, wrap: true },
               ],
             },
             {
@@ -477,7 +484,7 @@ export function createBillNotificationFlex(bill: {
                 { type: "text", text: "ร้าน/บุคคล:", color: "#64748B", size: "xs", flex: 2 },
                 {
                   type: "text",
-                  text: resolveVendorName(bill.vendor_or_person, bankInfoMap, bill) || bankInfo?.storeName || bankInfo?.accountName || bill.vendor_or_person || "-",
+                  text: resolveVendorName(vendorCandidate, bankInfoMap, bill) || bankInfo?.storeName || bankInfo?.accountName || vendorCandidate,
                   color: "#1E293B",
                   size: "xs",
                   flex: 5,
@@ -539,13 +546,13 @@ export function createBillNotificationFlex(bill: {
                 ]
               }
             ] : []),
-            ...(bill.description && bill.description !== "-" && lineItems.length === 0 ? [
+            ...(billDescription && billDescription !== "-" && lineItems.length === 0 ? [
               {
                 type: "box",
                 layout: "baseline",
                 contents: [
                   { type: "text", text: "รายละเอียด:", color: "#64748B", size: "xs", flex: 2 },
-                  { type: "text", text: bill.description || "-", color: "#1E293B", size: "xs", flex: 5, wrap: true },
+                  { type: "text", text: billDescription, color: "#1E293B", size: "xs", flex: 5, wrap: true },
                 ],
               }
             ] : []),
@@ -554,7 +561,7 @@ export function createBillNotificationFlex(bill: {
               layout: "baseline",
               contents: [
                 { type: "text", text: "ผู้เบิก:", color: "#64748B", size: "xs", flex: 2 },
-                { type: "text", text: bill.requester || "-", color: "#1E293B", size: "xs", flex: 5 },
+                { type: "text", text: requesterName, color: "#1E293B", size: "xs", flex: 5 },
               ],
             },
             ...(lineItems.length > 0 ? [
@@ -578,29 +585,65 @@ export function createBillNotificationFlex(bill: {
                   },
                   ...lineItems.map((item, idx) => {
                     const itemAmt = Number(item.amount ?? item.price ?? item.total ?? 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                    const itemCat = item.category || item.name || `สินค้า ${idx + 1}`;
-                    const itemType = item.categoryType || item.type || "";
+                    const rawCat = String(item.category || "").trim();
+                    const rawName = String(item.name || "").trim();
+                    const cleanCat = rawCat.replace(/^\d+\.?\s*\d*\.?\s*/, "").trim();
+                    const cleanName = rawName.replace(/^\d+\.?\s*\d*\.?\s*/, "").trim();
+
+                    let itemTitle = "";
+                    if (cleanCat && cleanName && cleanCat !== cleanName) {
+                      itemTitle = `${cleanCat} ${cleanName}`;
+                    } else {
+                      itemTitle = cleanName || cleanCat || `สินค้า ${idx + 1}`;
+                    }
+
+                    const rawType = String(item.categoryType || item.type || "").trim();
+                    const cleanType = rawType.replace(/^\d+\.?\s*/, "").trim();
                     return {
                       type: "box",
-                      layout: "horizontal",
+                      layout: "vertical",
+                      margin: idx > 0 ? "xs" : "none",
+                      spacing: "none",
                       contents: [
                         {
-                          type: "text",
-                          text: `${idx + 1}. ${itemCat}${itemType ? ` (${itemType})` : ""}`,
-                          size: "xs",
-                          color: "#334155",
-                          flex: 7,
-                          wrap: true
+                          type: "box",
+                          layout: "horizontal",
+                          contents: [
+                            {
+                              type: "text",
+                              text: `${idx + 1}. ${itemTitle}`,
+                              size: "xs",
+                              color: "#1E293B",
+                              weight: "bold",
+                              flex: 7,
+                              wrap: true
+                            },
+                            {
+                              type: "text",
+                              text: `฿${itemAmt}`,
+                              size: "xs",
+                              color: "#059669",
+                              weight: "bold",
+                              align: "end",
+                              flex: 3
+                            }
+                          ]
                         },
-                        {
-                          type: "text",
-                          text: `฿${itemAmt}`,
-                          size: "xs",
-                          color: "#059669",
-                          weight: "bold",
-                          align: "end",
-                          flex: 3
-                        }
+                        ...(cleanType ? [
+                          {
+                            type: "box",
+                            layout: "horizontal",
+                            contents: [
+                              {
+                                type: "text",
+                                text: `   (${cleanType})`,
+                                size: "xxs",
+                                color: "#0284C7",
+                                wrap: true
+                              }
+                            ]
+                          }
+                        ] : [])
                       ]
                     };
                   })
@@ -1119,14 +1162,14 @@ export function createBillSearchResultFlex(
 
           const hasImages = imgList.length > 0;
 
-          const rawItems = (b as any).items || (b as any).data?.items;
+          const rawItems = (b as any).items || (b as any).data?.items || (b as any)["รายการสินค้า"] || (b as any).line_items;
           let lineItems: Array<{ category?: string; categoryType?: string; amount?: string | number; name?: string; type?: string; price?: string | number; total?: string | number }> = [];
           if (Array.isArray(rawItems) && rawItems.length > 0) {
-            lineItems = rawItems;
+            lineItems = rawItems.filter(Boolean);
           } else if (typeof rawItems === "string" && rawItems.trim().startsWith("[")) {
             try {
               const parsed = JSON.parse(rawItems);
-              if (Array.isArray(parsed) && parsed.length > 0) lineItems = parsed;
+              if (Array.isArray(parsed) && parsed.length > 0) lineItems = parsed.filter(Boolean);
             } catch {}
           }
 
@@ -1242,29 +1285,65 @@ export function createBillSearchResultFlex(
                     },
                     ...lineItems.map((item, iIdx) => {
                       const itemAmt = Number(item.amount ?? item.price ?? item.total ?? 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                      const itemCat = item.category || item.name || `สินค้า ${iIdx + 1}`;
-                      const itemType = item.categoryType || item.type || "";
+                      const rawCat = String(item.category || "").trim();
+                      const rawName = String(item.name || "").trim();
+                      const cleanCat = rawCat.replace(/^\d+\.?\s*\d*\.?\s*/, "").trim();
+                      const cleanName = rawName.replace(/^\d+\.?\s*\d*\.?\s*/, "").trim();
+
+                      let itemTitle = "";
+                      if (cleanCat && cleanName && cleanCat !== cleanName) {
+                        itemTitle = `${cleanCat} ${cleanName}`;
+                      } else {
+                        itemTitle = cleanName || cleanCat || `สินค้า ${iIdx + 1}`;
+                      }
+
+                      const rawType = String(item.categoryType || item.type || "").trim();
+                      const cleanType = rawType.replace(/^\d+\.?\s*/, "").trim();
                       return {
                         type: "box",
-                        layout: "horizontal",
+                        layout: "vertical",
+                        margin: iIdx > 0 ? "xs" : "none",
+                        spacing: "none",
                         contents: [
                           {
-                            type: "text",
-                            text: `${iIdx + 1}. ${itemCat}${itemType ? ` (${itemType})` : ""}`,
-                            size: "xxs",
-                            color: "#334155",
-                            flex: 7,
-                            wrap: true
+                            type: "box",
+                            layout: "horizontal",
+                            contents: [
+                              {
+                                type: "text",
+                                text: `${iIdx + 1}. ${itemTitle}`,
+                                size: "xxs",
+                                color: "#1E293B",
+                                weight: "bold",
+                                flex: 7,
+                                wrap: true
+                              },
+                              {
+                                type: "text",
+                                text: `฿${itemAmt}`,
+                                size: "xxs",
+                                color: "#059669",
+                                weight: "bold",
+                                align: "end",
+                                flex: 3
+                              }
+                            ]
                           },
-                          {
-                            type: "text",
-                            text: `฿${itemAmt}`,
-                            size: "xxs",
-                            color: "#059669",
-                            weight: "bold",
-                            align: "end",
-                            flex: 3
-                          }
+                          ...(cleanType ? [
+                            {
+                              type: "box",
+                              layout: "horizontal",
+                              contents: [
+                                {
+                                  type: "text",
+                                  text: `   (${cleanType})`,
+                                  size: "xxs",
+                                  color: "#0284C7",
+                                  wrap: true
+                                }
+                              ]
+                            }
+                          ] : [])
                         ]
                       };
                     })
@@ -2771,7 +2850,7 @@ export async function getProjectBudgetMap(forceRefresh = false): Promise<Map<str
         const st = String(b.status || d.status || d["สถานะ"] || innerData["สถานะ"] || "").trim().toLowerCase();
         if (st === "ยกเลิก" || st === "ไม่อนุมัติ") continue;
 
-        const isPaid = st.includes("เบิกแล้ว") || st === "paid" || st === "withdrawn";
+        const isPaid = st.includes("เบิกแล้ว") || st.includes("อนุมัติ") || st === "paid" || st === "withdrawn" || st === "approved";
 
         const pId = String(b.project_id || d.project_id || d["ID Project"] || innerData["ID Project"] || "").trim();
         const pName = String(b.project_name || d.project_name || d["ชื่อ Project"] || innerData["ชื่อ Project"] || "").trim();
@@ -3491,7 +3570,7 @@ export function createMultiBillFlex(
       }
 
       const bStatus = String(b["สถานะ"] || b.status || b.data?.["สถานะ"] || b.data?.status || "").trim().toLowerCase();
-      const isBillPaid = mode === "completed" || bStatus.includes("เบิกแล้ว") || bStatus === "paid" || bStatus === "withdrawn";
+      const isBillPaid = mode === "completed" || mode === "approver" || bStatus.includes("เบิกแล้ว") || bStatus.includes("อนุมัติ") || bStatus === "paid" || bStatus === "withdrawn" || bStatus === "approved";
       const billKey = String(b.id || b._sheetRow || b["ลำดับ"] || b.data?.id || b.data?.["ลำดับ"] || "").trim();
       const alreadyCountedInPaid = Boolean(billKey && projInfo?.paidBillIds && projInfo.paidBillIds.has(billKey));
 
@@ -3555,7 +3634,7 @@ export function createMultiBillFlex(
           }
         }
 
-        const deductTag = billDeductPercent ? `(${billDeductPercent}%)` : (hasDeduct ? "(หัก)" : "");
+        const deductTag = billDeductPercent ? `(หัก ${billDeductPercent}%)` : (hasDeduct ? "(หัก)" : "");
 
         if (hireBudgetCap > 0 || grossAmt > 0) {
           laborLine2 = `งบเปิดจ้าง ${hireBudgetCap.toLocaleString("th-TH")} | เบิก ${grossAmt.toLocaleString("th-TH")}${deductTag}`;
@@ -3598,14 +3677,14 @@ export function createMultiBillFlex(
 
       const productName = b["สินค้า"] || b.product || "";
       const categoryName = b["ประเภท"] || b.category || "";
-      const rawItems = b.items || b.data?.items;
+      const rawItems = b.items || b.data?.items || b["รายการสินค้า"] || b.line_items;
       let lineItems: Array<{ category?: string; categoryType?: string; amount?: string | number; name?: string; type?: string; price?: string | number; total?: string | number }> = [];
       if (Array.isArray(rawItems) && rawItems.length > 0) {
-        lineItems = rawItems;
+        lineItems = rawItems.filter(Boolean);
       } else if (typeof rawItems === "string" && rawItems.trim().startsWith("[")) {
         try {
           const parsed = JSON.parse(rawItems);
-          if (Array.isArray(parsed) && parsed.length > 0) lineItems = parsed;
+          if (Array.isArray(parsed) && parsed.length > 0) lineItems = parsed.filter(Boolean);
         } catch {}
       }
 
@@ -3753,26 +3832,56 @@ export function createMultiBillFlex(
           ] : []),
           // Row 7 (Store): Single Product Category Row
           ...(productName && productName !== "-" && lineItems.length === 0 && !isContractor ? (() => {
+            const cleanProdName = productName.replace(/^\d+[\.\s\-]+/, "").trim() || productName;
             const singleBudgetField = resolveProductBudgetField(productName);
             const { cap: singleCap, actualField } = getBudgetCapForField(singleBudgetField, projInfo?.allBudgets);
-            let singleTag = categoryName ? ` (${categoryName})` : "";
+            let singleTag = "";
+            let singleIsOver = false;
             if (singleCap > 0 && actualField) {
               const singlePaid = Number(projInfo?.productPaidSpent?.[actualField] || 0);
               const singleRemaining = (isBillPaid && alreadyCountedInPaid)
                 ? (singleCap - singlePaid)
                 : (singleCap - (singlePaid + grossAmt));
+              singleIsOver = singleRemaining < 0;
               const singleRemTag = singleRemaining < 0
                 ? `⚠️เกิน ${Math.abs(singleRemaining).toLocaleString("th-TH")}`
                 : `เหลือ ${singleRemaining.toLocaleString("th-TH")}`;
-              singleTag = ` (${singleRemTag} | งบ ${singleCap.toLocaleString("th-TH")})`;
+              singleTag = `(${singleRemTag} | งบ ${singleCap.toLocaleString("th-TH")})`;
+            } else if (categoryName) {
+              const cleanType = categoryName.replace(/^\d+[\.\s\-]+/, "").trim();
+              if (cleanType) singleTag = `(${cleanType})`;
             }
             return [
               {
                 type: "box",
-                layout: "horizontal",
+                layout: "vertical",
                 margin: "xs",
+                spacing: "none",
                 contents: [
-                  { type: "text", text: `สินค้า: ${productName}${singleTag}`, size: "xxs", color: "#2563EB", weight: "bold", wrap: true }
+                  {
+                    type: "box",
+                    layout: "horizontal",
+                    contents: [
+                      { type: "text", text: `• ${cleanProdName}`, size: "xxs", color: "#1E293B", weight: "bold", wrap: true, flex: 7 },
+                      { type: "text", text: `฿${grossAmt.toLocaleString("th-TH")}`, size: "xxs", color: "#059669", weight: "bold", align: "end", flex: 5 }
+                    ]
+                  },
+                  ...(singleTag ? [
+                    {
+                      type: "box",
+                      layout: "horizontal",
+                      contents: [
+                        {
+                          type: "text",
+                          text: `  ${singleTag}`,
+                          size: "xxs",
+                          color: singleIsOver ? "#DC2626" : singleCap > 0 ? "#0284C7" : "#64748B",
+                          weight: singleIsOver ? "bold" : "regular",
+                          wrap: true
+                        }
+                      ]
+                    }
+                  ] : [])
                 ]
               }
             ];
@@ -3788,25 +3897,27 @@ export function createMultiBillFlex(
                 paddingAll: "4px",
                 backgroundColor: "#F8FAFC",
                 cornerRadius: "4px",
-                spacing: "none",
+                spacing: "xs",
                 contents: lineItems.map((item, iIdx) => {
                   const itemAmtNum = Number(item.amount ?? item.price ?? item.total ?? 0);
                   const itemAmt = itemAmtNum.toLocaleString("th-TH");
                   const rawCat = String(item.category || "").trim();
                   const rawName = String(item.name || "").trim();
-                  const cleanCat = rawCat.replace(/^\d+\.?\s*\d*\.?\s*/, "");
+                  const cleanCat = rawCat.replace(/^\d+\.?\s*\d*\.?\s*/, "").trim();
+                  const cleanName = rawName.replace(/^\d+\.?\s*\d*\.?\s*/, "").trim();
 
                   let itemTitle = "";
-                  if (cleanCat && rawName && cleanCat !== rawName) {
-                    itemTitle = `${cleanCat} ${rawName}`;
+                  if (cleanCat && cleanName && cleanCat !== cleanName) {
+                    itemTitle = `${cleanCat} ${cleanName}`;
                   } else {
-                    itemTitle = cleanCat || rawName || `สินค้า ${iIdx + 1}`;
+                    itemTitle = cleanName || cleanCat || `สินค้า ${iIdx + 1}`;
                   }
 
                   const budgetField = resolveProductBudgetField(rawCat) || resolveProductBudgetField(cleanCat) || resolveProductBudgetField(rawName);
                   const { cap: budgetCap, actualField } = getBudgetCapForField(budgetField, projInfo?.allBudgets);
 
                   let budgetTag = "";
+                  let isOver = false;
                   if (budgetCap > 0 && actualField) {
                     const paidSpent = Number(projInfo?.productPaidSpent?.[actualField] || 0);
                     const priorInThisBill = billRunningProductSpent[actualField] || 0;
@@ -3816,38 +3927,65 @@ export function createMultiBillFlex(
                       : (budgetCap - totalSpent);
                     billRunningProductSpent[actualField] = priorInThisBill + itemAmtNum;
 
+                    isOver = remaining < 0;
                     const remTag = remaining < 0
                       ? `⚠️เกิน ${Math.abs(remaining).toLocaleString("th-TH")}`
                       : `เหลือ ${remaining.toLocaleString("th-TH")}`;
-                    budgetTag = ` (${remTag} | งบ ${budgetCap.toLocaleString("th-TH")})`;
+                    budgetTag = `(${remTag} | งบ ${budgetCap.toLocaleString("th-TH")})`;
                   } else {
-                    const itemType = item.categoryType || item.type || "";
-                    if (itemType) {
-                      budgetTag = ` (${itemType})`;
+                    const rawType = String(item.categoryType || item.type || "").trim();
+                    const cleanType = rawType.replace(/^\d+\.?\s*/, "").trim();
+                    if (cleanType) {
+                      budgetTag = `(${cleanType})`;
                     }
                   }
 
                   return {
                     type: "box",
-                    layout: "horizontal",
+                    layout: "vertical",
+                    margin: iIdx > 0 ? "xs" : "none",
+                    spacing: "none",
                     contents: [
                       {
-                        type: "text",
-                        text: `• ${itemTitle}${budgetTag}`,
-                        size: "xxs",
-                        color: "#334155",
-                        flex: 8,
-                        wrap: true
+                        type: "box",
+                        layout: "horizontal",
+                        contents: [
+                          {
+                            type: "text",
+                            text: `• ${itemTitle}`,
+                            size: "xxs",
+                            color: "#1E293B",
+                            weight: "bold",
+                            flex: 7,
+                            wrap: true
+                          },
+                          {
+                            type: "text",
+                            text: `฿${itemAmt}`,
+                            size: "xxs",
+                            color: "#059669",
+                            weight: "bold",
+                            align: "end",
+                            flex: 5
+                          }
+                        ]
                       },
-                      {
-                        type: "text",
-                        text: itemAmt,
-                        size: "xxs",
-                        color: "#059669",
-                        weight: "bold",
-                        align: "end",
-                        flex: 3
-                      }
+                      ...(budgetTag ? [
+                        {
+                          type: "box",
+                          layout: "horizontal",
+                          contents: [
+                            {
+                              type: "text",
+                              text: `  ${budgetTag}`,
+                              size: "xxs",
+                              color: isOver ? "#DC2626" : budgetCap > 0 ? "#0284C7" : "#64748B",
+                              weight: isOver ? "bold" : "regular",
+                              wrap: true
+                            }
+                          ]
+                        }
+                      ] : [])
                     ]
                   };
                 })
@@ -4155,6 +4293,376 @@ export function createWithdrawCompletedRequesterFlex(
     title: "🎉 รายการเบิกเงินสำเร็จเรียบร้อย (ปิดงาน)",
     mode: "completed"
   }, peopleMap, bankInfoMap, contractMap, projectBudgetMap);
+}
+
+export interface DailyTransferGroup {
+  groupKey: string;
+  payeeName: string;
+  bankName: string;
+  accountNo: string;
+  accountName: string;
+  totalAmount: number;
+  bills: Array<{
+    id: string;
+    billNo: string;
+    projectName: string;
+    amount: number;
+    description: string;
+  }>;
+}
+
+export function createDailyTransferSummaryFlex(
+  billsInput: Record<string, any> | Array<Record<string, any>>,
+  options?: {
+    title?: string;
+    dateStr?: string;
+  },
+  peopleMap?: Map<string, string> | Record<string, string>,
+  bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>
+): Record<string, any> {
+  const rawBills = (Array.isArray(billsInput) ? billsInput : [billsInput]).filter(Boolean);
+  const title = options?.title || "💸 ยอดโอนวันนี้ (ปิดงานแล้ว)";
+
+  // Format today's date in Thai format (e.g. 12 ก.ย. 2569)
+  let displayDate = options?.dateStr || "";
+  if (!displayDate) {
+    try {
+      displayDate = new Date().toLocaleDateString("th-TH", {
+        timeZone: "Asia/Bangkok",
+        day: "numeric",
+        month: "short",
+        year: "numeric"
+      });
+    } catch {
+      displayDate = new Date().toLocaleDateString("th-TH");
+    }
+  }
+
+  // Group bills by payee / account
+  const groupsMap = new Map<string, DailyTransferGroup>();
+
+  for (const b of rawBills) {
+    const grossAmt = Number(b["ยอดเงิน"] || b.amount || 0);
+    const deductPercent = String(b["หัก"] || b.deduct_percent || "").trim();
+    let deductAmt = Number(b["จำนวนหัก"] || b["3เปอร์"] || b.deduct_amount || 0);
+    if (!deductAmt && deductPercent && Number(deductPercent.replace(/หัก|\s|%/g, "")) > 0 && grossAmt > 0) {
+      deductAmt = Math.round((grossAmt * Number(deductPercent.replace(/หัก|\s|%/g, ""))) / 100 * 100) / 100;
+    }
+    const rawNet = Number(b["ยอดโอน"] || b.net_amount || 0);
+    const netTransferAmt = rawNet > 0 ? rawNet : (deductAmt > 0 ? grossAmt - deductAmt : grossAmt);
+
+    // Resolve Payee / Store / Contractor
+    const rawVendorType = String(b["ร้านค้า/ผู้รับเหมา"] || b.vendor_type || "").trim();
+    const isContractor = rawVendorType === "ผู้รับเหมา" || Boolean(b["ผู้รับเหมา"]) || Boolean(b.contractor_id);
+    let rawVendorCandidate = "";
+    if (isContractor) {
+      rawVendorCandidate = b["ชื่อผู้รับเหมา"] || b.contractor_name || b["ผู้รับเหมา"] || b.contractor_id || b["ร้าน/บุคคล"] || b.vendor_or_person || "-";
+    } else {
+      const namedVendor = String(b["ชื่อร้านค้า"] || b.store_name || b["ร้าน/บุคคล"] || b.vendor_or_person || b.data?.["ร้าน/บุคคล"] || b.data?.vendor_or_person || "").trim();
+      const idStore = String(b["ร้านค้า"] || b.store_id || b.data?.["ร้านค้า"] || "").trim();
+      if (namedVendor && namedVendor !== "-" && namedVendor !== "non" && !/^[a-zA-Z]{1,3}[-_]?\d+$/.test(namedVendor)) {
+        rawVendorCandidate = namedVendor;
+      } else if (idStore) {
+        rawVendorCandidate = idStore;
+      } else {
+        rawVendorCandidate = namedVendor || "-";
+      }
+    }
+
+    const bankInfo = resolveBankInfo(b, bankInfoMap);
+    let payeeName = resolveVendorName(rawVendorCandidate, bankInfoMap, b, peopleMap);
+    if ((!payeeName || payeeName === "-" || /^[a-zA-Z]{1,3}[-_]?\d+$/.test(payeeName)) && bankInfo) {
+      payeeName = bankInfo.storeName || bankInfo.accountName || payeeName;
+    }
+    if (!payeeName || payeeName === "-") {
+      payeeName = String(b["ผู้เบิก"] || b.requester || "ผู้รับเงิน").trim();
+    }
+    // Clean leading numbers
+    payeeName = payeeName.replace(/^\d+[\.\s\-]+/, "").trim() || payeeName;
+
+    const bankName = String(bankInfo?.bankName || b["ธนาคาร"] || b.bank_name || "").trim();
+    const accountNo = String(bankInfo?.accountNo || b["เลขบัญชี"] || b.bank_account || "").trim();
+    const accountName = String(bankInfo?.accountName || b["ชื่อบัญชี"] || b.account_name || "").trim();
+
+    const cleanAccDigits = accountNo.replace(/\D/g, "");
+    const groupKey = cleanAccDigits.length >= 6
+      ? `ACC_${cleanAccDigits}`
+      : (accountNo && accountNo !== "-" ? `ACC_${accountNo}_${bankName}` : `NAME_${payeeName.toLowerCase()}`);
+
+    const bId = String(b.id || b["ลำดับ"] || b._sheetRow || "-").trim();
+    const pName = String(b["ชื่อ Project"] || b.project_name || "").trim();
+    const bDesc = String(b["สินค้า/ทำงาน"] || b.description || "").trim();
+
+    const billItem = {
+      id: bId,
+      billNo: bId,
+      projectName: pName,
+      amount: netTransferAmt,
+      description: bDesc
+    };
+
+    if (groupsMap.has(groupKey)) {
+      const existing = groupsMap.get(groupKey)!;
+      existing.totalAmount += netTransferAmt;
+      existing.bills.push(billItem);
+      if (!existing.accountNo && accountNo) existing.accountNo = accountNo;
+      if (!existing.bankName && bankName) existing.bankName = bankName;
+      if (!existing.accountName && accountName) existing.accountName = accountName;
+    } else {
+      groupsMap.set(groupKey, {
+        groupKey,
+        payeeName,
+        bankName,
+        accountNo,
+        accountName,
+        totalAmount: netTransferAmt,
+        bills: [billItem]
+      });
+    }
+  }
+
+  const groupsList = Array.from(groupsMap.values()).sort((a, b) => b.totalAmount - a.totalAmount);
+  const grandTotal = groupsList.reduce((sum, g) => sum + g.totalAmount, 0);
+  const totalBillsCount = rawBills.length;
+  const formattedGrandTotal = grandTotal.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  if (groupsList.length === 0) {
+    return {
+      type: "bubble",
+      size: "mega",
+      header: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: "#0F172A",
+        paddingAll: "12px",
+        contents: [
+          { type: "text", text: title, weight: "bold", color: "#FFFFFF", size: "sm" },
+          { type: "text", text: `วันที่ ${displayDate}`, color: "#94A3B8", size: "xxs", margin: "xs" }
+        ]
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "16px",
+        contents: [
+          { type: "text", text: "ℹ️ ไม่พบรายการบิลที่ปิดงาน/โอนเงินในวันนี้", size: "xs", color: "#64748B", align: "center" }
+        ]
+      }
+    };
+  }
+
+  const pageSize = 5;
+  const maxBubbles = 10;
+  const totalPages = Math.max(1, Math.ceil(groupsList.length / pageSize));
+
+  function buildBubblePage(pageGroups: DailyTransferGroup[], pageIndex: number) {
+    return {
+      type: "bubble",
+      size: "mega",
+      header: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: "#0F172A",
+        paddingAll: "12px",
+        contents: [
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              {
+                type: "text",
+                text: title,
+                weight: "bold",
+                color: "#FFFFFF",
+                size: "sm",
+                flex: 7,
+                wrap: true
+              },
+              {
+                type: "text",
+                text: `รวม ฿${grandTotal.toLocaleString("th-TH")}`,
+                weight: "bold",
+                color: "#34D399",
+                size: "xs",
+                align: "end",
+                flex: 5
+              }
+            ]
+          },
+          {
+            type: "text",
+            text: totalPages > 1
+              ? `หน้า ${pageIndex + 1}/${totalPages} • วันที่ ${displayDate} (${totalBillsCount} บิล • ${groupsList.length} ผู้รับ)`
+              : `วันที่ ${displayDate} • ปิดงานทั้งหมด ${totalBillsCount} บิล (${groupsList.length} ผู้รับ)`,
+            color: "#94A3B8",
+            size: "xxs",
+            margin: "xs"
+          }
+        ]
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "8px",
+        spacing: "xs",
+        contents: pageGroups.map((g, idx) => {
+          const formattedAmt = g.totalAmount.toLocaleString("th-TH");
+          const billTags = g.bills.map(b => `#${b.billNo}`).join(", ");
+          const isMulti = g.bills.length > 1;
+
+          return {
+            type: "box",
+            layout: "vertical",
+            backgroundColor: "#F8FAFC",
+            cornerRadius: "8px",
+            borderWidth: "1px",
+            borderColor: "#E2E8F0",
+            paddingAll: "8px",
+            margin: idx > 0 ? "xs" : "none",
+            contents: [
+              // Row 1: Payee Name & Net Amount to Transfer
+              {
+                type: "box",
+                layout: "horizontal",
+                contents: [
+                  {
+                    type: "text",
+                    text: `🏪 ${g.payeeName}`,
+                    weight: "bold",
+                    color: "#0F172A",
+                    size: "xs",
+                    flex: 7,
+                    wrap: true
+                  },
+                  {
+                    type: "text",
+                    text: `฿${formattedAmt}`,
+                    weight: "bold",
+                    color: "#059669",
+                    size: "xs",
+                    align: "end",
+                    flex: 5
+                  }
+                ]
+              },
+              // Row 2: Bank & Account No
+              {
+                type: "box",
+                layout: "horizontal",
+                margin: "xs",
+                alignItems: "center",
+                contents: [
+                  {
+                    type: "text",
+                    text: g.accountNo ? `เลข: ${g.accountNo}` : "ไม่มีเลขบัญชี",
+                    color: g.accountNo ? "#0284C7" : "#94A3B8",
+                    size: "xs",
+                    weight: "bold",
+                    flex: 7
+                  },
+                  {
+                    type: "text",
+                    text: g.bankName ? `ธ.${g.bankName}` : "-",
+                    color: "#475569",
+                    size: "xxs",
+                    align: "end",
+                    flex: 5
+                  }
+                ]
+              },
+              // Optional: Account Name if specified
+              ...(g.accountName && g.accountName !== g.payeeName ? [
+                {
+                  type: "box",
+                  layout: "horizontal",
+                  margin: "none",
+                  contents: [
+                    {
+                      type: "text",
+                      text: `ชื่อบัญชี: ${g.accountName}`,
+                      color: "#64748B",
+                      size: "xxs",
+                      wrap: true
+                    }
+                  ]
+                }
+              ] : []),
+              // Row 3: Combined Bills Tag
+              {
+                type: "box",
+                layout: "horizontal",
+                margin: "xs",
+                contents: [
+                  {
+                    type: "text",
+                    text: `📦 ${isMulti ? `รวม ${g.bills.length} บิล:` : "บิล:"} ${billTags}`,
+                    color: isMulti ? "#2563EB" : "#64748B",
+                    size: "xxs",
+                    weight: isMulti ? "bold" : "regular",
+                    wrap: true
+                  }
+                ]
+              }
+            ]
+          };
+        })
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "10px",
+        backgroundColor: "#ECFDF5",
+        contents: [
+          {
+            type: "box",
+            layout: "horizontal",
+            alignItems: "center",
+            contents: [
+              {
+                type: "text",
+                text: "💰 ยอดโอนรวมทั้งหมด",
+                weight: "bold",
+                color: "#065F46",
+                size: "xs",
+                flex: 6
+              },
+              {
+                type: "text",
+                text: `฿${formattedGrandTotal}`,
+                weight: "bold",
+                color: "#059669",
+                size: "md",
+                align: "end",
+                flex: 6
+              }
+            ]
+          },
+          {
+            type: "text",
+            text: `ปิดงานแล้วทั้งหมด ${totalBillsCount} บิล • รวม ${groupsList.length} รายการโอน`,
+            color: "#047857",
+            size: "xxs",
+            margin: "xs"
+          }
+        ]
+      }
+    };
+  }
+
+  const bubbles: any[] = [];
+  for (let i = 0; i < totalPages && i < maxBubbles; i++) {
+    const chunk = groupsList.slice(i * pageSize, (i + 1) * pageSize);
+    bubbles.push(buildBubblePage(chunk, i));
+  }
+
+  if (bubbles.length === 1) {
+    return bubbles[0];
+  }
+
+  return {
+    type: "carousel",
+    contents: bubbles
+  };
 }
 
 export async function getLineQuotaInfo() {

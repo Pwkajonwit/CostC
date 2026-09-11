@@ -1,4 +1,4 @@
-﻿import { TABLES } from "@/lib/config";
+import { TABLES } from "@/lib/config";
 import { hydrateContractRows } from "@/lib/formulas";
 import { getRows } from "@/lib/db";
 import { money, toNumber } from "@/lib/utils/numbers";
@@ -93,10 +93,12 @@ export type CategoryBudgetCheckResult = {
   totalAfterBill: number;
   remainingBeforeBill: number;
   remainingAfterBill: number;
+  percentUsedBeforeBill?: number;
   percentUsedAfterBill: number;
   isOverBudget: boolean;
   isWarning: boolean;
   message: string;
+  isProductLevel?: boolean;
 };
 
 export async function validateBillRelations(row: SheetRow) {
@@ -117,14 +119,25 @@ export async function validateBillRelations(row: SheetRow) {
   // Validate Contractor Relations if contractor bill
   if (row["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา") {
     const contractId = String(row["ผู้รับเหมา"] || "").trim();
-    const hydratedContracts = await hydrateContractRows(contracts);
-    const contract = hydratedContracts.find(item => String(item.id_Conwork || "").trim() === contractId);
-    if (!contract) throw new Error("ไม่พบรายการเปิดจ้างที่เลือก");
-    if (String(contract["ID Project"] || "").trim() !== projectId) {
-      throw new Error("รายการเปิดจ้างไม่อยู่ใน Project ที่เลือก");
-    }
-    if (toNumber(contract["ค่าแรงคงเหลือ"]) <= 0) {
-      throw new Error("รายการเปิดจ้างนี้ชำระครบแล้ว");
+    const category = String(row["ประเภท"] || row.category || "").trim();
+    const isOptionalCategory =
+      category.startsWith("3.") ||
+      category.includes("พนักงาน") ||
+      category.startsWith("8.") ||
+      category.includes("อื่นๆ");
+
+    if (!contractId && isOptionalCategory) {
+      // เมื่อเลือกผู้รับเหมา แต่เป็นหมวดพนักงาน หรือหมวดอื่นๆ และไม่ได้ระบุผู้รับเหมา -> ไม่บังคับ
+    } else {
+      const hydratedContracts = await hydrateContractRows(contracts);
+      const contract = hydratedContracts.find(item => String(item.id_Conwork || "").trim() === contractId);
+      if (!contract) throw new Error("ไม่พบรายการเปิดจ้างที่เลือก");
+      if (String(contract["ID Project"] || "").trim() !== projectId) {
+        throw new Error("รายการเปิดจ้างไม่อยู่ใน Project ที่เลือก");
+      }
+      if (toNumber(contract["ค่าแรงคงเหลือ"]) <= 0) {
+        throw new Error("รายการเปิดจ้างนี้ชำระครบแล้ว");
+      }
     }
   }
 
@@ -237,40 +250,77 @@ export function checkCategoryBudgetCap(
     const bRowKey = String(b._sheetRow || b["ลำดับ"] || "").trim();
     if (currentRowKey && bRowKey === currentRowKey) continue; // Skip self when editing
 
-    const bProd = String(b["สินค้า"] || "").trim();
-    const bCat = String(b["ประเภท"] || "").trim();
-
-    let isMatch = false;
-    if (isProductLevel) {
-      isMatch = Boolean(
-        productVal && (
-          bProd === productVal ||
-          bProd.replace(/^\d+\s*/, "").trim() === productVal.replace(/^\d+\s*/, "").trim()
-        )
-      );
-    } else if (targetBudgetField === "งบไม่เกินค่าของ") {
-      isMatch = Boolean(bCat === "1.ค่าของ" || bCat === "ค่าของ" || (!bCat && bProd) || toNumber(b["ค่าของ"]) > 0);
-    } else if (targetBudgetField === "งบไม่เกินค่าแรง") {
-      isMatch = Boolean(bCat === "2.ค่าแรง" || bCat === "ค่าแรง" || toNumber(b["ค่าแรง"]) > 0);
-    } else if (targetBudgetField === "งบไม่เกินพนักงาน") {
-      isMatch = Boolean(bCat === "3.พนักงาน" || bCat === "พนักงาน" || toNumber(b["พนักงาน"]) > 0);
-    } else if (targetBudgetField === "งบไม่เกินน้ำมัน") {
-      isMatch = Boolean(bCat === "4.น้ำมัน" || bCat === "น้ำมัน" || toNumber(b["น้ำมัน"]) > 0);
-    } else if (targetBudgetField === "งบไม่เกินซ่อมรถ") {
-      isMatch = Boolean(bCat === "5.ซ่อมรถ" || bCat === "ซ่อมรถ" || toNumber(b["ซ่อมรถ"]) > 0);
-    } else if (targetBudgetField === "งบไม่เกินเครื่องจักร") {
-      isMatch = Boolean(bCat === "6.เครื่องจักร" || bCat === "เครื่องจักร" || toNumber(b["เครื่องจักร"]) > 0);
-    } else if (targetBudgetField === "งบไม่เกินเครื่องมือ") {
-      isMatch = Boolean(bCat === "7.เครื่องมือ" || bCat === "เครื่องมือ" || toNumber(b["เครื่องมือ"]) > 0);
-    } else if (targetBudgetField === "งบไม่เกินอื่นๆ") {
-      isMatch = Boolean(bCat === "8.อื่นๆ" || bCat === "อื่นๆ" || toNumber(b["อื่นๆ"]) > 0);
-    } else {
-      isMatch = Boolean(categoryVal && (bCat === categoryVal || bCat.replace(/^\d+\.\s*/, "") === categoryVal.replace(/^\d+\.\s*/, "")));
+    const bStatus = String(b["สถานะ"] || b.status || "").trim().toLowerCase();
+    if (bStatus === "ยกเลิก" || bStatus === "ไม่อนุมัติ" || bStatus === "cancelled" || bStatus === "rejected") {
+      continue;
     }
 
-    if (isMatch) {
-      const amt = getBillRowAmount(b);
-      accumulatedAmount += amt;
+    const rawItems = (b as any).items || (b as any).data?.items || (b as any)["รายการสินค้า"] || (b as any).line_items;
+    let bLineItems: any[] = [];
+    if (Array.isArray(rawItems) && rawItems.length > 0) {
+      bLineItems = rawItems;
+    } else if (typeof rawItems === "string" && rawItems.trim().startsWith("[")) {
+      try {
+        const parsed = JSON.parse(rawItems);
+        if (Array.isArray(parsed)) bLineItems = parsed;
+      } catch {}
+    }
+
+    if (bLineItems.length > 0) {
+      if (isProductLevel) {
+        for (const it of bLineItems) {
+          const itCat = String(it.category || it.name || "").trim();
+          const itClean = itCat.replace(/^\d+[\.\s\-]+/, "").trim();
+          const targetClean = productVal.replace(/^\d+[\.\s\-]+/, "").trim();
+          const itField = PRODUCT_BUDGET_MAP[itCat] || PRODUCT_BUDGET_MAP[itClean];
+          if (itCat === productVal || itClean === targetClean || (itField && itField === targetBudgetField)) {
+            accumulatedAmount += toNumber(it.amount ?? it.price ?? it.total ?? 0);
+          }
+        }
+      } else {
+        for (const it of bLineItems) {
+          const itType = String(it.categoryType || it.type || "").trim();
+          if (CATEGORY_BUDGET_MAP[itType] === targetBudgetField || (!itType && targetBudgetField === "งบไม่เกินค่าของ")) {
+            accumulatedAmount += toNumber(it.amount ?? it.price ?? it.total ?? 0);
+          }
+        }
+      }
+    } else {
+      const bProd = String(b["สินค้า"] || "").trim();
+      const bCat = String(b["ประเภท"] || "").trim();
+
+      let isMatch = false;
+      if (isProductLevel) {
+        isMatch = Boolean(
+          productVal && (
+            bProd === productVal ||
+            bProd.replace(/^\d+\s*/, "").trim() === productVal.replace(/^\d+\s*/, "").trim()
+          )
+        );
+      } else if (targetBudgetField === "งบไม่เกินค่าของ") {
+        isMatch = Boolean(bCat === "1.ค่าของ" || bCat === "ค่าของ" || (!bCat && bProd) || toNumber(b["ค่าของ"]) > 0);
+      } else if (targetBudgetField === "งบไม่เกินค่าแรง") {
+        isMatch = Boolean(bCat === "2.ค่าแรง" || bCat === "ค่าแรง" || toNumber(b["ค่าแรง"]) > 0);
+      } else if (targetBudgetField === "งบไม่เกินพนักงาน") {
+        isMatch = Boolean(bCat === "3.พนักงาน" || bCat === "พนักงาน" || toNumber(b["พนักงาน"]) > 0);
+      } else if (targetBudgetField === "งบไม่เกินน้ำมัน") {
+        isMatch = Boolean(bCat === "4.น้ำมัน" || bCat === "น้ำมัน" || toNumber(b["น้ำมัน"]) > 0);
+      } else if (targetBudgetField === "งบไม่เกินซ่อมรถ") {
+        isMatch = Boolean(bCat === "5.ซ่อมรถ" || bCat === "ซ่อมรถ" || toNumber(b["ซ่อมรถ"]) > 0);
+      } else if (targetBudgetField === "งบไม่เกินเครื่องจักร") {
+        isMatch = Boolean(bCat === "6.เครื่องจักร" || bCat === "เครื่องจักร" || toNumber(b["เครื่องจักร"]) > 0);
+      } else if (targetBudgetField === "งบไม่เกินเครื่องมือ") {
+        isMatch = Boolean(bCat === "7.เครื่องมือ" || bCat === "เครื่องมือ" || toNumber(b["เครื่องมือ"]) > 0);
+      } else if (targetBudgetField === "งบไม่เกินอื่นๆ") {
+        isMatch = Boolean(bCat === "8.อื่นๆ" || bCat === "อื่นๆ" || toNumber(b["อื่นๆ"]) > 0);
+      } else {
+        isMatch = Boolean(categoryVal && (bCat === categoryVal || bCat.replace(/^\d+\.\s*/, "") === categoryVal.replace(/^\d+\.\s*/, "")));
+      }
+
+      if (isMatch) {
+        const amt = getBillRowAmount(b);
+        accumulatedAmount += amt;
+      }
     }
   }
 
@@ -278,7 +328,8 @@ export function checkCategoryBudgetCap(
   const totalAfterBill = accumulatedAmount + currentBillAmount;
   const remainingBeforeBill = budgetLimit - accumulatedAmount;
   const remainingAfterBill = budgetLimit - totalAfterBill;
-  const percentUsedAfterBill = (totalAfterBill / budgetLimit) * 100;
+  const percentUsedBeforeBill = budgetLimit > 0 ? Number(((accumulatedAmount / budgetLimit) * 100).toFixed(1)) : 0;
+  const percentUsedAfterBill = budgetLimit > 0 ? Number(((totalAfterBill / budgetLimit) * 100).toFixed(1)) : 0;
   const isOverBudget = totalAfterBill > budgetLimit;
   const isWarning = !isOverBudget && percentUsedAfterBill >= 85;
 
@@ -302,10 +353,12 @@ export function checkCategoryBudgetCap(
     totalAfterBill,
     remainingBeforeBill,
     remainingAfterBill,
-    percentUsedAfterBill: Number(percentUsedAfterBill.toFixed(1)),
+    percentUsedBeforeBill,
+    percentUsedAfterBill,
     isOverBudget,
     isWarning,
-    message
+    message,
+    isProductLevel
   };
 }
 

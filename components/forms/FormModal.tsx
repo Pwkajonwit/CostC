@@ -24,6 +24,7 @@ import {
   Save,
   Scissors,
   Search,
+  ShieldCheck,
   Store,
   Trash2,
   X
@@ -34,6 +35,7 @@ import type { FieldSchema, RefOption, SheetRow } from "@/lib/types";
 import { normalizeDateToIso, parseDateStrict, toInputDateValue, getTodayDateIso } from "@/lib/utils/dates";
 import { imagePreviewUrl } from "@/components/bills/BillImageThumbnail";
 import { compressImageFiles } from "@/lib/utils/image-compressor";
+import { money } from "@/lib/utils/numbers";
 
 const ProjectBudgetAllocator = dynamic(
   () => import("@/components/forms/ProjectBudgetAllocator").then(mod => mod.ProjectBudgetAllocator),
@@ -45,10 +47,17 @@ const BillCategoryBudgetGuardrail = dynamic(
   { ssr: false }
 );
 
+const MultiItemsBudgetGuardrail = dynamic(
+  () => import("@/components/forms/BillCategoryBudgetGuardrail").then(mod => mod.MultiItemsBudgetGuardrail),
+  { ssr: false }
+);
+
 const ContractLaborBudgetGuardrail = dynamic(
   () => import("@/components/forms/ContractLaborBudgetGuardrail").then(mod => mod.ContractLaborBudgetGuardrail),
   { ssr: false }
 );
+
+import { checkCategoryBudgetCap } from "@/lib/bills/bill-validation";
 
 type FormPayload = {
   tableName: string;
@@ -128,7 +137,7 @@ const DATA_FORM_SECTIONS: { id: string; title: string; iconName: string; fields:
     id: "basic",
     title: "ข้อมูลหลัก & โครงการ",
     iconName: "ClipboardList",
-    fields: ["ลำดับ", "ID Project", "บิล", "ผู้เบิก", "ผู้สร้างบิล", "ว/ด/ป"]
+    fields: ["ลำดับ", "ID Project", "บิล", "ผู้เบิก", "ว/ด/ป", "ผู้สร้างบิล"]
   },
   {
     id: "vendor",
@@ -173,6 +182,10 @@ function MultiLineItemsBuilder({
   onRemove,
   onUpdate,
   onCancel,
+  projectId = "",
+  projectRows = [],
+  values = {},
+  existingBills = [],
 }: {
   items: MultiLineItem[];
   productOptions: { label: string; value: string }[];
@@ -180,101 +193,222 @@ function MultiLineItemsBuilder({
   onRemove: (id: string) => void;
   onUpdate: (id: string, field: keyof MultiLineItem, value: string) => void;
   onCancel: () => void;
+  projectId?: string;
+  projectRows?: SheetRow[];
+  values?: Record<string, string>;
+  existingBills?: SheetRow[];
 }) {
   const totalSum = items.reduce((s, i) => s + (Number(i.amount) || 0), 0);
 
+  const matchedProject = useMemo(() => {
+    return projectRows.find(p => {
+      const projId = String(p["ID Project"] || p.id || "").trim();
+      const projName = String(p["ชื่อ Project"] || p.name || "").trim();
+      if (!projId && !projName) return false;
+      return (
+        projId === projectId ||
+        projName === projectId ||
+        projectId.startsWith(`${projId} `) ||
+        projectId.startsWith(`${projId} -`) ||
+        projectId === `${projId} - ${projName}` ||
+        (projId && projectId.includes(projId))
+      );
+    });
+  }, [projectId, projectRows]);
+
   return (
-    <div className="col-span-full bg-slate-50/80 border border-slate-200 rounded-xl p-3 space-y-2 font-sans animate-in fade-in duration-150">
-      <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-1.5">
+    <div className="col-span-full bg-slate-50/70 border border-slate-200/90 rounded-xl p-3 sm:p-3.5 space-y-3 font-sans shadow-2xs">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-200">
         <div className="flex items-center gap-2">
-          <span className="font-semibold text-xs text-slate-800 flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-600 inline-block" />
-            <span>รายการสินค้า ({items.length})</span>
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block ring-4 ring-emerald-100" />
+          <span className="font-semibold text-xs text-slate-800">
+            รายการสินค้า / ค่าใช้จ่ายในบิล
+          </span>
+          <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100/70 text-emerald-800">
+            {items.length} รายการ
           </span>
         </div>
       </div>
 
-      {/* Minimalist Line Items Rows */}
-      <div className="space-y-1.5">
-        {items.map((item, idx) => (
-          <div
-            key={item.id}
-            className="bg-white border border-slate-200 rounded-lg p-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shadow-2xs"
-          >
-            <span className="font-mono text-[11px] text-slate-400 font-semibold w-5 shrink-0 text-center hidden sm:block">
-              {idx + 1}.
-            </span>
-
-            {/* Product Category Dropdown */}
-            <div className="flex-1 min-w-0">
-              <SearchableRefSelect
-                name={`product_category_${item.id}`}
-                value={item.category}
-                options={productOptions}
-                readOnly={false}
-                placeholder={`เลือกสินค้า (${idx + 1})...`}
-                onChange={(val) => onUpdate(item.id, "category", val)}
-              />
-            </div>
-
-            {/* Cost Type Pill Select */}
-            <div className="w-full sm:w-32 shrink-0">
-              <SearchableRefSelect
-                name={`product_cost_type_${item.id}`}
-                value={item.categoryType}
-                options={[
-                  { label: "1.ค่าของ", value: "1.ค่าของ" },
-                  { label: "7.เครื่องมือ", value: "7.เครื่องมือ" },
-                  { label: "8.อื่นๆ", value: "8.อื่นๆ" }
-                ]}
-                readOnly={false}
-                placeholder="ประเภท..."
-                onChange={(val) => onUpdate(item.id, "categoryType", val)}
-              />
-            </div>
-
-            {/* Amount Input */}
-            <div className="w-full sm:w-36 shrink-0 relative">
-              <input
-                type="number"
-                step="any"
-                value={item.amount}
-                onChange={(e) => onUpdate(item.id, "amount", e.target.value)}
-                placeholder="0.00"
-                className="w-full h-10 sm:h-9 bg-white border border-slate-300 rounded-lg text-xs sm:text-sm px-2.5 py-1.5 focus:outline-none focus:border-slate-800 text-right font-semibold text-slate-900 placeholder:text-slate-400"
-              />
-            </div>
-
-            {/* Delete Button */}
-            <button
-              type="button"
-              onClick={() => onRemove(item.id)}
-              disabled={items.length <= 1}
-              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed shrink-0 self-end sm:self-center"
-              title="ลบ"
-            >
-              <Trash2 size={15} />
-            </button>
-          </div>
-        ))}
+      {/* Column Headers for Desktop */}
+      <div className="hidden sm:flex items-center gap-2 px-2 text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
+        <span className="w-5 text-center shrink-0">#</span>
+        <span className="flex-1 min-w-0">สินค้า / รายการ</span>
+        <span className="w-32 shrink-0">หมวดค่าใช้จ่าย</span>
+        <span className="w-36 text-right shrink-0 pr-1">ยอดเงิน (฿)</span>
+        <span className="w-8 shrink-0"></span>
       </div>
 
-      {/* Summary Footer */}
-      <div className="flex items-center justify-between pt-1 text-xs">
+      {/* Clean, Non-Nested Line Item Rows */}
+      <div className="space-y-2">
+        {items.map((item, idx) => {
+          let itemBudget: ReturnType<typeof checkCategoryBudgetCap> | null = null;
+          if (matchedProject && (item.category || item.categoryType)) {
+            const prod = String(item.category || "").trim();
+            const type = String(item.categoryType || "1.ค่าของ").trim();
+            const prodAmtSum = items
+              .filter(i => (i.category || "").trim() === prod)
+              .reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+            const amt = String(prodAmtSum > 0 ? prodAmtSum : (item.amount || "0")).trim();
+
+            itemBudget = checkCategoryBudgetCap({
+              "ID Project": projectId,
+              "สินค้า": prod,
+              "ประเภท": type,
+              "ยอดเงิน": amt,
+              "ค่าของ": type === "1.ค่าของ" ? amt : "",
+              "เครื่องมือ": type === "7.เครื่องมือ" ? amt : "",
+              "อื่นๆ": type === "8.อื่นๆ" ? amt : "",
+            }, matchedProject, existingBills);
+          }
+
+          const hasSubBudget = Boolean(itemBudget?.hasBudgetCap && itemBudget.isProductLevel);
+          const isOver = Boolean(itemBudget?.isOverBudget);
+
+          return (
+            <div
+              key={item.id}
+              className={`bg-white border rounded-lg p-2 sm:px-2.5 sm:py-2 flex flex-col sm:flex-row items-stretch sm:items-start gap-2 shadow-2xs transition-colors ${
+                isOver ? "border-rose-300 bg-rose-50/20" : "border-slate-200/90 hover:border-slate-300"
+              }`}
+            >
+              <span className="font-mono text-xs text-slate-400 font-semibold w-5 shrink-0 text-center hidden sm:block pt-2">
+                {idx + 1}
+              </span>
+
+              {/* Product Category Dropdown */}
+              <div className="flex-1 min-w-0">
+                <SearchableRefSelect
+                  name={`product_category_${item.id}`}
+                  value={item.category}
+                  options={productOptions}
+                  readOnly={false}
+                  placeholder={`เลือกสินค้า (${idx + 1})...`}
+                  onChange={(val) => onUpdate(item.id, "category", val)}
+                />
+                {/* Slim Budget Indicator directly under the Product Selector */}
+                {hasSubBudget && itemBudget ? (
+                  <div
+                    className={`mt-1 w-full h-6 px-2 rounded-md border flex items-center justify-between text-[11px] font-sans shadow-2xs transition-all ${
+                      itemBudget.isOverBudget
+                        ? "bg-rose-50 border-rose-300 text-rose-950 animate-pulse"
+                        : itemBudget.isWarning
+                        ? "bg-amber-50 border-amber-300 text-amber-950"
+                        : "bg-sky-50/90 border-sky-200/90 text-sky-950"
+                    }`}
+                  >
+                    <div className="flex items-center gap-1 min-w-0 truncate">
+                      <span
+                        className={`text-[10px] font-semibold px-1.5 py-0.2 rounded shrink-0 ${
+                          itemBudget.isOverBudget
+                            ? "bg-rose-200 text-rose-800"
+                            : itemBudget.isWarning
+                            ? "bg-amber-200 text-amber-800"
+                            : "bg-sky-200/90 text-sky-800"
+                        }`}
+                      >
+                        {itemBudget.percentUsedAfterBill}%
+                      </span>
+                      <span className="text-[10px] text-slate-600 truncate">
+                        {itemBudget.accumulatedAmount > 0
+                          ? `เบิกแล้ว ${money(itemBudget.accumulatedAmount)} (${itemBudget.percentUsedBeforeBill}%) | งบ ${money(itemBudget.budgetLimit)}`
+                          : `งบ ${money(itemBudget.budgetLimit)}`}
+                      </span>
+                    </div>
+                    <span className="font-semibold shrink-0 text-[11px] ml-1">
+                      {itemBudget.remainingAfterBill < 0 ? (
+                        <span className="text-rose-700 font-bold">เกินงบ {money(Math.abs(itemBudget.remainingAfterBill))} ฿</span>
+                      ) : (
+                        <span className="text-sky-800">คงเหลือ {money(itemBudget.remainingAfterBill)} ฿</span>
+                      )}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+
+              {/* Cost Type Pill Select */}
+              <div className="w-full sm:w-32 shrink-0">
+                <SearchableRefSelect
+                  name={`product_cost_type_${item.id}`}
+                  value={item.categoryType}
+                  options={[
+                    { label: "1.ค่าของ", value: "1.ค่าของ" },
+                    { label: "7.เครื่องมือ", value: "7.เครื่องมือ" },
+                    { label: "8.อื่นๆ", value: "8.อื่นๆ" }
+                  ]}
+                  readOnly={false}
+                  placeholder="ประเภท..."
+                  onChange={(val) => onUpdate(item.id, "categoryType", val)}
+                />
+              </div>
+
+              {/* Amount Input */}
+              <div className="w-full sm:w-36 shrink-0 relative">
+                <input
+                  type="number"
+                  step="any"
+                  value={item.amount}
+                  onChange={(e) => onUpdate(item.id, "amount", e.target.value)}
+                  placeholder="0.00"
+                  className={`w-full h-10 sm:h-9 bg-white border rounded-lg text-xs sm:text-sm px-2.5 py-1.5 focus:outline-none focus:border-slate-800 text-right font-semibold text-slate-900 placeholder:text-slate-400 ${
+                    isOver ? "border-rose-400 bg-rose-50/30 text-rose-950" : "border-slate-300"
+                  }`}
+                />
+                {isOver ? (
+                  <span className="absolute -top-2 right-2 px-1.5 py-0.2 bg-rose-600 text-white text-[9px] font-bold rounded shadow-2xs">
+                    เกินงบ
+                  </span>
+                ) : null}
+              </div>
+
+              {/* Delete Button */}
+              <button
+                type="button"
+                onClick={() => onRemove(item.id)}
+                disabled={items.length <= 1}
+                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed shrink-0 self-end sm:self-start sm:mt-1"
+                title="ลบแถวนี้"
+              >
+                <Trash2 size={15} />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Footer: ปุ่มเพิ่มรายการ, สถานะคุมงบประมาณ และ ยอดรวม ทั้งหมดอยู่ในแถวเดียวกัน */}
+      <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-2 pt-2 border-t border-slate-200/90">
+        {/* ปุ่มเพิ่มรายการ */}
         <button
           type="button"
           onClick={onAdd}
-          className="text-xs text-emerald-800 hover:text-emerald-900 font-medium flex items-center gap-1 cursor-pointer"
+          className="h-9 px-3.5 rounded-lg bg-emerald-50 text-emerald-800 hover:bg-emerald-100 hover:text-emerald-950 font-semibold text-xs flex items-center gap-1.5 cursor-pointer transition-colors border border-emerald-200/80 shadow-2xs shrink-0 self-start lg:self-auto"
         >
-          <Plus size={13} className="shrink-0" />
+          <Plus size={14} className="shrink-0 text-emerald-700" />
           <span>เพิ่มรายการ</span>
         </button>
 
-        <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-900 px-2.5 py-1 rounded-lg border border-emerald-200 text-xs">
-          <span>รวม:</span>
-          <span className="font-bold text-emerald-950">
-            ฿{totalSum.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </span>
+        {/* แถบคุมงบประมาณ + รวมยอดเงิน (อยู่แถวเดียวกัน) */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-1 lg:justify-end min-w-0">
+          {projectId && projectRows.length > 0 && (
+            <div className="min-w-0 flex-1 lg:max-w-md">
+              <MultiItemsBudgetGuardrail
+                items={items}
+                projectId={projectId}
+                projectRows={projectRows}
+                values={values}
+                existingBills={existingBills}
+              />
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 bg-white text-slate-700 px-3.5 h-9 rounded-lg border border-slate-200 text-xs shadow-2xs shrink-0 justify-between sm:justify-start">
+            <span className="text-slate-500 font-medium">รวมยอดเงิน:</span>
+            <span className="font-bold text-sm text-emerald-700 font-sans">
+              ฿{totalSum.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -347,6 +481,26 @@ export function FormModal({
   // Multi-Line Items State for Multi-category Bill Entry
   const [multiLineItems, setMultiLineItems] = useState<MultiLineItem[]>([]);
   const [isMultiItemMode, setIsMultiItemMode] = useState<boolean>(false);
+  const [projectBills, setProjectBills] = useState<SheetRow[]>([]);
+
+  useEffect(() => {
+    const projVal = String(values["ID Project"] || "").trim();
+    if (!projVal) {
+      setProjectBills([]);
+      return;
+    }
+    const cleanId = projVal.split(" - ")[0].trim();
+    let active = true;
+    fetch(`/api/bills?projectId=${encodeURIComponent(cleanId)}&pageSize=5000`)
+      .then(r => r.json())
+      .then(data => {
+        if (active && Array.isArray(data.rows)) {
+          setProjectBills(data.rows);
+        }
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [values["ID Project"]]);
 
   const [resetKey, setResetKey] = useState(0);
   const formBodyRef = useRef<HTMLDivElement>(null);
@@ -951,7 +1105,16 @@ export function FormModal({
                         {DATA_FORM_SECTIONS.map(section => {
                           const isStoreVendor = values["ร้านค้า/ผู้รับเหมา"] === "ร้านค้า";
                           const sectionFields = visibleFields.filter(f => {
-                            if (isMultiItemMode && isStoreVendor && (f.name === "สินค้า" || f.name === "ประเภท" || f.name === "รายละเอียดงาน")) {
+                            if (isMultiItemMode && isStoreVendor && (
+                              f.name === "สินค้า" ||
+                              f.name === "ประเภท" ||
+                              f.name === "รายละเอียดงาน" ||
+                              f.name === "ค่าของ" ||
+                              f.name === "เครื่องมือ" ||
+                              f.name === "ชื่อเครื่องมือ" ||
+                              f.name === "อื่นๆ" ||
+                              f.name === "รายการ"
+                            )) {
                               return false;
                             }
                             return section.fields.includes(f.name);
@@ -1023,7 +1186,7 @@ export function FormModal({
                                   />
                                 ))}
 
-                                {section.id === "expense" ? (
+                                {section.id === "expense" && !isMultiItemMode ? (
                                   <div className="space-y-1 min-w-0 w-full overflow-hidden">
                                     <label className="text-xs font-medium text-slate-500 block">
                                       สถานะคุมงบประมาณ
@@ -1031,6 +1194,7 @@ export function FormModal({
                                     <BillCategoryBudgetGuardrail
                                       values={values}
                                       projectRows={(activeForm.refOptions["ID Project"] || activeForm.refOptions["ชื่อ Project"] || []).map(opt => opt.row).filter(Boolean) as SheetRow[]}
+                                      existingBills={projectBills}
                                     />
                                   </div>
                                 ) : null}
@@ -1043,6 +1207,10 @@ export function FormModal({
                                     onRemove={handleRemoveLineItem}
                                     onUpdate={handleUpdateLineItem}
                                     onCancel={disableMultiItemMode}
+                                    projectId={values["ID Project"] || ""}
+                                    projectRows={(activeForm.refOptions["ID Project"] || activeForm.refOptions["ชื่อ Project"] || []).map(opt => opt.row).filter(Boolean) as SheetRow[]}
+                                    values={values}
+                                    existingBills={projectBills}
                                   />
                                 ) : null}
                               </div>
@@ -1983,6 +2151,46 @@ function renderField(
           <span className="text-slate-500 text-[10px]">(ยอดงาน ฿{workAmount.toLocaleString("th-TH", { minimumFractionDigits: 2 })} + VAT ฿{vatAmount.toLocaleString("th-TH", { minimumFractionDigits: 2 })})</span>
         </div>
       ) : null}
+      {field.name === "จำกัดยอด/ปี" ? (
+        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+          <span className="text-2xs text-slate-500 font-medium">ปุ่มลัดโควตา:</span>
+          {currentValues["ประเภท"] === "นิติบุคคล" ? (
+            <>
+              {[2_000_000, 3_000_000, 5_000_000].map(amt => (
+                <button
+                  key={amt}
+                  type="button"
+                  onClick={() => onChange(String(amt))}
+                  className={`px-2 py-0.5 text-2xs rounded border transition cursor-pointer ${
+                    toNumber(value) === amt
+                      ? "bg-purple-600 text-white border-purple-700 font-semibold shadow-2xs"
+                      : "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100"
+                  }`}
+                >
+                  {(amt / 1_000_000)} ล้าน
+                </button>
+              ))}
+            </>
+          ) : (
+            <>
+              {[1_200_000, 1_500_000, 1_800_000].map(amt => (
+                <button
+                  key={amt}
+                  type="button"
+                  onClick={() => onChange(String(amt))}
+                  className={`px-2 py-0.5 text-2xs rounded border transition cursor-pointer ${
+                    toNumber(value) === amt
+                      ? "bg-blue-600 text-white border-blue-700 font-semibold shadow-2xs"
+                      : "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                  }`}
+                >
+                  {(amt / 1_000_000)} ล้าน
+                </button>
+              ))}
+            </>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2726,6 +2934,17 @@ function calculateDueDate(baseDateStr: string, days: number): string {
 }
 
 function normalizeDependentValues(values: Record<string, string>, changedField: string, form: FormPayload) {
+  // Contractor Form: เมื่อเปลี่ยนประเภท ให้ auto-set วงเงินจำกัดยอด/ปี
+  const isContractorForm = form.tableName === TABLES.CONTRACTOR || form.tableName === "contractors" || form.tableName === "รับเหมา" || form.tableName === "5. รับเหมา";
+  if (isContractorForm && changedField === "ประเภท") {
+    if (values["ประเภท"] === "นิติบุคคล") {
+      const cur = toNumber(values["จำกัดยอด/ปี"]);
+      if (cur <= 1_200_000) values["จำกัดยอด/ปี"] = "2000000";
+    } else if (values["ประเภท"] === "บุคคลธรรมดา") {
+      values["จำกัดยอด/ปี"] = "1200000";
+    }
+  }
+
   if (changedField === "ร้านค้า/ผู้รับเหมา") {
     if (values[changedField] === "ร้านค้า") {
       values["ผู้รับเหมา"] = "";
@@ -2926,9 +3145,29 @@ function sanitizeValuesForSubmit(values: Record<string, string>, form: FormPaylo
   return next;
 }
 
+function isFieldRequired(field: FieldSchema, values: Record<string, string>, tableName?: string): boolean {
+  if (!field.required) return false;
+  if (field.type === "Hidden" || field.readonly) return false;
+
+  // กรณีตารางบิล: เมื่อเลือก ผู้รับเหมา แต่ประเภทงานเป็น "พนักงาน" (3.พนักงาน) หรือ "อื่นๆ" (8.อื่นๆ) -> ผู้รับเหมาจะไม่บังคับ
+  if (field.name === "ผู้รับเหมา") {
+    const category = String(values["ประเภท"] || "").trim();
+    if (
+      category.startsWith("3.") ||
+      category.includes("พนักงาน") ||
+      category.startsWith("8.") ||
+      category.includes("อื่นๆ")
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 function validateVisibleRequiredFields(values: Record<string, string>, form: FormPayload) {
   const missingField = form.schema.find(field => {
-    if (!field.required || field.type === "Hidden" || field.readonly) return false;
+    if (!isFieldRequired(field, values, form.tableName)) return false;
     if (!isFieldVisible(field, values)) return false;
     return !hasValue(values[field.name]);
   });
@@ -2971,7 +3210,7 @@ function getFieldClassName(field: FieldSchema) {
   if (field.type === "LongText" || field.type === "Image" || field.type === "File" || field.type === "EnumList" || field.name === "รายละเอียดงาน") {
     return "col-span-full";
   }
-  if (field.name === "ชื่อ Project" || field.name === "ร้านค้า" || field.name === "ผู้รับเหมา" || field.name === "ประเภท") {
+  if (field.name === "ID Project" || field.name === "ชื่อ Project" || field.name === "ร้านค้า" || field.name === "ผู้รับเหมา" || field.name === "ประเภท") {
     return "col-span-1 sm:col-span-2 lg:col-span-2";
   }
   return "col-span-1";
@@ -3036,11 +3275,13 @@ const MemoizedFormField = memo(function MemoizedFormField({
   attachedFiles = [],
   onAttachedFilesChange = () => {},
 }: MemoizedFormFieldProps) {
+  const isRequired = isFieldRequired(field, currentValues, activeForm?.tableName);
+
   return (
     <div className={`${getFieldClassName(field)} space-y-1 min-w-0 w-full overflow-hidden`} key={field.name}>
       <label className="text-xs font-medium text-slate-700 block">
         {getFieldLabel(field)}
-        {field.required ? <span className="text-rose-600 font-medium ml-0.5">*</span> : ""}
+        {isRequired ? <span className="text-rose-600 font-medium ml-0.5">*</span> : ""}
       </label>
       {renderField(
         field,
@@ -3065,6 +3306,8 @@ const MemoizedFormField = memo(function MemoizedFormField({
     prev.enumSearchValue === next.enumSearchValue &&
     prev.resetKey === next.resetKey &&
     prev.attachedFiles === next.attachedFiles &&
+    isFieldRequired(prev.field, prev.currentValues, prev.activeForm?.tableName) ===
+      isFieldRequired(next.field, next.currentValues, next.activeForm?.tableName) &&
     prev.currentValues[prev.field.showIf?.column || ""] === next.currentValues[next.field.showIf?.column || ""] &&
     prev.currentValues[prev.field.filterBy?.column || ""] === next.currentValues[next.field.filterBy?.column || ""]
   );

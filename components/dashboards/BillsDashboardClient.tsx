@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowDownWideNarrow, ArrowUpWideNarrow, Calendar, ChevronDown, ChevronLeft, ChevronRight, Eye, Filter, Plus, RotateCcw, Search, X } from "lucide-react";
 import dynamic from "next/dynamic";
@@ -123,11 +123,15 @@ export function BillsDashboardClient({
     search: initialSearch,
   }));
 
-  // Auto-sync initial requester when peopleRows finishes loading if not yet set (only for non-admins)
+  const hasInitializedRequesterRef = useRef(Boolean(initialRequester));
+
+  // Auto-sync initial requester only ONCE on initial load if peopleRows was not yet ready (never overwrite user manual selection)
   useEffect(() => {
-    if (!isAdmin && !filters.requester) {
+    if (hasInitializedRequesterRef.current) return;
+    if (!isAdmin && peopleRows.length > 0) {
       const resolvedReq = resolveMatchingRequesterKey(peopleRows, authEmpId, authName);
       if (resolvedReq) {
+        hasInitializedRequesterRef.current = true;
         setFilters(prev => ({ ...prev, requester: resolvedReq }));
       }
     }
@@ -198,7 +202,7 @@ export function BillsDashboardClient({
     tables: ["bills"],
     onSync: refreshBillsData,
     debounceMs: 500,
-    pollingIntervalMs: 8_000,
+    pollingIntervalMs: 60_000,
   });
 
   // Bill Detail Drawer State

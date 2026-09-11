@@ -1,4 +1,4 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import { ArrowLeft, Building2, Store, User, Briefcase, Truck, Users, Building, FileText, ClipboardList } from "lucide-react";
 import { notFound } from "next/navigation";
 import { BillFollowDashboard, MainDashboard, WithdrawDashboard, WorkStatusDashboard } from "@/components/dashboards/DashboardsServer";
@@ -8,6 +8,7 @@ import { FormModal } from "@/components/forms/FormModal";
 import { ManageTableClient } from "@/components/views/ManageTableClient";
 import { TABLE_KEYS, TABLES } from "@/lib/config";
 import { hydrateContractRows } from "@/lib/formulas";
+import { hydrateContractorsWithYearlySpend } from "@/lib/contractors/contractor-limits";
 import { money, toNumber } from "@/lib/utils/numbers";
 import { getHeaders, getRows } from "@/lib/db";
 import { getViewById, getViewColumns } from "@/lib/views";
@@ -383,7 +384,7 @@ async function renderView(
     const sort = parseSort(firstSearchParam(query?.sort));
     const [rawRows, projectDataRows, companyRows, bankRows, projectRows, contractorRows, customerRows] = await Promise.all([
       safeRows(view.table),
-      (view.id === "project-all" || view.id === "contract-open") ? safeRows(TABLES.DATA) : Promise.resolve([]),
+      (view.id === "project-all" || view.id === "contract-open" || view.id === "contractors") ? safeRows(TABLES.DATA) : Promise.resolve([]),
       view.id === "project-all" ? safeRows(TABLES.COMPANY) : Promise.resolve([]),
       (view.id === "stores" || view.id === "contractors" || view.id === "people" || view.id === "bill-entry") ? safeRows(TABLES.BANK) : Promise.resolve([]),
       view.id === "contract-open" ? safeRows(TABLES.PROJECT) : Promise.resolve([]),
@@ -398,7 +399,9 @@ async function renderView(
       ? await hydrateContractRows(rawRows, { projects: projectRows, contractors: contractorRows, dataRows: projectDataRows })
       : view.id === "project-all"
         ? hydrateProjectRowsForList(rawRows, projectDataRows)
-        : rawRows;
+        : view.id === "contractors"
+          ? hydrateContractorsWithYearlySpend(rawRows, projectDataRows)
+          : rawRows;
     const rows = view.id === "contract-open" ? hydratedRows : filterRows(hydratedRows, search);
     const fallback = rows[0] ? Object.keys(rows[0]).filter(column => !column.startsWith("_")) : [];
     const columns = getViewColumns(view.name, fallback);

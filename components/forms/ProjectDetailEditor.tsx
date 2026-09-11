@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -13,11 +13,18 @@ type ProjectDetailEditorProps = {
   project: SheetRow;
   customerDisplay?: string;
   companyDisplay?: string;
+  initialEditing?: boolean;
 };
 
-export function ProjectDetailEditor({ fields, project, customerDisplay, companyDisplay }: ProjectDetailEditorProps) {
+export function ProjectDetailEditor({
+  fields,
+  project,
+  customerDisplay,
+  companyDisplay,
+  initialEditing = false
+}: ProjectDetailEditorProps) {
   const router = useRouter();
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(initialEditing);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [draft, setDraft] = useState<Record<string, string>>(() => draftFromProject(project, fields));
@@ -190,6 +197,21 @@ export function ProjectDetailEditor({ fields, project, customerDisplay, companyD
           </div>
         ))}
       </dl>
+      <div className="mt-6 border-t border-slate-100 pt-5">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs font-semibold text-slate-700">การจัดสรรงบประมาณโครงการ</span>
+          <button
+            type="button"
+            disabled={!canSave}
+            onClick={beginEdit}
+            className="text-xs text-indigo-700 hover:text-indigo-800 font-medium inline-flex items-center gap-1 cursor-pointer"
+          >
+            <Pencil size={12} />
+            <span>แก้ไขการจัดสรรงบ</span>
+          </button>
+        </div>
+        <ProjectBudgetAllocator values={project} onChange={() => beginEdit()} defaultExpanded={true} />
+      </div>
     </section>
   );
 

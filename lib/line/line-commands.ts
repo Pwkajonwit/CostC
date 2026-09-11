@@ -18,7 +18,8 @@ import {
   getPeopleMap,
   getBankInfoMap,
   getContractWorkMap,
-  getProjectBudgetMap
+  getProjectBudgetMap,
+  createDailyTransferSummaryFlex
 } from "@/lib/line/line";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 import { insertRowToSupabase } from "@/lib/supabase/supabase-db";
@@ -58,7 +59,7 @@ export async function handleLineCommand(
 
     // 2. Menu & Help Commands
     if (lowerText === "ช่วยด้วย" || lowerText === "ช่วยเหลือ" || lowerText === "ช่วย" || lowerText === "เมนู" || lowerText === "คำสั่ง" || lowerText === "help") {
-      const menuText = `🤖 ระบบ LINE Bot ประจำ CostCode Supabase\n\n📌 คำสั่งที่รองรับทั้งหมด:\n\n1. 📊 หมวดสรุปการเงิน/เบิกเงิน:\n   - พิมพ์ "สรุป" / "สรุปบิล" / "สรุปวันนี้"\n   - พิมพ์ "รออนุมัติ" (ดูบิลที่รอพิจารณาอนุมัติ)\n   - พิมพ์ "รอปิดงาน" / "รอจ่าย" / "อนุมัติแล้ว" (ดูบิลที่อนุมัติแล้ว รอการเงินปิดงาน)\n   - พิมพ์ "บิลหลัก: [ชื่อ]" หรือ "บิลย่อย: [ชื่อ]"\n   - พิมพ์ "ส่งไปเพื่ออนุมัติ" (ส่งแจ้งเตือนหาผู้อนุมัติ)\n   - พิมพ์ "อนุมัติบิลหลักของ:" / "อนุมัติเงินสดบิลย่อยของ:"\n   - พิมพ์ "ปิดงานบิลหลักลำดับที่:" / "ปิดงานเงินสดบิลย่อยลำดับที่:"\n\n2. 🎯 หมวดงาน & PW มอบหมาย:\n   - พิมพ์ "งาน2: [ชื่อพนักงาน]" (ดูตารางงานแผนงาน)\n   - พิมพ์ "งาน: [รายละเอียดงาน]" (สร้างงานใหม่)\n   - พิมพ์ "งานด่วน:" / "ปิดงาน:" / "ยืนยันปิดงาน:" / "s:" (ค้นหา)\n   - พิมพ์ "มอบหมาย:" / "กิจกรรม:" / "PW:" / "PW1:work" / "PWALL:work"\n\n3. ⚡ หมวดคำสั่งลัด (Shortcuts):\n   - พิมพ์ "copy" / "add1" / "add3" / "addp" / "doo"\n\n4. ⚙️ หมวดตรวจสอบระบบ:\n   - พิมพ์ "testbot" / "check" / "getid"`;
+      const menuText = `🤖 ระบบ LINE Bot ประจำ CostCode Supabase\n\n📌 คำสั่งที่รองรับทั้งหมด:\n\n1. 📊 หมวดสรุปการเงิน/เบิกเงิน:\n   - พิมพ์ "ยอดโอนวันนี้" / "โอนวันนี้" (สรุปยอดโอนที่ปิดงานแล้ว รวมบัญชีเดียวกัน)\n   - พิมพ์ "สรุป" / "สรุปบิล" / "สรุปวันนี้"\n   - พิมพ์ "รออนุมัติ" (ดูบิลที่รอพิจารณาอนุมัติ)\n   - พิมพ์ "รอปิดงาน" / "รอจ่าย" / "อนุมัติแล้ว" (ดูบิลที่อนุมัติแล้ว รอการเงินปิดงาน)\n   - พิมพ์ "บิลหลัก: [ชื่อ]" หรือ "บิลย่อย: [ชื่อ]"\n   - พิมพ์ "ส่งไปเพื่ออนุมัติ" (ส่งแจ้งเตือนหาผู้อนุมัติ)\n   - พิมพ์ "อนุมัติบิลหลักของ:" / "อนุมัติเงินสดบิลย่อยของ:"\n   - พิมพ์ "ปิดงานบิลหลักลำดับที่:" / "ปิดงานเงินสดบิลย่อยลำดับที่:"\n\n2. 🎯 หมวดงาน & PW มอบหมาย:\n   - พิมพ์ "งาน2: [ชื่อพนักงาน]" (ดูตารางงานแผนงาน)\n   - พิมพ์ "งาน: [รายละเอียดงาน]" (สร้างงานใหม่)\n   - พิมพ์ "งานด่วน:" / "ปิดงาน:" / "ยืนยันปิดงาน:" / "s:" (ค้นหา)\n   - พิมพ์ "มอบหมาย:" / "กิจกรรม:" / "PW:" / "PW1:work" / "PWALL:work"\n\n3. ⚡ หมวดคำสั่งลัด (Shortcuts):\n   - พิมพ์ "copy" / "add1" / "add3" / "addp" / "doo"\n\n4. ⚙️ หมวดตรวจสอบระบบ:\n   - พิมพ์ "testbot" / "check" / "getid"`;
       await replyTextMessage(replyToken, menuText);
       return true;
     }
@@ -922,6 +923,151 @@ export async function handleLineCommand(
         replyToken,
         `✅ ${isApprove ? "อนุมัติ" : "ปิดงาน"}บิล${isSubBatch ? "ย่อย" : isMainBatch ? "หลัก" : ""}ของ "${rawTarget}" เรียบร้อยแล้ว!\n\n📊 จำนวน: ${targetBills.length} รายการ\n💰 ยอดเงินรวม: ฿${formattedTotal}\n👮‍♂️ ผู้ดำเนินการ: ${operatorName}${isApprove && targetFinanceList.length > 0 ? `\n🧮 ส่ง Flex ต่อไปยังฝ่ายการเงิน (${financeNames}) เพื่อปิดงานแล้ว` : ""}`
       );
+      return true;
+    }
+
+    // 5.5 Daily Transfer Summary Commands (Flex ยอดโอนวันนี้ - รวมบิลตามผู้รับ/บัญชีเดียวกัน)
+    if (
+      lowerText === "ยอดโอนวันนี้" ||
+      lowerText === "โอนวันนี้" ||
+      lowerText === "สรุปยอดโอน" ||
+      lowerText === "สรุปโอน" ||
+      lowerText === "ยอดโอน" ||
+      lowerText === "โอนเงินวันนี้" ||
+      lowerText === "บิลปิดงานวันนี้" ||
+      lowerText === "ปิดงานวันนี้" ||
+      lowerText === "บิลปิดงาน" ||
+      lowerText === "ยอดโอนทั้งหมด" ||
+      lowerText === "โอนทั้งหมด" ||
+      rawText.startsWith("ยอดโอน:") ||
+      rawText.startsWith("โอน:")
+    ) {
+      const isAll = lowerText === "ยอดโอนทั้งหมด" || lowerText === "โอนทั้งหมด";
+      const customFilter = rawText.replace(/^ยอดโอน:|^โอน:/, "").trim();
+
+      const { getRows } = await import("@/lib/db");
+      const { normalizeBillStatus } = await import("@/lib/bills/bill-status");
+      const [rawBills, peopleRows, bankInfoMap] = await Promise.all([
+        getRows("Data", 0, 5000),
+        getRows("master_members", 60_000, 500).catch(() => []),
+        getBankInfoMap()
+      ]);
+
+      const peopleMap = new Map<string, string>();
+      for (const p of peopleRows) {
+        const empId = String(p["รหัสพนักงาน"] || p.id || "").trim();
+        const empName = String(p["ชื่อเล่น"] || p["ชื่อ-นามสกุล"] || p.name || "").trim();
+        if (empId && empName) {
+          peopleMap.set(empId, empName);
+        }
+      }
+
+      // Filter only closed/paid bills
+      const closedBills = rawBills.filter(b => {
+        const st = normalizeBillStatus(b["สถานะ"] || b.status);
+        const rawSt = String(b["สถานะ"] || b.status || "").trim().toLowerCase();
+        return st === "เบิกแล้ว" || rawSt.includes("ปิดงาน") || rawSt.includes("จ่ายแล้ว") || rawSt === "paid" || rawSt === "withdrawn";
+      });
+
+      // Today in Bangkok timezone (YYYY-MM-DD and DD/MM/YYYY)
+      const nowBangkok = new Date();
+      let todayYmd = "";
+      let todayDmy = "";
+      let todayDisplay = "";
+      try {
+        todayYmd = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Asia/Bangkok",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit"
+        }).format(nowBangkok);
+
+        todayDmy = nowBangkok.toLocaleDateString("th-TH", { timeZone: "Asia/Bangkok" });
+        todayDisplay = nowBangkok.toLocaleDateString("th-TH", {
+          timeZone: "Asia/Bangkok",
+          day: "numeric",
+          month: "short",
+          year: "numeric"
+        });
+      } catch {
+        todayYmd = nowBangkok.toISOString().split("T")[0];
+        todayDisplay = nowBangkok.toLocaleDateString("th-TH");
+      }
+
+      let targetBills = closedBills;
+
+      if (customFilter && customFilter !== "ทั้งหมด" && customFilter !== "วันนี้") {
+        const q = customFilter.toLowerCase();
+        targetBills = targetBills.filter(b => {
+          const pDate = String(b.paid_date || b["วันจ่าย"] || b.paid_at || b.updated_at || b["ว/ด/ป"] || "").toLowerCase();
+          const req = String(b["ผู้เบิก"] || b.requester || "").toLowerCase();
+          const reqName = (peopleMap.get(String(b["ผู้เบิก"] || b.requester || "").trim()) || "").toLowerCase();
+          const vendor = String(b["ร้าน/บุคคล"] || b["ผู้รับเหมา"] || b["ร้านค้า"] || b.vendor_or_person || "").toLowerCase();
+          const pName = String(b["ชื่อ Project"] || b.project_name || "").toLowerCase();
+          const bId = String(b.id || b["ลำดับ"] || b._sheetRow || "");
+
+          return pDate.includes(q) || req.includes(q) || reqName.includes(q) || vendor.includes(q) || pName.includes(q) || bId === q;
+        });
+      } else if (!isAll) {
+        // Today filter
+        const todayBills = targetBills.filter(b => {
+          const pDateRaw = String(b.paid_date || b["วันจ่าย"] || b.paid_at || b.updated_at || "").trim();
+          if (!pDateRaw) return false;
+          return pDateRaw.startsWith(todayYmd) || pDateRaw.includes(todayYmd) || (todayDmy && pDateRaw.includes(todayDmy));
+        });
+
+        if (todayBills.length > 0) {
+          targetBills = todayBills;
+        } else {
+          // If no bills were closed today, inform user and show recent closed bills
+          if (closedBills.length === 0) {
+            await replyTextMessage(replyToken, `ℹ️ วันนี้ (${todayDisplay}) ยังไม่มีรายการบิลที่ปิดงาน/โอนเงินเรียบร้อยในระบบครับ`);
+            return true;
+          }
+          if (lowerText === "ยอดโอนวันนี้" || lowerText === "โอนวันนี้") {
+            const flexRecent = createDailyTransferSummaryFlex(
+              closedBills.slice(0, 30),
+              { title: "💸 ยอดโอนล่าสุด (ปิดงานแล้ว)", dateStr: `ล่าสุด (${closedBills.length} บิล)` },
+              peopleMap,
+              bankInfoMap
+            );
+            await replyFlexMessage(
+              replyToken,
+              `💸 ยอดโอนล่าสุด (${closedBills.length} บิลที่ปิดงานแล้ว)`,
+              flexRecent
+            );
+            return true;
+          }
+          targetBills = closedBills.slice(0, 40);
+        }
+      }
+
+      if (targetBills.length === 0) {
+        await replyTextMessage(
+          replyToken,
+          `ℹ️ ไม่พบรายการบิลที่ปิดงาน/โอนเงิน${customFilter ? ` สำหรับ "${customFilter}"` : ` ในวันนี้ (${todayDisplay})`} ครับ`
+        );
+        return true;
+      }
+
+      const transferFlex = createDailyTransferSummaryFlex(
+        targetBills,
+        {
+          title: isAll ? "💸 ยอดโอนทั้งหมด (ปิดงานแล้ว)" : "💸 ยอดโอนวันนี้ (ปิดงานแล้ว)",
+          dateStr: isAll ? `ทั้งหมด (${targetBills.length} บิล)` : todayDisplay
+        },
+        peopleMap,
+        bankInfoMap
+      );
+
+      const altText = `💸 ยอดโอนประจำวัน (${targetBills.length} บิลปิดงานแล้ว)`;
+      const sent = await replyFlexMessage(replyToken, altText, transferFlex);
+      if (!sent && replyToken) {
+        let textFallback = `💸 สรุปยอดโอนประจำวัน (ปิดงานแล้วทั้งหมด ${targetBills.length} รายการ):\n\n`;
+        const total = targetBills.reduce((s, b) => s + Number(b["ยอดโอน"] || b["ยอดเงิน"] || b.amount || 0), 0);
+        textFallback += `💰 ยอดโอนรวมทั้งหมด: ฿${total.toLocaleString("th-TH")}\n`;
+        await replyTextMessage(replyToken, textFallback.trim());
+      }
       return true;
     }
 

@@ -1,4 +1,4 @@
-﻿import { toNumber } from "@/lib/utils/numbers";
+import { toNumber } from "@/lib/utils/numbers";
 import { isCommittedBill } from "@/lib/bills/bill-status";
 import type { RowValue, SheetRow } from "@/lib/types";
 
@@ -333,16 +333,22 @@ export function hydrateProjectSummary(project: SheetRow, projectDataRows: SheetR
   const workTotal = rawWorkTotal > 0 ? rawWorkTotal : (totalVat > 0 ? totalVat / 1.07 : 0);
   const totalAll = hasValue(project["รวม ALL"]) && toNumber(project["รวม ALL"]) > 0 ? toNumber(project["รวม ALL"]) : projectTotal;
 
-  // Check Category Budget Matrix sum for consistency with project-all
-  const categorySum = Object.keys(project)
-    .filter(k => k.startsWith("งบไม่เกิน") && k !== "งบไม่เกิน")
-    .reduce((sum, k) => sum + toNumber(project[k]), 0);
-
+  // Determine project budget: prioritize explicit project budget cap ("งบไม่เกิน")
+  // If not set, derive from allocated categories without double counting (material items + labor + staff)
   let budget = rawBudget;
-  if (categorySum > 0) {
-    budget = categorySum;
-  } else if (rawBudget <= 0) {
-    budget = workTotal > 0 ? workTotal : (totalVat > 0 ? Math.round(totalVat / 1.07) : totalAll);
+  if (budget <= 0) {
+    const materialSubTotal = Object.keys(project)
+      .filter(k => k.startsWith("งบไม่เกิน") && k !== "งบไม่เกิน" && k !== "งบไม่เกินค่าของ" && k !== "งบไม่เกินค่าแรง" && k !== "งบไม่เกินพนักงาน")
+      .reduce((sum, k) => sum + toNumber(project[k]), 0);
+    const materialBudget = materialSubTotal > 0 ? materialSubTotal : toNumber(project["งบไม่เกินค่าของ"]);
+    const laborBudget = toNumber(project["งบไม่เกินค่าแรง"]) + toNumber(project["งบไม่เกินพนักงาน"]);
+    const allocatedSum = materialBudget + laborBudget;
+
+    if (allocatedSum > 0) {
+      budget = allocatedSum;
+    } else {
+      budget = workTotal > 0 ? workTotal : (totalVat > 0 ? Math.round(totalVat / 1.07) : totalAll);
+    }
   }
 
   const effectiveRevenue = workTotal > 0 ? workTotal : (totalVat > 0 ? Math.round(totalVat / 1.07) : budget);
