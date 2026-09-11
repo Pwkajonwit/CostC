@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import {
   sendFlexMessageDetailed,
   getLineUserIdByRequester,
@@ -11,7 +11,8 @@ import {
   createWithdrawRequesterFlex,
   createWithdrawOwnerFlex,
   createWithdrawApproverFlex,
-  createWithdrawCompletedRequesterFlex
+  createWithdrawCompletedRequesterFlex,
+  createDailyTransferSummaryFlex
 } from "@/lib/line/line";
 
 export async function POST(req: NextRequest) {
@@ -36,6 +37,30 @@ export async function POST(req: NextRequest) {
     const targetRole = body.targetRole || "requester";
     const totalAmount = bills.reduce((sum: number, b: any) => sum + Number(b["ยอดเงิน"] || b.amount || 0), 0);
     const amountStr = totalAmount.toLocaleString("th-TH");
+
+    if (targetRole === "transfer_summary") {
+      const { closerIds, financeIds, ownerId } = await getLineConfigIds();
+      const rawFinanceList = Array.from(new Set([...(closerIds || []), ...(financeIds || []), ownerId].filter(Boolean)));
+      const fallbackFinanceGroup = await getLineTargetGroup("finance");
+      const validFinanceGroup = fallbackFinanceGroup && fallbackFinanceGroup.startsWith("C") ? fallbackFinanceGroup : "";
+
+      const targetList = rawFinanceList.length > 0
+        ? rawFinanceList
+        : (validFinanceGroup ? [validFinanceGroup] : []);
+
+      if (targetList.length === 0) {
+        return NextResponse.json({ error: "ไม่พบ LINE User ID ของฝ่ายการเงิน หรือกลุ่มการเงินในระบบ" }, { status: 400 });
+      }
+
+      const flex = createDailyTransferSummaryFlex(bills, { title: body.title, dateStr: body.dateStr }, peopleMap, bankInfoMap);
+      const altText = `💸 ยอดโอนประจำวัน (${bills.length} บิลปิดงานแล้ว)`;
+
+      const results = await Promise.all(
+        targetList.map(targetId => sendFlexMessageDetailed(targetId, altText, flex))
+      );
+
+      return NextResponse.json({ success: true, count: targetList.length, results });
+    }
 
     if (targetRole === "approver" || targetRole === "finance" || targetRole === "closer") {
       const { closerIds, financeIds } = await getLineConfigIds();

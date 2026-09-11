@@ -552,6 +552,17 @@ function sanitizeBySchema(row: SheetRow, tableName: string) {
 function validateRequiredBySchema(row: SheetRow, tableName: string) {
   const missing = getFormSchema(tableName).find(field => {
     if (!field.required || field.type === "Hidden" || field.readonly) return false;
+    if (field.name === "ผู้รับเหมา") {
+      const category = String(row["ประเภท"] || row.category || "").trim();
+      if (
+        category.startsWith("3.") ||
+        category.includes("พนักงาน") ||
+        category.startsWith("8.") ||
+        category.includes("อื่นๆ")
+      ) {
+        return false;
+      }
+    }
     if (!isFieldVisible(field, row)) return false;
     return !hasRowValue(row[field.name]);
   });

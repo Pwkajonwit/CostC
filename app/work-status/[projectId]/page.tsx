@@ -1,9 +1,10 @@
-﻿import { ProjectDetailClient } from "@/components/dashboards/ProjectDetailClient";
+import { ProjectDetailClient } from "@/components/dashboards/ProjectDetailClient";
 import { isCommittedBill, isPaidBill } from "@/lib/bills/bill-status";
 import { TABLES } from "@/lib/config";
 import { toNumber } from "@/lib/utils/numbers";
 import { getRows } from "@/lib/db";
 import { getCategoryExpense, hydrateProjectSummary, rowsForProject, valueOf } from "@/lib/project-summary";
+import { calculateProjectBudgetControl } from "@/lib/project-budget-control";
 import type { SheetRow } from "@/lib/types";
 import { notFound } from "next/navigation";
 
@@ -76,6 +77,7 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
     "ผู้เบิก": resolveRequesterName(row["ผู้เบิก"], peopleRows)
   }));
   const { project: hydratedProject, totals } = hydrateProjectSummary(project, relatedRows);
+  const budgetControl = calculateProjectBudgetControl(hydratedProject, relatedRows);
   const paidRows = summaryRows.filter(isPaidBill);
   const pendingRows = summaryRows.filter((r) => !isPaidBill(r));
   const expenseBreakdown = buildExpenseBreakdown(paidRows);
@@ -111,6 +113,7 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
       customerDisplay={customerDisplay}
       companyDisplay={companyDisplay}
       totals={totals}
+      budgetControl={budgetControl}
       summaryRows={summaryRows}
       expenseBreakdown={expenseBreakdown}
       pendingBreakdown={pendingBreakdown}
