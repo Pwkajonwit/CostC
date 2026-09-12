@@ -1,9 +1,11 @@
 import { notFound } from "next/navigation";
+import { cookies } from "next/headers";
 import { BillDetailClient } from "@/components/dashboards/BillDetailClient";
 import { TABLES } from "@/lib/config";
 import { hydrateBillRows, hydrateContractRows, hydrateProjectRows } from "@/lib/formulas";
 import { getBillDocumentData } from "@/lib/bills/bill-document";
 import { getRows } from "@/lib/db";
+import { extractMemberPermissions, findMemberInPeopleRows, type UserPermissions } from "@/lib/user-permissions";
 import type { SheetRow } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -206,6 +208,30 @@ export default async function BillDetailPage({ params }: BillDetailPageProps) {
       : rawCreatedBy
     : "-";
 
+  // Resolve current user permissions for action authorization
+  const cookieStore = await cookies();
+  const authEmpId = cookieStore.get("auth_employee_id")?.value || "";
+  const authRole = cookieStore.get("auth_role")?.value || "";
+
+  let userPermissions: UserPermissions | null = null;
+  if (authEmpId) {
+    const matched = findMemberInPeopleRows(peopleRows, authEmpId);
+    if (matched) {
+      userPermissions = extractMemberPermissions(matched);
+    } else {
+      const isOwner = authRole === "Owner" || authRole === "Admin";
+      userPermissions = {
+        id: authEmpId,
+        displayName: cookieStore.get("auth_name")?.value || authEmpId,
+        role: authRole || "User",
+        isOwner,
+        canApprove: isOwner || authRole === "Finance",
+        canCloseBill: isOwner || authRole === "Approver",
+        canDelete: isOwner || cookieStore.get("auth_can_delete")?.value === "true",
+      };
+    }
+  }
+
   return (
     <BillDetailClient
       bill={bill}
@@ -222,6 +248,7 @@ export default async function BillDetailPage({ params }: BillDetailPageProps) {
       vendorSubText={vendorSubText}
       vendorLink={vendorLink}
       documentData={documentData}
+      userPermissions={userPermissions}
     />
   );
 }

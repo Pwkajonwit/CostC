@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { clearCache, revalidateAllBillViews } from "@/lib/utils/cache";
-import { canEditOrDeleteBill, validateBillStatusTransition } from "@/lib/bills/bill-status";
+import { canEditOrDeleteBill, normalizeBillStatus, validateBillStatusTransition } from "@/lib/bills/bill-status";
 import { validateBillRelations } from "@/lib/bills/bill-validation";
 import { PRIMARY_VIEWS, TABLE_KEYS, TABLES, VIEW_COLUMNS } from "@/lib/config";
 import { uploadTableImage } from "@/lib/utils/drive";
 import { applyBillFormulas, applyContractFormulas, applyProjectFormulas } from "@/lib/formulas";
 import { getFormSchema } from "@/lib/schemas";
-import { isVatActive, parseDeductPercent, parseCreditDays } from "@/lib/project-summary";
+import { isVatActive, isDeductActive, parseDeductPercent, parseCreditDays } from "@/lib/project-summary";
 import { appendAuditLog, appendRow, bulkAppendRows, deleteRows, getRows, getSystemOptions, invalidateTableCache, updateRow } from "@/lib/db";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 import { getNextBillSequence, syncContractWorkPaidAmount } from "@/lib/supabase/supabase-db";
-import { extractMemberPermissions } from "@/lib/user-permissions";
+import { extractMemberPermissions, type UserPermissions } from "@/lib/user-permissions";
 import type { SheetRow } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -25,49 +25,66 @@ const NO_CACHE_HEADERS = {
   "Vercel-CDN-Cache-Control": "no-store"
 };
 
-async function verifyDeletePermission(request: NextRequest): Promise<boolean> {
+async function getUserPermissionsFromRequest(request: NextRequest): Promise<UserPermissions | null> {
   const empId = request.cookies.get("auth_employee_id")?.value;
-  if (!empId) return false;
+  const cookieRole = request.cookies.get("auth_role")?.value || "";
+  const cookieCanDelete = request.cookies.get("auth_can_delete")?.value === "true";
+  const cookieName = request.cookies.get("auth_name")?.value || "";
 
-  // 1. Direct server-side verification in master_members table (Source of Truth)
-  try {
-    const { data: member } = await supabaseAdmin
-      .from("master_members")
-      .select("*")
-      .eq("id", empId)
-      .maybeSingle();
+  if (empId) {
+    // 1. Direct server-side verification in master_members table (Source of Truth)
+    try {
+      const { data: member } = await supabaseAdmin
+        .from("master_members")
+        .select("*")
+        .eq("id", empId)
+        .maybeSingle();
 
-    if (member) {
-      const perms = extractMemberPermissions(member);
-      if (perms.canDelete || perms.isOwner || perms.role === "Owner" || perms.role === "Admin") {
-        return true;
+      if (member) {
+        return extractMemberPermissions(member);
       }
-      return false;
+    } catch (e) {
+      console.warn("getUserPermissionsFromRequest master_members lookup error:", e);
     }
-  } catch (e) {
-    console.warn("verifyDeletePermission master_members lookup error:", e);
+
+    // 2. Fallback: Check users_list cache in database by employeeId
+    try {
+      const { data } = await supabaseAdmin
+        .from("system_options")
+        .select("data")
+        .eq("id", "users_list")
+        .maybeSingle();
+
+      if (data?.data && Array.isArray(data.data)) {
+        const u = data.data.find((x: any) => x.id === empId || x.username === empId);
+        if (u) {
+          return extractMemberPermissions(u);
+        }
+      }
+    } catch (e) {}
   }
 
-  // 3. Fallback: Check users_list cache in database by employeeId
-  try {
-    const { data } = await supabaseAdmin
-      .from("system_options")
-      .select("data")
-      .eq("id", "users_list")
-      .maybeSingle();
+  // 3. Fallback from cookies if present
+  if (cookieRole || empId) {
+    const isOwner = cookieRole === "Owner" || cookieRole === "Admin";
+    return {
+      id: empId || "",
+      displayName: cookieName || empId || "",
+      role: cookieRole || "User",
+      isOwner,
+      canApprove: isOwner || cookieRole === "Finance",
+      canCloseBill: isOwner || cookieRole === "Approver",
+      canDelete: isOwner || cookieCanDelete,
+    };
+  }
 
-    if (data?.data && Array.isArray(data.data)) {
-      const u = data.data.find((x: any) => x.id === empId || x.username === empId);
-      if (u) {
-        if (u.isOwner || u.role === "Owner" || u.role === "Admin") {
-          return u.canDelete !== false;
-        }
-        return Boolean(u.canDelete);
-      }
-    }
-  } catch (e) {}
+  return null;
+}
 
-  return false;
+async function verifyDeletePermission(request: NextRequest): Promise<boolean> {
+  const perms = await getUserPermissionsFromRequest(request);
+  if (!perms) return false;
+  return Boolean(perms.isOwner || perms.canDelete || perms.role === "Owner" || perms.role === "Admin");
 }
 
 export async function GET(request: NextRequest) {
@@ -217,6 +234,28 @@ export async function PATCH(request: NextRequest) {
     // High performance bulk batch patching
     if (Array.isArray(body.patches) && body.patches.length > 0) {
       const patches = body.patches as Array<{ id?: string | number; sheetRow?: string | number; values: SheetRow }>;
+
+      // Check permissions if any patch modifies status on bills
+      if (tableName === TABLES.DATA || tableName === "Data" || tableName === "bills") {
+        const hasStatusChange = patches.some(p => p.values && p.values["สถานะ"] !== undefined);
+        if (hasStatusChange) {
+          const perms = await getUserPermissionsFromRequest(request);
+          const isOwner = Boolean(perms?.isOwner || perms?.role === "Owner" || perms?.role === "Admin");
+          const canApprove = isOwner || Boolean(perms?.canCloseBill) || perms?.role === "Approver" || perms?.role === "Admin_Approver";
+          const canMarkPaid = isOwner || Boolean(perms?.canApprove) || Boolean(perms?.canCloseBill) || perms?.role === "Finance" || perms?.role === "Approver" || perms?.role === "Admin_Closer";
+
+          for (const p of patches) {
+            if (!p.values || p.values["สถานะ"] === undefined) continue;
+            const targetSt = normalizeBillStatus(p.values["สถานะ"]);
+            if (targetSt === "อนุมัติ" && !canApprove) {
+              return NextResponse.json({ error: "⛔ คุณไม่มีสิทธิ์ในการอนุมัติบิล (เฉพาะผู้อนุมัติหรือเจ้าของระบบเท่านั้น)" }, { status: 403 });
+            }
+            if (targetSt === "เบิกแล้ว" && !canMarkPaid) {
+              return NextResponse.json({ error: "⛔ คุณไม่มีสิทธิ์ในการปิดบิล/บันทึกเบิกแล้ว (เฉพาะฝ่ายการเงินหรือเจ้าของระบบเท่านั้น)" }, { status: 403 });
+            }
+          }
+        }
+      }
       const existingRows = await getRows(tableName);
       const keyCol = TABLE_KEYS[tableName] || "id";
       const results = await Promise.all(
@@ -338,8 +377,44 @@ export async function PATCH(request: NextRequest) {
     );
 
     if (tableName === TABLES.DATA) {
+      if (patch["สถานะ"] !== undefined) {
+        const nextStatus = normalizeBillStatus(patch["สถานะ"]);
+        const prevStatus = normalizeBillStatus(existing["สถานะ"]);
+        if (nextStatus !== prevStatus) {
+          const perms = await getUserPermissionsFromRequest(request);
+          const isOwner = Boolean(perms?.isOwner || perms?.role === "Owner" || perms?.role === "Admin");
+          const canApprove = isOwner || Boolean(perms?.canCloseBill) || perms?.role === "Approver" || perms?.role === "Admin_Approver";
+          const canMarkPaid = isOwner || Boolean(perms?.canApprove) || Boolean(perms?.canCloseBill) || perms?.role === "Finance" || perms?.role === "Approver" || perms?.role === "Admin_Closer";
+
+          if (nextStatus === "อนุมัติ" && !canApprove) {
+            return NextResponse.json({ error: "⛔ คุณไม่มีสิทธิ์ในการอนุมัติบิล (เฉพาะผู้อนุมัติหรือเจ้าของระบบเท่านั้น)" }, { status: 403 });
+          }
+          if (nextStatus === "เบิกแล้ว" && !canMarkPaid) {
+            return NextResponse.json({ error: "⛔ คุณไม่มีสิทธิ์ในการปิดบิล/บันทึกเบิกแล้ว (เฉพาะฝ่ายการเงินหรือเจ้าของระบบเท่านั้น)" }, { status: 403 });
+          }
+        }
+      }
+
       ensureBillVendorType(values);
       validateBillPatch(existing, patch, values);
+      if (patch["หัก"] !== undefined && !isDeductActive(patch["หัก"])) {
+        values["หัก"] = "";
+        values["จำนวนหัก"] = "";
+        values["3เปอร์"] = "";
+        values["3เปอร์เซ็น"] = "";
+        values["วันออก 3%"] = "";
+        values.withholding_tax = 0;
+        values.deduct_amount = 0;
+      }
+      if (patch["vat"] !== undefined && !isVatActive(patch["vat"])) {
+        values["vat"] = "";
+        values.vat_amount = 0;
+        values["วันได้บิล"] = "";
+      }
+      if (patch["เครดิต"] !== undefined && parseCreditDays(patch["เครดิต"]) <= 0) {
+        values["เครดิต"] = "";
+        values.credit_days = 0;
+      }
     }
 
     if (!isFollowUpOrStatusPatch) {
@@ -382,13 +457,22 @@ export async function PATCH(request: NextRequest) {
     revalidateAllBillViews();
     try {
       revalidatePath("/views", "layout");
-      revalidatePath("/views/people");
-      revalidatePath("/views/customers");
-      revalidatePath("/views/stores");
-      revalidatePath("/views/contractors");
-      revalidatePath("/views/cars");
-      revalidatePath("/views/companies");
-      revalidatePath("/contract-open");
+      revalidatePath("/views/people", "page");
+      revalidatePath("/views/customers", "page");
+      revalidatePath("/views/stores", "page");
+      revalidatePath("/views/contractors", "page");
+      revalidatePath("/views/cars", "page");
+      revalidatePath("/views/companies", "page");
+      revalidatePath("/contract-open", "page");
+      revalidatePath("/contract-open", "layout");
+      revalidatePath("/bills", "page");
+      revalidatePath("/bills", "layout");
+      revalidatePath("/bills/follow-up", "page");
+      if (tableName === TABLES.DATA || tableName === "Data" || tableName === "bills") {
+        if (targetRowKey) revalidatePath(`/bills/${targetRowKey}`, "page");
+        if (originalTarget && String(originalTarget) !== String(targetRowKey)) revalidatePath(`/bills/${originalTarget}`, "page");
+        revalidatePath("/bills/[billId]", "page");
+      }
     } catch {}
     return NextResponse.json({ ok: true, row });
   } catch (error) {
@@ -454,7 +538,12 @@ export async function DELETE(request: NextRequest) {
     invalidateTableCache(tableName);
     revalidateAllBillViews();
     try {
-      revalidatePath("/contract-open");
+      revalidatePath("/contract-open", "page");
+      revalidatePath("/contract-open", "layout");
+      revalidatePath("/bills", "page");
+      revalidatePath("/bills", "layout");
+      revalidatePath("/bills/[billId]", "page");
+      revalidatePath("/bills/follow-up", "page");
       revalidatePath("/views", "layout");
     } catch {}
     return NextResponse.json({ ok: true, deleted: rawKeys.length });

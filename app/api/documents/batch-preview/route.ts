@@ -15,7 +15,11 @@ export async function POST(req: Request) {
       );
     }
 
-    const documents = await getMultipleBillsDocumentData(billIds);
+    const clientBills = Array.isArray(body.bills) ? body.bills : undefined;
+    const documents = await getMultipleBillsDocumentData(
+      clientBills && clientBills.length > 0 ? clientBills : billIds,
+      clientBills && clientBills.length > 0 ? { bills: clientBills } : undefined
+    );
     return NextResponse.json({ success: true, documents });
   } catch (error: any) {
     return NextResponse.json(

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { sendFlexMessageDetailed, sendTextMessageDetailed, createEveningSummaryCarouselFlex, getLineTargetIds } from "@/lib/line/line";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
+import { normalizeDateToIso } from "@/lib/utils/dates";
+import { normalizeBillStatus } from "@/lib/bills/bill-status";
 
 export const dynamic = "force-dynamic";
 
@@ -76,11 +78,21 @@ export async function GET(req: NextRequest) {
     const todayBills = bills.filter(rawB => {
       const b = rawB as any;
       const d = (b.data && typeof b.data === "object") ? b.data : {};
-      const dateField = String(b["ว/ด/ป"] || d["ว/ด/ป"] || b.paid_date || d.paid_date || b["วันจ่าย"] || d["วันจ่าย"] || "").trim();
-      if (dateField && (dateField.startsWith(todayYmd) || dateField.includes(todayYmd) || (todayDmy && dateField.includes(todayDmy)))) {
-        return true;
+      const dateCandidates = [
+        b["วันที่"], d["วันที่"],
+        b["ว/ด/ป"], d["ว/ด/ป"],
+        b.bill_date, d.bill_date,
+        b["วันจ่าย"], d["วันจ่าย"],
+        b.paid_date, d.paid_date,
+        b["วันได้บิล"], d["วันได้บิล"],
+        b.bill_received_date, d.bill_received_date
+      ];
+      for (const cand of dateCandidates) {
+        if (cand && normalizeDateToIso(cand) === todayYmd) {
+          return true;
+        }
       }
-      for (const isoField of [b.created_at, b.paid_at, b.approved_at]) {
+      for (const isoField of [b.created_at, b.paid_at, b.approved_at, d.created_at, d.paid_at, d.approved_at]) {
         if (isoField) {
           try {
             const bkk = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(isoField));
@@ -92,9 +104,33 @@ export async function GET(req: NextRequest) {
     });
 
     const totalBills = todayBills.length;
-    const totalAmount = todayBills.reduce((acc, b) => acc + (Number(b.amount) || 0), 0);
-    const pendingCount = bills.filter((b) => b.status === "รอตรวจสอบ" || b.status === "รออนุมัติ" || b.status === "รอตั้งเบิก" || b.status === "ตั้งเบิก").length;
-    const approvedCount = todayBills.filter((b) => b.status === "อนุมัติแล้ว" || b.status === "จ่ายแล้ว" || b.status === "เบิกแล้ว" || b.status === "อนุมัติ").length;
+    let todayPendingCount = 0;
+    let todayApprovedCount = 0;
+    let todayPaidCount = 0;
+    let totalAmount = 0;
+
+    todayBills.forEach(rawB => {
+      const b = rawB as any;
+      const d = (b.data && typeof b.data === "object") ? b.data : {};
+      const rawAmt = b.amount ?? b["ยอดเงิน"] ?? d["ยอดเงิน"] ?? b["ค่าแรง+พนักงาน+อื่นๆ"] ?? d["ค่าแรง+พนักงาน+อื่นๆ"] ?? b["ค่าแรง"] ?? d["ค่าแรง"] ?? b["ค่าจ้าง"] ?? d["ค่าจ้าง"] ?? b["ยอดโอน"] ?? d["ยอดโอน"] ?? 0;
+      const amt = typeof rawAmt === "number" ? (Number.isFinite(rawAmt) ? rawAmt : 0) : (Number(String(rawAmt).replace(/,/g, "").trim()) || 0);
+      totalAmount += amt;
+
+      const normSt = normalizeBillStatus(b.status || b["สถานะ"]);
+      if (normSt === "อนุมัติ") {
+        todayApprovedCount++;
+      } else if (normSt === "เบิกแล้ว") {
+        todayPaidCount++;
+      } else if (normSt === "รออนุมัติ" || normSt === "รอตั้งเบิก" || normSt === "ตั้งเบิก" || normSt === "รอตรวจสอบ") {
+        todayPendingCount++;
+      }
+    });
+
+    const globalPendingCount = bills.filter(rawB => {
+      const b = rawB as any;
+      const normSt = normalizeBillStatus(b.status || b["สถานะ"]);
+      return normSt === "รออนุมัติ" || normSt === "รอตั้งเบิก" || normSt === "ตั้งเบิก" || normSt === "รอตรวจสอบ";
+    }).length;
 
     const activeTasks = tasks.filter(t => t.status !== "สำเร็จ");
     const activeWorksCount = activeTasks.length;
@@ -117,8 +153,10 @@ export async function GET(req: NextRequest) {
       dateStr: `${todayStr} (${configuredTime} น.)`,
       totalBills,
       totalAmount,
-      pendingCount,
-      approvedCount,
+      pendingCount: todayPendingCount,
+      approvedCount: todayApprovedCount,
+      paidCount: todayPaidCount,
+      globalPendingCount,
       activeWorksCount,
       completedWorksCount,
       lateTasks
@@ -133,8 +171,11 @@ export async function GET(req: NextRequest) {
       );
       if (!res.success) {
         let teamSummaryText = `📊 สรุปภาพรวมการเงิน & ผลงานทีม (${todayStr} - ${configuredTime} น.)\n\n`;
-        teamSummaryText += `🧾 รายการบิล: ${totalBills} รายการ (รออนุมัติ: ${pendingCount}, อนุมัติแล้ว: ${approvedCount})\n`;
-        teamSummaryText += `💰 ยอดเงินรวม: ฿${totalAmount.toLocaleString("th-TH")}\n`;
+        teamSummaryText += `🧾 รายการบิลวันนี้: ${totalBills} รายการ (รออนุมัติ: ${todayPendingCount}, อนุมัติแล้ว: ${todayApprovedCount}, ปิดงานแล้ว: ${todayPaidCount})\n`;
+        if (globalPendingCount > 0) {
+          teamSummaryText += `📌 รออนุมัติสะสมในระบบ: ${globalPendingCount} รายการ\n`;
+        }
+        teamSummaryText += `💰 ยอดเงินรวมวันนี้: ฿${totalAmount.toLocaleString("th-TH")}\n`;
         teamSummaryText += `👷‍♂️ งานรับเหมา/PW: กำลังทำ ${activeWorksCount} รายการ, เสร็จแล้ว ${completedWorksCount} รายการ`;
 
         const textRes = await sendTextMessageDetailed(sendTo, teamSummaryText);
@@ -151,7 +192,17 @@ export async function GET(req: NextRequest) {
       results,
       configuredTime,
       todayStr,
-      summary: { dateStr: todayStr, totalBills, totalAmount, pendingCount, approvedCount, activeWorksCount, completedWorksCount },
+      summary: {
+        dateStr: todayStr,
+        totalBills,
+        totalAmount,
+        pendingCount: todayPendingCount,
+        approvedCount: todayApprovedCount,
+        paidCount: todayPaidCount,
+        globalPendingCount,
+        activeWorksCount,
+        completedWorksCount
+      },
       tabs: 3,
     });
   } catch (err: any) {
