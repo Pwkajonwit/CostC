@@ -2,7 +2,7 @@ import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 export { supabaseAdmin };
 import { normalizeDateToIso, formatDateDisplay, getTodayDateIso } from "@/lib/utils/dates";
 import { cached, clearCache } from "@/lib/utils/cache";
-import { isVatActive, parseDeductPercent, parseCreditDays } from "@/lib/project-summary";
+import { isVatActive, isDeductActive, parseDeductPercent, parseCreditDays } from "@/lib/project-summary";
 
 export type SheetRow = Record<string, any>;
 
@@ -176,10 +176,39 @@ export const DEFAULT_PRODUCT_CATEGORIES: SheetRow[] = [
   { _sheetRow: 23, id_product: "non", รหัสสินค้า: "non", ชื่อประเภทสินค้า: "non (7.เครื่องมือ 8.อื่นๆ ที่พัก)", หมายเหตุ: "" }
 ];
 
+export function cleanDataPayload(obj: any): Record<string, any> {
+  if (!obj || typeof obj !== "object") return {};
+
+  // Collect nested layers from inside out (innermost oldest, outermost newest)
+  const layers: Record<string, any>[] = [];
+  let curr: any = obj;
+  let depth = 0;
+  while (curr && typeof curr === "object" && !Array.isArray(curr) && depth < 30) {
+    const copy = { ...curr };
+    const nextData = copy.data;
+    delete copy.data;
+    layers.unshift(copy); // innermost at index 0, outermost (newest) at end
+    curr = nextData;
+    depth++;
+  }
+
+  const result: Record<string, any> = {};
+  for (const layer of layers) {
+    for (const [k, v] of Object.entries(layer)) {
+      if (k !== "data") {
+        result[k] = v;
+      }
+    }
+  }
+  delete result.data;
+  return result;
+}
+
 export function mapSupabaseRowToSheetRow(dbTable: string, row: Record<string, any>, idx: number = 0): SheetRow {
   if (!row) return {};
-  const dataObj = (row.data && typeof row.data === "object") ? row.data : {};
+  const dataObj = cleanDataPayload(row.data);
   const res: SheetRow = { ...dataObj, ...row };
+  delete res.data;
 
   if (dbTable === "bills") {
     res["ลำดับ"] = row.id ?? row["ลำดับ"] ?? dataObj["ลำดับ"];
@@ -191,17 +220,41 @@ export function mapSupabaseRowToSheetRow(dbTable: string, row: Record<string, an
     res["บิล"] = row.bill_no ?? row["บิล"] ?? dataObj["บิล"];
     res["ประเภท"] = row.category ?? row["ประเภท"] ?? dataObj["ประเภท"];
     res["ยอดเงิน"] = row.amount ?? row["ยอดเงิน"] ?? dataObj["ยอดเงิน"];
-    res["หัก"] = row.withholding_tax ?? row["หัก"] ?? dataObj["หัก"] ?? "";
-    res["จำนวนหัก"] = row.deduct_amount ?? row["จำนวนหัก"] ?? dataObj["จำนวนหัก"] ?? dataObj["3เปอร์"] ?? dataObj["3เปอร์เซ็น"] ?? "";
-    res["3เปอร์"] = res["จำนวนหัก"];
-    res["3เปอร์เซ็น"] = res["จำนวนหัก"];
+    
+    const hasExplicitZeroWht = row.withholding_tax !== null && row.withholding_tax !== undefined && Number(row.withholding_tax) === 0;
+    const rawWhtStr = String(row["หัก"] || dataObj["หัก"] || "").trim();
+    const isWhtActive = !hasExplicitZeroWht && (
+      Number(row.withholding_tax) > 0 ||
+      isDeductActive(row["หัก"]) ||
+      isDeductActive(dataObj["หัก"])
+    );
+    res["หัก"] = isWhtActive ? (typeof row.withholding_tax === "number" && row.withholding_tax > 0 ? `หัก ${row.withholding_tax}%` : (rawWhtStr || `หัก 3%`)) : "";
+    res["จำนวนหัก"] = isWhtActive ? (row.deduct_amount ?? row["จำนวนหัก"] ?? dataObj["จำนวนหัก"] ?? "") : "";
+    res["3เปอร์"] = isWhtActive ? res["จำนวนหัก"] : "";
+    res["3เปอร์เซ็น"] = isWhtActive ? res["จำนวนหัก"] : "";
+    if (!isWhtActive) {
+      res["วันออก 3%"] = "";
+    }
+
+    const hasExplicitZeroVat = row.vat_amount !== null && row.vat_amount !== undefined && Number(row.vat_amount) === 0;
+    const isVat = !hasExplicitZeroVat && (Number(row.vat_amount) > 0 || isVatActive(row.vat) || isVatActive(dataObj.vat));
+    if (!isVat) {
+      res["vat"] = "";
+      res.vat = "";
+    }
     res["เครดิต"] = row.credit_days ?? row["เครดิต"] ?? dataObj["เครดิต"];
     res["ผู้เบิก"] = row.requester ?? row["ผู้เบิก"] ?? dataObj["ผู้เบิก"];
     res["ผู้สร้างบิล"] = row.created_by ?? row["ผู้สร้างบิล"] ?? dataObj["ผู้สร้างบิล"] ?? dataObj["ผู้บันทึก"] ?? "";
     res["created_by"] = res["ผู้สร้างบิล"];
     res["รูปถ่ายบิล"] = row.image_url ?? row["รูปถ่ายบิล"] ?? dataObj["รูปถ่ายบิล"];
     res["สถานะ"] = row.status ?? row["สถานะ"] ?? dataObj["สถานะ"];
-    res["ว/ด/ป"] = row.bill_date ? String(row.bill_date) : row["ว/ด/ป"] ?? dataObj["ว/ด/ป"] ?? (row.created_at ? getTodayDateIso(new Date(row.created_at)) : "");
+    const resolvedBillDate = row.bill_date ? String(row.bill_date) : row["ว/ด/ป"] ?? row["วันที่"] ?? dataObj["ว/ด/ป"] ?? dataObj["วันที่"] ?? (row.created_at ? getTodayDateIso(new Date(row.created_at)) : "");
+    res["ว/ด/ป"] = resolvedBillDate;
+    res["วันที่"] = resolvedBillDate;
+    res.bill_date = resolvedBillDate;
+    res["เลขบัญชี"] = row.bank_account ?? row["เลขบัญชี"] ?? dataObj["เลขบัญชี"] ?? "";
+    res["ธนาคาร"] = row.bank_name ?? row.bank ?? row["ธนาคาร"] ?? dataObj["ธนาคาร"] ?? "";
+    res["ชื่อบัญชี"] = row.account_name ?? row["ชื่อบัญชี"] ?? dataObj["ชื่อบัญชี"] ?? "";
 
     res["ค่าของ"] = row.material_cost ?? row["ค่าของ"] ?? dataObj["ค่าของ"] ?? "";
     res["ค่าแรง"] = row.labor_cost ?? row["ค่าแรง"] ?? dataObj["ค่าแรง"] ?? "";
@@ -232,7 +285,9 @@ export function mapSupabaseRowToSheetRow(dbTable: string, row: Record<string, an
     const rawCategory = String(row.category ?? row["ประเภท"] ?? dataObj["ประเภท"] ?? "").trim();
     const rawLaborStatus = String(row.labor_status ?? row["statusค่าแรง"] ?? dataObj["statusค่าแรง"] ?? "").trim();
     const hasLaborCost = Number(row.labor_cost ?? row["ค่าแรง"] ?? dataObj["ค่าแรง"] ?? 0) > 0;
-    const isContractorBill = 
+    const rawStaffName = String(row.staff_name ?? row["ชื่อพนักงาน"] ?? dataObj["ชื่อพนักงาน"] ?? dataObj.staff_name ?? "").trim();
+    const isStaffBill = rawCategory.startsWith("3.") || rawCategory.includes("พนักงาน") || Boolean(rawStaffName && !row.contractor_id && !dataObj["ผู้รับเหมา"]);
+    const isContractorBill = !isStaffBill && (
       row.vendor_type === "ผู้รับเหมา" ||
       dataObj["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา" ||
       Boolean(row.contractor_id) ||
@@ -241,10 +296,17 @@ export function mapSupabaseRowToSheetRow(dbTable: string, row: Record<string, an
       rawCategory.includes("ค่าแรง") ||
       rawCategory.includes("จ้าง") ||
       Boolean(rawLaborStatus) ||
-      hasLaborCost;
+      hasLaborCost
+    );
 
-    res["ร้านค้า/ผู้รับเหมา"] = isContractorBill ? "ผู้รับเหมา" : (row.vendor_type || dataObj["ร้านค้า/ผู้รับเหมา"] || "ร้านค้า");
-    if (isContractorBill) {
+    res["ร้านค้า/ผู้รับเหมา"] = isStaffBill ? "พนักงาน" : (isContractorBill ? "ผู้รับเหมา" : (row.vendor_type || dataObj["ร้านค้า/ผู้รับเหมา"] || "ร้านค้า"));
+    if (isStaffBill) {
+      res["ผู้รับเหมา"] = "";
+      res["ร้านค้า"] = "";
+      res["รายละเอียดงาน"] = row.work_details ?? row.description ?? dataObj["รายละเอียดงาน"] ?? dataObj["สินค้า/ทำงาน"] ?? "";
+      res["สินค้า"] = "";
+      res["ร้าน/บุคคล"] = rawStaffName || row.vendor_or_person || dataObj["ร้าน/บุคคล"] || "พนักงาน";
+    } else if (isContractorBill) {
       res["ผู้รับเหมา"] = row.contractor_id ?? dataObj["ผู้รับเหมา"] ?? row.vendor_or_person ?? dataObj["ร้าน/บุคคล"] ?? "";
       res["ร้านค้า"] = "";
       res["รายละเอียดงาน"] = row.work_details ?? row.description ?? dataObj["รายละเอียดงาน"] ?? dataObj["สินค้า/ทำงาน"] ?? "";
@@ -533,20 +595,35 @@ export function mapSheetRowToSupabaseRow(tableName: string, row: Record<string, 
     if (hasValue(rawAmount)) dbRow.amount = toNumber(rawAmount);
 
     const rawVat = row["vat"] ?? row.vat_amount;
-    if (hasValue(rawVat)) {
+    if (row["vat"] !== undefined || row.vat_amount !== undefined) {
       const isVat = isVatActive(rawVat);
-      const parsed = parseDeductPercent(rawVat);
-      dbRow.vat_amount = isVat ? (parsed > 0 ? parsed : 7) : 0;
+      if (isVat) {
+        const parsed = parseDeductPercent(rawVat);
+        dbRow.vat_amount = parsed > 0 ? parsed : 7;
+      } else {
+        dbRow.vat_amount = 0;
+      }
     }
 
     const rawDeduct = row["หัก"] ?? row.withholding_tax;
-    if (hasValue(rawDeduct)) {
-      dbRow.withholding_tax = parseDeductPercent(rawDeduct);
+    if (row["หัก"] !== undefined || row.withholding_tax !== undefined) {
+      const isDeduct = isDeductActive(rawDeduct);
+      if (isDeduct) {
+        const rate = parseDeductPercent(rawDeduct);
+        dbRow.withholding_tax = rate > 0 ? rate : 3;
+        const customDeduct = toNumber(row["จำนวนหัก"] ?? row.deduct_amount ?? row["3เปอร์"] ?? 0);
+        dbRow.deduct_amount = customDeduct;
+      } else {
+        dbRow.withholding_tax = 0;
+        dbRow.deduct_amount = 0;
+        dbRow.wht_issued_date = null;
+      }
     }
 
     const rawCredit = row["เครดิต"] ?? row.credit_days;
-    if (hasValue(rawCredit)) {
-      dbRow.credit_days = parseCreditDays(rawCredit);
+    if (row["เครดิต"] !== undefined || row.credit_days !== undefined) {
+      const cDays = parseCreditDays(rawCredit);
+      dbRow.credit_days = cDays;
     }
 
     const rawRequester = row["ผู้เบิก"] ?? row.requester;
@@ -564,7 +641,7 @@ export function mapSheetRowToSupabaseRow(tableName: string, row: Record<string, 
     const rawStatus = row["สถานะ"] ?? row.status;
     if (hasValue(rawStatus)) dbRow.status = String(rawStatus).trim();
 
-    const rawDate = row["ว/ด/ป"] ?? row.bill_date;
+    const rawDate = row["ว/ด/ป"] ?? row["วันที่"] ?? row.bill_date;
     if (hasValue(rawDate)) dbRow.bill_date = normalizeDateToIso(rawDate);
 
     const rawBillReceived = row["วันได้บิล"] ?? row.bill_received_date;
@@ -605,6 +682,11 @@ export function mapSheetRowToSupabaseRow(tableName: string, row: Record<string, 
     if (hasValue(row["สินค้า"] ?? row.product)) dbRow.product = String(row["สินค้า"] ?? row.product).trim();
     if (hasValue(row["รายละเอียดงาน"] ?? row.work_details)) dbRow.work_details = String(row["รายละเอียดงาน"] ?? row.work_details).trim();
     if (hasValue(row["รายการ"] ?? row.sub_category)) dbRow.sub_category = String(row["รายการ"] ?? row.sub_category).trim();
+    if (hasValue(row["ชื่อพนักงาน"] ?? row.staff_name)) {
+      dbRow.staff_name = String(row["ชื่อพนักงาน"] ?? row.staff_name).trim();
+      if (!dbRow.data) dbRow.data = {};
+      dbRow.data["ชื่อพนักงาน"] = dbRow.staff_name;
+    }
     if (row.items !== undefined || row["items"] !== undefined) {
       dbRow.items = row.items ?? row["items"];
     }
@@ -1015,10 +1097,26 @@ export async function saveBillFollowDate(billId: string, patch: Record<string, a
   ];
   const datesToSave: Record<string, any> = {};
   for (const k of followKeys) {
-    if (patch[k] !== undefined && patch[k] !== null && String(patch[k]).trim() !== "") {
+    if (patch[k] !== undefined && patch[k] !== null) {
       datesToSave[k] = patch[k];
     }
   }
+
+  // If deduction is inactive or explicitly removed, ensure all tax keys in follow dates are cleared
+  const checkDeduct = patch["หัก"] !== undefined ? patch["หัก"] : patch.withholding_tax;
+  if (checkDeduct !== undefined && !isDeductActive(checkDeduct)) {
+    datesToSave["หัก"] = "";
+    datesToSave["จำนวนหัก"] = "";
+    datesToSave["3เปอร์"] = "";
+    datesToSave["3เปอร์เซ็น"] = "";
+    datesToSave["วันออก 3%"] = "";
+  }
+
+  const checkVat = patch["vat"] !== undefined ? patch["vat"] : patch.vat_amount;
+  if (checkVat !== undefined && !isVatActive(checkVat)) {
+    datesToSave["vat"] = "";
+  }
+
   if (!Object.keys(datesToSave).length) return;
 
   try {
@@ -1185,15 +1283,73 @@ export async function updateRowInSupabase(tableName: string, keyColumn: string, 
 
     try {
       const { data: currentRecord } = await supabaseAdmin.from(dbTable).select("data").eq("id", primaryVal).maybeSingle();
-      const existingData = (currentRecord && currentRecord.data && typeof currentRecord.data === "object") ? currentRecord.data : {};
-      dbPatch.data = { ...existingData, ...dbPatch.data, ...patch };
+      const existingData = cleanDataPayload(currentRecord?.data);
+      const incomingPatch = cleanDataPayload(patch);
+      const existingDbPatchData = cleanDataPayload(dbPatch.data);
+      
+      const mergedData = cleanDataPayload({ ...existingData, ...existingDbPatchData, ...incomingPatch });
+      delete mergedData.data;
+      dbPatch.data = mergedData;
+
+      if (dbTable === "bills") {
+        const checkDeductVal = patch["หัก"] !== undefined 
+          ? patch["หัก"] 
+          : (dbPatch.withholding_tax !== undefined 
+              ? dbPatch.withholding_tax 
+              : (mergedData["หัก"] ?? patch["3เปอร์"] ?? patch["จำนวนหัก"]));
+        const isDeduct = isDeductActive(checkDeductVal);
+        if (!isDeduct) {
+          dbPatch.withholding_tax = 0;
+          dbPatch.deduct_amount = 0;
+          dbPatch.wht_issued_date = null;
+          dbPatch.data["หัก"] = "";
+          dbPatch.data["จำนวนหัก"] = "";
+          dbPatch.data["3เปอร์"] = "";
+          dbPatch.data["3เปอร์เซ็น"] = "";
+          dbPatch.data["วันออก 3%"] = "";
+          dbPatch.data.withholding_tax = 0;
+          dbPatch.data.deduct_amount = 0;
+        } else {
+          if (dbPatch.withholding_tax === undefined) {
+            dbPatch.withholding_tax = parseDeductPercent(checkDeductVal);
+          }
+        }
+        const checkVatVal = patch["vat"] !== undefined ? patch["vat"] : (dbPatch.vat_amount !== undefined ? dbPatch.vat_amount : mergedData["vat"]);
+        const isVat = isVatActive(checkVatVal);
+        if (!isVat) {
+          dbPatch.vat_amount = 0;
+          dbPatch.data["vat"] = "";
+          dbPatch.data.vat_amount = 0;
+        }
+      }
       if (dbTable === "master_members" && dbPatch.line_user_id !== undefined) {
         dbPatch.data.line_user_id = dbPatch.line_user_id;
         dbPatch.data["LINE User ID"] = dbPatch.line_user_id;
         dbPatch.data["LINE"] = dbPatch.line_user_id;
       }
     } catch {
-      dbPatch.data = { ...dbPatch.data, ...patch };
+      const incomingPatch = cleanDataPayload(patch);
+      const existingDbPatchData = cleanDataPayload(dbPatch.data);
+      const mergedData = cleanDataPayload({ ...existingDbPatchData, ...incomingPatch });
+      delete mergedData.data;
+      dbPatch.data = mergedData;
+
+      if (dbTable === "bills") {
+        const checkDeductVal = patch["หัก"] !== undefined ? patch["หัก"] : dbPatch.withholding_tax;
+        const isDeduct = isDeductActive(checkDeductVal);
+        if (!isDeduct) {
+          dbPatch.withholding_tax = 0;
+          dbPatch.deduct_amount = 0;
+          dbPatch.wht_issued_date = null;
+          dbPatch.data["หัก"] = "";
+          dbPatch.data["จำนวนหัก"] = "";
+          dbPatch.data["3เปอร์"] = "";
+          dbPatch.data["3เปอร์เซ็น"] = "";
+          dbPatch.data["วันออก 3%"] = "";
+          dbPatch.data.withholding_tax = 0;
+          dbPatch.data.deduct_amount = 0;
+        }
+      }
       if (dbTable === "master_members" && dbPatch.line_user_id !== undefined) {
         dbPatch.data.line_user_id = dbPatch.line_user_id;
         dbPatch.data["LINE User ID"] = dbPatch.line_user_id;
@@ -1407,6 +1563,29 @@ export async function getRowsFromSupabase(tableName: string, maxRows = 10_000): 
           const followData = (rawId && billFollowDatesMap[rawId]) || (rawSeq && billFollowDatesMap[rawSeq]);
           if (followData) {
             Object.assign(res, followData);
+
+            // Re-enforce withholding tax and VAT consistency after followData merge
+            const hasExplicitZeroWht = row.withholding_tax !== null && row.withholding_tax !== undefined && Number(row.withholding_tax) === 0;
+            const isWhtActive = !hasExplicitZeroWht && (
+              Number(row.withholding_tax) > 0 ||
+              isDeductActive(res["หัก"]) ||
+              isDeductActive(row["หัก"])
+            );
+            if (!isWhtActive) {
+              res["หัก"] = "";
+              res["จำนวนหัก"] = "";
+              res["3เปอร์"] = "";
+              res["3เปอร์เซ็น"] = "";
+              res["วันออก 3%"] = "";
+            }
+
+            const hasExplicitZeroVat = row.vat_amount !== null && row.vat_amount !== undefined && Number(row.vat_amount) === 0;
+            const isVat = !hasExplicitZeroVat && (Number(row.vat_amount) > 0 || isVatActive(res["vat"]) || isVatActive(row.vat));
+            if (!isVat) {
+              res["vat"] = "";
+              res.vat = "";
+            }
+
             if (followData["ลำดับ"]) {
               res["ลำดับ"] = followData["ลำดับ"];
             }
@@ -1520,10 +1699,6 @@ export async function getWithdrawBillsFromSupabase(maxRows = 3_000): Promise<She
             res["created_by"] = followData["ผู้สร้างบิล"];
           }
         }
-      }
-      if (!res["ผู้สร้างบิล"]) {
-        res["ผู้สร้างบิล"] = res["ผู้เบิก"] || "";
-        res["created_by"] = res["ผู้สร้างบิล"];
       }
 
       mapped[idx] = res;

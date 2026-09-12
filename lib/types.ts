@@ -59,6 +59,7 @@ export type ShowIf = {
 
 export type FieldSchema = {
   name: string;
+  label?: string;
   type: FieldType;
   key?: boolean;
   required?: boolean;

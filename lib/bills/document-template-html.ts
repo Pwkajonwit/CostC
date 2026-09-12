@@ -343,11 +343,25 @@ export function renderDocumentIndexHtml(
   };
 
   const totalLabor = dataList.reduce((acc, d) => acc + (d.amounts.laborAndStaff || 0), 0);
-  const totalWht = dataList.reduce((acc, d) => acc + (d.amounts.withholdingTax || 0), 0);
-  const totalNet = dataList.reduce((acc, d) => acc + (d.amounts.netPayable || 0), 0);
-  const totalBase003 = dataList.reduce((acc, d) => {
-    const rawVal = toNumber(d.rawBill?.["0.03"]);
-    return acc + (rawVal > 0 ? rawVal : (d.amounts.laborAndStaff || 0));
+  const totalWht = dataList.reduce((acc, d) => {
+    const wage = d.amounts.laborAndStaff || 0;
+    const rawWht = toNumber(d.rawBill?.["หัก 3%"]);
+    const rawNet = toNumber(d.rawBill?.["จ่าย"] || d.rawBill?.["ยอดโอน"] || d.rawBill?.["คงเหลือ"]);
+    const net = rawNet > 0 ? rawNet : (rawWht > wage * 0.5 ? rawWht : d.amounts.netPayable || wage);
+    const wht =
+      d.amounts.withholdingTax > 0 && d.amounts.withholdingTax < wage
+        ? d.amounts.withholdingTax
+        : wage > net && net > 0
+        ? Math.round((wage - net) * 100) / 100
+        : 0;
+    return acc + wht;
+  }, 0);
+  const totalNet = dataList.reduce((acc, d) => {
+    const wage = d.amounts.laborAndStaff || 0;
+    const rawWht = toNumber(d.rawBill?.["หัก 3%"]);
+    const rawNet = toNumber(d.rawBill?.["จ่าย"] || d.rawBill?.["ยอดโอน"] || d.rawBill?.["คงเหลือ"]);
+    const net = rawNet > 0 ? rawNet : (rawWht > wage * 0.5 ? rawWht : d.amounts.netPayable || wage);
+    return acc + net;
   }, 0);
   const countIndividual = dataList.filter((d) => !d.contractor.isCorporate).length;
   const countCorporate = dataList.filter((d) => d.contractor.isCorporate).length;
@@ -469,10 +483,23 @@ export function renderDocumentIndexHtml(
       const idCard = item.contractor.idCard || item.contractor.taxId || item.rawBill?.["เลขประจำตัวประชาชน"] || "-";
       const address = item.contractor.address || item.rawBill?.["ที่อยู่"] || "-";
       const wage = item.amounts.laborAndStaff || 0;
-      const base003 = toNumber(item.rawBill?.["0.03"]) || wage;
+      const rawNetPayable = toNumber(item.rawBill?.["จ่าย"] || item.rawBill?.["ยอดโอน"] || item.rawBill?.["คงเหลือ"]);
       const rawWht3 = toNumber(item.rawBill?.["หัก 3%"]);
-      // In the accounting file, "หัก 3%" stores the net payable amount after deducting 3%
-      const netPayable = rawWht3 > (wage * 0.5) ? rawWht3 : (item.amounts.netPayable || wage);
+      // In the accounting file, "หัก 3%" often stores the net payable amount after deducting 3%
+      const netPayable =
+        rawNetPayable > 0
+          ? rawNetPayable
+          : rawWht3 > wage * 0.5
+          ? rawWht3
+          : item.amounts.netPayable || wage;
+      const whtAmt =
+        item.amounts.withholdingTax > 0 && item.amounts.withholdingTax < wage
+          ? item.amounts.withholdingTax
+          : wage > netPayable && netPayable > 0
+          ? Math.round((wage - netPayable) * 100) / 100
+          : rawWht3 > 0 && rawWht3 < wage * 0.5
+          ? rawWht3
+          : 0;
 
       // ผู้ออก คือ ผู้สร้างบิลตั้งเบิก
       const rawIssuer = String(
@@ -500,7 +527,7 @@ export function renderDocumentIndexHtml(
           <td style="border: 1px solid #000; text-align: center; font-size: 10.5px; white-space: nowrap; padding: 2px;">${idCard}</td>
           <td style="border: 1px solid #000; padding: 2px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${address}">${address}</td>
           <td style="border: 1px solid #000; text-align: right; padding: 2px 4px; font-weight: 500;">${fmt(wage)}</td>
-          <td style="border: 1px solid #000; text-align: right; padding: 2px 4px; font-weight: 500;">${fmt(base003)}</td>
+          <td style="border: 1px solid #000; text-align: right; padding: 2px 4px; font-weight: 500;">${fmt(whtAmt)}</td>
           <td style="border: 1px solid #000; text-align: right; padding: 2px 4px; font-weight: bold; color: #065f46;">${fmt(netPayable)}</td>
           <td style="border: 1px solid #000; text-align: center; font-size: 10.5px; padding: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${issuer}</td>
           <td style="border: 1px solid #000; padding: 2px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${jobDesc}">${jobDesc}</td>
@@ -518,7 +545,7 @@ export function renderDocumentIndexHtml(
               รวมทั้งสิ้น (${dataList.length} รายการ) — ${thaiBahtText(totalNet)}
             </td>
             <td style="border: 1px solid #000; text-align: right; padding: 2px 4px; font-size: 11px;">฿${fmt(totalLabor)}</td>
-            <td style="border: 1px solid #000; text-align: right; padding: 2px 4px; font-size: 11px;">฿${fmt(totalBase003)}</td>
+            <td style="border: 1px solid #000; text-align: right; padding: 2px 4px; font-size: 11px;">฿${fmt(totalWht)}</td>
             <td style="border: 1px solid #000; text-align: right; padding: 2px 4px; font-size: 11px; color: #065f46;">฿${fmt(totalNet)}</td>
             <td colspan="3" style="border: 1px solid #000; text-align: center; font-size: 11px; color: #333;">บาท</td>
           </tr>
@@ -549,8 +576,8 @@ export function renderDocumentIndexHtml(
             <th style="border: 1px solid #000; text-align: center;">เลขประจำตัวประชาชน</th>
             <th style="border: 1px solid #000; text-align: center;">ที่อยู่</th>
             <th style="border: 1px solid #000; text-align: center;">ค่าจ้าง</th>
-            <th style="border: 1px solid #000; text-align: center;">0.03</th>
             <th style="border: 1px solid #000; text-align: center;">หัก 3%</th>
+            <th style="border: 1px solid #000; text-align: center;">จ่าย</th>
             <th style="border: 1px solid #000; text-align: center;">ผู้ออก</th>
             <th style="border: 1px solid #000; text-align: center;">ชื่องาน หรือ หมายเหตุ</th>
             <th style="border: 1px solid #000; text-align: center;">Statusค่าแรง</th>

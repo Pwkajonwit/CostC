@@ -1,4 +1,4 @@
-﻿import type { SheetRow } from "@/lib/types";
+import type { SheetRow } from "@/lib/types";
 import { toNumber } from "@/lib/utils/numbers";
 
 export function validateBillStatusTransition(currentStatus: unknown, nextStatus: unknown) {
@@ -52,9 +52,17 @@ export function normalizeBillStatus(value: unknown) {
   const str = String(value || "").trim();
   if (str.includes("รอตั้งเบิก")) return "รอตั้งเบิก";
   if (str.includes("อนุมัติ") && !str.includes("รออนุมัติ")) return "อนุมัติ";
-  if (str.includes("เบิกแล้ว") || str.toLowerCase() === "paid" || str.toLowerCase() === "withdrawn") return "เบิกแล้ว";
+  if (
+    str.includes("เบิกแล้ว") ||
+    str.includes("ปิดงาน") ||
+    str.includes("จ่ายแล้ว") ||
+    str.toLowerCase() === "paid" ||
+    str.toLowerCase() === "withdrawn"
+  ) {
+    return "เบิกแล้ว";
+  }
   if (str.includes("ตั้งเบิก")) return "ตั้งเบิก";
-  if (str.includes("รออนุมัติ")) return "รออนุมัติ";
+  if (str.includes("รออนุมัติ") || str.includes("รอตรวจสอบ")) return "รออนุมัติ";
   return str;
 }
 

@@ -663,15 +663,16 @@ export function BillFollowDashboardClient({
         )}
       </div>
 
-      {/* 2. FILTER & ACTION TOOLBAR (Clean High-Efficiency Layout) */}
-      <div className="border border-slate-200 rounded-xl md:rounded-md p-2 sm:p-3 bg-white flex flex-col gap-2 text-xs shadow-2xs">
-        <div className="flex items-center justify-between gap-2 w-full">
-          {/* Universal Search Box */}
-          <div className="relative flex items-center flex-1 min-w-0">
+      {/* 2. FILTER & ACTION TOOLBAR (UNIFIED SINGLE ROW) */}
+      <div className="border border-slate-200 rounded-xl md:rounded-md p-2 bg-white flex flex-col md:flex-row md:items-center justify-between gap-2 text-xs shadow-2xs">
+        {/* Left Section: Search Box (compact) + Filters in the same row */}
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
+          {/* Universal Search Box (Compact width) */}
+          <div className="relative flex items-center w-full md:w-44 lg:w-56 shrink-0">
             <Search size={14} className="absolute left-2.5 text-slate-400 pointer-events-none shrink-0" />
             <input
               type="text"
-              placeholder="ค้นหาลำดับ, ร้านค้า, Project..."
+              placeholder="ค้นหา..."
               value={searchTerm}
               onChange={(e) => {
                 setSearchTerm(e.target.value);
@@ -691,97 +692,112 @@ export function BillFollowDashboardClient({
             )}
           </div>
 
-          {/* Controls: Filter Toggle & Batch LINE Copy */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              type="button"
-              onClick={() => setShowMobileFilters(!showMobileFilters)}
-              className={`md:hidden px-2.5 py-1.5 rounded-lg border text-xs flex items-center gap-1 shrink-0 cursor-pointer active:scale-95 transition ${
-                showMobileFilters || selectedRequester || selectedDate
-                  ? "bg-slate-900 text-white border-slate-900 shadow-2xs"
-                  : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200"
-              }`}
-            >
-              <Filter size={13} className={showMobileFilters || selectedRequester || selectedDate ? "text-[#d4f54e]" : "text-slate-500"} />
-              <span>{showMobileFilters ? "ซ่อน" : "ตัวกรอง"}</span>
-            </button>
+          <div className="hidden lg:block h-4 w-px bg-slate-200 shrink-0" />
 
-            {selectedRequester && filteredRows.length > 0 && (
-              <button
-                type="button"
-                onClick={copyRequesterBatchText}
-                className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs rounded-lg transition cursor-pointer shrink-0 flex items-center gap-1 shadow-2xs active:scale-95"
-                title="คัดลอกข้อความสรุปบิลค้างทั้งหมดของผู้เบิกรายนี้"
+          {/* Filters (Desktop all in one row, Mobile expandable) */}
+          <div className={`flex-wrap items-center gap-2 ${showMobileFilters ? "flex w-full md:w-auto" : "hidden md:flex"}`}>
+            {/* Requester dropdown */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-slate-700 whitespace-nowrap">ผู้เบิก:</span>
+              <select
+                value={selectedRequester}
+                onChange={(e) => {
+                  setSelectedRequester(e.target.value);
+                  setPage(1);
+                }}
+                className="bg-white border border-slate-300 text-xs text-slate-800 px-2 py-1 rounded-md focus:outline-none cursor-pointer max-w-[140px] truncate"
               >
-                <span>LINE ({filteredRows.length})</span>
-              </button>
-            )}
+                <option value="">ทั้งหมด ({allPendingRows.length})</option>
+                {peopleRows.map((row) => {
+                  const key = String(row["รหัสพนักงาน"] || row["ชื่อเล่น"] || row._sheetRow || "").trim();
+                  const label = row["ชื่อเล่น"] ? `${key} - ${row["ชื่อเล่น"]}` : key;
+                  return key ? (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ) : null;
+                })}
+              </select>
+            </div>
 
-            {selectedIds.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setIsBatchConfirming(true)}
-                className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs rounded-lg transition cursor-pointer shrink-0 flex items-center gap-1.5 shadow-2xs active:scale-95 font-medium animate-in fade-in"
-                title="อนุมัติบิลที่เลือกทั้งหมด"
-              >
-                <CheckCircle2 size={13} />
-                <span>อนุมัติที่เลือก ({selectedIds.length})</span>
-              </button>
-            )}
-
-            {filteredRows.length > 0 && (
-              <button
-                type="button"
-                onClick={handleExportCsv}
-                className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 text-xs rounded-lg border border-slate-200 transition cursor-pointer shrink-0 flex items-center gap-1 shadow-2xs active:scale-95"
-                title="ส่งออกรายการตามบิลที่กรองอยู่เป็นไฟล์ Excel (CSV)"
-              >
-                <Download size={13} className="text-slate-600" />
-                <span className="hidden sm:inline">ส่งออก</span> Excel
-              </button>
-            )}
+            {/* Date Picker */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-slate-700 whitespace-nowrap">วันที่:</span>
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => {
+                  setSelectedDate(e.target.value);
+                  setPage(1);
+                }}
+                className="bg-white border border-slate-300 text-xs text-slate-800 px-2 py-1 rounded-md focus:outline-none cursor-pointer"
+              />
+              {selectedDate ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedDate("");
+                    setPage(1);
+                  }}
+                  className="text-xs text-slate-500 hover:text-slate-800 px-1.5 py-0.5 rounded border border-slate-200 bg-slate-50 hover:bg-slate-100 transition cursor-pointer"
+                  title="ดูทุกวัน (ไม่จำกัดวันที่)"
+                >
+                  ทั้งหมด
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
 
-        {/* Expandable Dropdown Filters (Requester & Date) */}
-        <div className={`flex-wrap items-center gap-2.5 pt-2 border-t border-slate-100 ${showMobileFilters ? "flex" : "hidden md:flex"}`}>
-          {/* Requester dropdown */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-slate-700 whitespace-nowrap">ผู้เบิก:</span>
-            <select
-              value={selectedRequester}
-              onChange={(e) => {
-                setSelectedRequester(e.target.value);
-                setPage(1);
-              }}
-              className="bg-white border border-slate-300 text-xs text-slate-800 px-2 py-1 rounded-md focus:outline-none cursor-pointer"
-            >
-              <option value="">ทั้งหมด ({allPendingRows.length} รายการ)</option>
-              {peopleRows.map((row) => {
-                const key = String(row["รหัสพนักงาน"] || row["ชื่อเล่น"] || row._sheetRow || "").trim();
-                const label = row["ชื่อเล่น"] ? `${key} - ${row["ชื่อเล่น"]}` : key;
-                return key ? (
-                  <option key={key} value={key}>
-                    {label}
-                  </option>
-                ) : null;
-              })}
-            </select>
-          </div>
+        {/* Right Section: Action Buttons (LINE, Batch Approve, Export, Mobile Toggle) */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowMobileFilters(!showMobileFilters)}
+            className={`md:hidden px-2.5 py-1.5 rounded-lg border text-xs flex items-center gap-1 shrink-0 cursor-pointer active:scale-95 transition ${
+              showMobileFilters || selectedRequester || selectedDate
+                ? "bg-slate-900 text-white border-slate-900 shadow-2xs"
+                : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200"
+            }`}
+          >
+            <Filter size={13} className={showMobileFilters || selectedRequester || selectedDate ? "text-[#d4f54e]" : "text-slate-500"} />
+            <span>{showMobileFilters ? "ซ่อน" : "ตัวกรอง"}</span>
+          </button>
 
-          {/* Date Picker */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-slate-700 whitespace-nowrap">วันที่:</span>
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => {
-                setSelectedDate(e.target.value);
-                setPage(1);
-              }}
-              className="bg-white border border-slate-300 text-xs text-slate-800 px-2 py-1 rounded-md focus:outline-none cursor-pointer"
-            />
-          </div>
+          {selectedRequester && filteredRows.length > 0 && (
+            <button
+              type="button"
+              onClick={copyRequesterBatchText}
+              className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs rounded-lg transition cursor-pointer shrink-0 flex items-center gap-1 shadow-2xs active:scale-95"
+              title="คัดลอกข้อความสรุปบิลค้างทั้งหมดของผู้เบิกรายนี้"
+            >
+              <span>LINE ({filteredRows.length})</span>
+            </button>
+          )}
+
+          {selectedIds.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setIsBatchConfirming(true)}
+              className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs rounded-lg transition cursor-pointer shrink-0 flex items-center gap-1.5 shadow-2xs active:scale-95 font-medium animate-in fade-in"
+              title="อนุมัติบิลที่เลือกทั้งหมด"
+            >
+              <CheckCircle2 size={13} />
+              <span>อนุมัติที่เลือก ({selectedIds.length})</span>
+            </button>
+          )}
+
+          {filteredRows.length > 0 && (
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 text-xs rounded-lg border border-slate-200 transition cursor-pointer shrink-0 flex items-center gap-1 shadow-2xs active:scale-95"
+              title="ส่งออกรายการตามบิลที่กรองอยู่เป็นไฟล์ Excel (CSV)"
+            >
+              <Download size={13} className="text-slate-600" />
+              <span className="hidden sm:inline">ส่งออก</span> Excel
+            </button>
+          )}
         </div>
       </div>
 

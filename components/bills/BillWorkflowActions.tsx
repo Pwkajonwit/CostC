@@ -1,26 +1,85 @@
-﻿"use client";
+"use client";
 
 import { Banknote, Check, LoaderCircle, Pencil, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { normalizeBillStatus } from "@/lib/bills/bill-status";
 import { showConfirm } from "@/components/shared/ToastProvider";
 import type { SheetRow } from "@/lib/types";
+import type { UserPermissions } from "@/lib/user-permissions";
 
 type BillWorkflowActionsProps = {
   row: SheetRow;
   compact?: boolean;
   allowEdit?: boolean;
   redirectAfterDelete?: string;
+  userPermissions?: UserPermissions | null;
 };
 
-export function BillWorkflowActions({ row, compact = false, allowEdit = false, redirectAfterDelete }: BillWorkflowActionsProps) {
+export function BillWorkflowActions({
+  row,
+  compact = false,
+  allowEdit = false,
+  redirectAfterDelete,
+  userPermissions,
+}: BillWorkflowActionsProps) {
   const router = useRouter();
   const [busy, setBusy] = useState<"status" | "delete" | null>(null);
   const [error, setError] = useState("");
+  const [clientPerms, setClientPerms] = useState<UserPermissions | null>(userPermissions || null);
+
+  useEffect(() => {
+    if (userPermissions) {
+      setClientPerms(userPermissions);
+      return;
+    }
+
+    if (typeof document !== "undefined") {
+      const roleMatch = document.cookie.match(/auth_role=([^;]+)/);
+      const role = roleMatch ? decodeURIComponent(roleMatch[1]) : "";
+      const isOwner = role === "Owner" || role === "Admin";
+      const canDeleteMatch = document.cookie.match(/auth_can_delete=([^;]+)/);
+      const canDelete = canDeleteMatch ? canDeleteMatch[1] === "true" : false;
+      const empMatch = document.cookie.match(/auth_employee_id=([^;]+)/);
+      const empId = empMatch ? decodeURIComponent(empMatch[1]) : "";
+      const nameMatch = document.cookie.match(/auth_name=([^;]+)/);
+      const name = nameMatch ? decodeURIComponent(nameMatch[1]) : "";
+
+      setClientPerms({
+        id: empId,
+        displayName: name,
+        role: role || "User",
+        isOwner,
+        canApprove: isOwner || role === "Finance",
+        canCloseBill: isOwner || role === "Approver",
+        canDelete: isOwner || canDelete,
+      });
+    }
+  }, [userPermissions]);
+
+  useEffect(() => {
+    const handlePermUpdate = () => {
+      fetch("/api/auth/sync", { cache: "no-store" })
+        .then(res => res.json())
+        .then(data => {
+          if (data?.success && data.user) {
+            setClientPerms(data.user);
+          }
+        })
+        .catch(() => undefined);
+    };
+    window.addEventListener("user-permissions-updated", handlePermUpdate);
+    return () => window.removeEventListener("user-permissions-updated", handlePermUpdate);
+  }, []);
+
+  const isOwner = Boolean(clientPerms?.isOwner || clientPerms?.role === "Owner" || clientPerms?.role === "Admin");
+  const canApproveBill = isOwner || Boolean(clientPerms?.canCloseBill) || clientPerms?.role === "Approver" || clientPerms?.role === "Admin_Approver";
+  const canMarkPaid = isOwner || Boolean(clientPerms?.canApprove) || Boolean(clientPerms?.canCloseBill) || clientPerms?.role === "Finance" || clientPerms?.role === "Approver" || clientPerms?.role === "Admin_Closer";
+  const canDeleteBill = isOwner || Boolean(clientPerms?.canDelete);
+
   const sheetRow = row.id ?? row["ลำดับ"] ?? row._sheetRow;
   const status = normalizeBillStatus(row["สถานะ"]);
-  const pending = status === "รออนุมัติ" || status === "ตั้งเบิก";
+  const pending = status === "รออนุมัติ" || status === "ตั้งเบิก" || status === "รอตั้งเบิก";
   const approved = status === "อนุมัติ";
 
   function editBill() {
@@ -85,7 +144,7 @@ export function BillWorkflowActions({ row, compact = false, allowEdit = false, r
         </button>
       ) : null}
 
-      {pending ? (
+      {pending && canApproveBill ? (
         <button
           type="button"
           disabled={busy !== null}
@@ -98,7 +157,7 @@ export function BillWorkflowActions({ row, compact = false, allowEdit = false, r
         </button>
       ) : null}
 
-      {approved ? (
+      {approved && canMarkPaid ? (
         <button
           type="button"
           disabled={busy !== null}
@@ -111,17 +170,19 @@ export function BillWorkflowActions({ row, compact = false, allowEdit = false, r
         </button>
       ) : null}
 
-      <button
-        type="button"
-        disabled={busy !== null}
-        onClick={deleteBill}
-        title="ลบบิล"
-        aria-label="ลบบิล"
-        className={`${btnBase} bg-rose-50 text-rose-700 border border-rose-300 hover:bg-rose-100`}
-      >
-        {busy === "delete" ? <LoaderCircle className="animate-spin shrink-0" size={14} /> : <Trash2 size={14} className="shrink-0 text-rose-600" />}
-        {compact ? null : <span>ลบ</span>}
-      </button>
+      {canDeleteBill ? (
+        <button
+          type="button"
+          disabled={busy !== null}
+          onClick={deleteBill}
+          title="ลบบิล"
+          aria-label="ลบบิล"
+          className={`${btnBase} bg-rose-50 text-rose-700 border border-rose-300 hover:bg-rose-100`}
+        >
+          {busy === "delete" ? <LoaderCircle className="animate-spin shrink-0" size={14} /> : <Trash2 size={14} className="shrink-0 text-rose-600" />}
+          {compact ? null : <span>ลบ</span>}
+        </button>
+      ) : null}
 
       {error ? <span className="text-xs text-rose-600 font-medium">{error}</span> : null}
     </div>

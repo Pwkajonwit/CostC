@@ -406,7 +406,7 @@ export function createBillNotificationFlex(bill: {
   bank_name?: string;
   account_name?: string;
   data?: any;
-}, bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>): Record<string, any> {
+}, bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>, peopleMap?: Map<string, string> | Record<string, string>, carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>): Record<string, any> {
   const rawAmount = bill.amount ?? (bill as any)["ยอดเงิน"] ?? (bill as any).total ?? 0;
   const formattedAmount = Number(rawAmount || 0).toLocaleString("th-TH", {
     minimumFractionDigits: 2,
@@ -426,12 +426,39 @@ export function createBillNotificationFlex(bill: {
 
   const bankInfo = resolveBankInfo(bill, bankInfoMap);
   const isSubBill = isSubBillRecord(bill);
+  const reqBank = resolveRequesterBankInfo(bill, bankInfoMap, peopleMap);
 
   const billStatus = bill.status || (bill as any)["สถานะ"] || "ตั้งเบิก";
   const projectName = bill.project_name || (bill as any)["ชื่อ Project"] || (bill as any)["โครงการ"] || "-";
   const vendorCandidate = bill.vendor_or_person || (bill as any)["ร้าน/บุคคล"] || (bill as any)["ร้านค้า"] || (bill as any)["ผู้รับเหมา"] || (bill as any).store_name || "-";
-  const requesterName = bill.requester || (bill as any)["ผู้เบิก"] || "-";
-  const billDescription = bill.description || (bill as any)["สินค้า/ทำงาน"] || (bill as any)["รายละเอียด"] || "-";
+  const rawRequester = bill.requester || (bill as any)["ผู้เบิก"] || "-";
+  const requesterName = resolveStaffDisplayName(rawRequester, peopleMap) || rawRequester;
+
+  const rawPlate = (bill as any)["ทะเบียน"] || (bill as any).plate_no || (bill as any)["id_car"] || (bill as any).id_car;
+  const carDisplayName = resolveCarDisplayName(rawPlate, carsMap);
+
+  const rawStaff = (bill as any)["ชื่อพนักงาน"] || (bill as any).staff_name || (bill as any)["รหัสพนักงาน"];
+  const staffDisplayName = resolveStaffDisplayName(rawStaff, peopleMap);
+
+  const rawTool = (bill as any)["ชื่อเครื่องมือ"] || (bill as any).tool_name;
+  const toolDisplayName = String(rawTool || "").trim();
+
+  const rawOther = (bill as any)["รายการ"] || (bill as any).sub_category;
+  const otherDisplayName = String(rawOther || "").trim();
+
+  const rawCategory = String((bill as any)["ประเภท"] || (bill as any).category || "").trim();
+
+  let rawBillDescription = bill.description || (bill as any)["สินค้า/ทำงาน"] || (bill as any)["รายละเอียด"] || "-";
+  let billDescription = sanitizeFlexItemDescription(rawBillDescription, carsMap, peopleMap);
+  if (carDisplayName && (billDescription === "-" || !billDescription || /^[a-zA-Z]{1,3}[-_]?\d+$/.test(billDescription))) {
+    billDescription = rawCategory.includes("ซ่อม") ? `ซ่อมรถ (${carDisplayName})` : `น้ำมัน (${carDisplayName})`;
+  } else if (staffDisplayName && (billDescription === "-" || !billDescription || /^[a-zA-Z]{1,3}[-_]?\d+$/.test(billDescription))) {
+    billDescription = `พนักงาน (${staffDisplayName})`;
+  } else if (toolDisplayName && (billDescription === "-" || !billDescription || /^[a-zA-Z]{1,3}[-_]?\d+$/.test(billDescription))) {
+    billDescription = `เครื่องมือ (${toolDisplayName})`;
+  } else if (otherDisplayName && (billDescription === "-" || !billDescription || /^[a-zA-Z]{1,3}[-_]?\d+$/.test(billDescription))) {
+    billDescription = `อื่นๆ (${otherDisplayName})`;
+  }
 
   return {
     type: "bubble",
@@ -439,23 +466,89 @@ export function createBillNotificationFlex(bill: {
     header: {
       type: "box",
       layout: "vertical",
-      backgroundColor: "#0F172A",
-      paddingAll: "15px",
+      backgroundColor: isSubBill ? "#1E293B" : "#0F172A",
+      paddingAll: "14px",
+      spacing: "xs",
       contents: [
         {
-          type: "text",
-          text: "🧾 รายการแจ้งเตือนการเบิกเงิน",
-          weight: "bold",
-          color: "#FFFFFF",
-          size: "md",
+          type: "box",
+          layout: "horizontal",
+          contents: [
+            {
+              type: "text",
+              text: isSubBill ? "🧾 แจ้งเตือนการเบิกเงิน (บิลย่อย)" : "🧾 รายการแจ้งเตือนการเบิกเงิน",
+              weight: "bold",
+              color: "#FFFFFF",
+              size: "md",
+              flex: 8,
+            },
+            ...(isSubBill ? [
+              {
+                type: "text",
+                text: "บิลย่อย",
+                weight: "bold",
+                color: "#F59E0B",
+                size: "xs",
+                align: "end",
+                flex: 3,
+              }
+            ] : [])
+          ]
         },
         {
           type: "text",
           text: `สถานะ: ${billStatus}`,
           color: "#94A3B8",
           size: "xs",
-          margin: "xs",
         },
+        // สำหรับบิลย่อย: แสดงชื่อ เลขบัญชี ธนาคาร ของผู้เบิก ไว้ที่ส่วนหัว
+        ...(isSubBill ? [
+          {
+            type: "box",
+            layout: "vertical",
+            margin: "sm",
+            paddingAll: "8px",
+            backgroundColor: "#334155",
+            cornerRadius: "6px",
+            borderWidth: "1px",
+            borderColor: "#F59E0B",
+            spacing: "xs",
+            contents: [
+              {
+                type: "box",
+                layout: "baseline",
+                contents: [
+                  { type: "text", text: "👤 ผู้เบิก:", size: "xs", color: "#FDE68A", flex: 3, weight: "bold" },
+                  { type: "text", text: reqBank.accountName || reqBank.requesterName || requesterName, size: "xs", color: "#FFFFFF", weight: "bold", flex: 7, wrap: true }
+                ]
+              },
+              {
+                type: "box",
+                layout: "baseline",
+                contents: [
+                  { type: "text", text: "🏦 ธนาคาร:", size: "xs", color: "#FDE68A", flex: 3 },
+                  { type: "text", text: reqBank.bankName || "-", size: "xs", color: reqBank.bankName ? "#FFFFFF" : "#94A3B8", weight: "bold", flex: 7, wrap: true }
+                ]
+              },
+              {
+                type: "box",
+                layout: "baseline",
+                contents: [
+                  { type: "text", text: "💳 เลขบัญชี:", size: "xs", color: "#FDE68A", flex: 3 },
+                  {
+                    type: "text",
+                    text: reqBank.accountNo || "ไม่มีเลขบัญชี",
+                    size: "xs",
+                    color: reqBank.accountNo ? "#34D399" : "#FCA5A5",
+                    weight: "bold",
+                    flex: 7,
+                    wrap: true
+                  }
+                ]
+              }
+            ]
+          }
+        ] : [])
       ],
     },
     body: {
@@ -481,10 +574,10 @@ export function createBillNotificationFlex(bill: {
               type: "box",
               layout: "baseline",
               contents: [
-                { type: "text", text: "ร้าน/บุคคล:", color: "#64748B", size: "xs", flex: 2 },
+                { type: "text", text: isSubBill ? "ร้านค้า/บิล:" : "ร้าน/บุคคล:", color: "#64748B", size: "xs", flex: 2 },
                 {
                   type: "text",
-                  text: resolveVendorName(vendorCandidate, bankInfoMap, bill) || bankInfo?.storeName || bankInfo?.accountName || vendorCandidate,
+                  text: resolveVendorName(vendorCandidate, bankInfoMap, bill as any, peopleMap) || bankInfo?.storeName || bankInfo?.accountName || vendorCandidate,
                   color: "#1E293B",
                   size: "xs",
                   flex: 5,
@@ -544,6 +637,46 @@ export function createBillNotificationFlex(bill: {
                     }
                   ] : [])
                 ]
+              }
+            ] : []),
+            ...(carDisplayName ? [
+              {
+                type: "box",
+                layout: "baseline",
+                contents: [
+                  { type: "text", text: "ทะเบียนรถ:", color: "#64748B", size: "xs", flex: 2 },
+                  { type: "text", text: carDisplayName, color: "#1E293B", size: "xs", weight: "bold", flex: 5, wrap: true },
+                ],
+              }
+            ] : []),
+            ...(staffDisplayName && rawCategory.includes("พนักงาน") ? [
+              {
+                type: "box",
+                layout: "baseline",
+                contents: [
+                  { type: "text", text: "ชื่อพนักงาน:", color: "#64748B", size: "xs", flex: 2 },
+                  { type: "text", text: staffDisplayName, color: "#1E293B", size: "xs", weight: "bold", flex: 5, wrap: true },
+                ],
+              }
+            ] : []),
+            ...(toolDisplayName && rawCategory.includes("เครื่องมือ") ? [
+              {
+                type: "box",
+                layout: "baseline",
+                contents: [
+                  { type: "text", text: "เครื่องมือ:", color: "#64748B", size: "xs", flex: 2 },
+                  { type: "text", text: toolDisplayName, color: "#1E293B", size: "xs", weight: "bold", flex: 5, wrap: true },
+                ],
+              }
+            ] : []),
+            ...(otherDisplayName && rawCategory.includes("อื่นๆ") ? [
+              {
+                type: "box",
+                layout: "baseline",
+                contents: [
+                  { type: "text", text: "รายการ:", color: "#64748B", size: "xs", flex: 2 },
+                  { type: "text", text: otherDisplayName, color: "#1E293B", size: "xs", weight: "bold", flex: 5, wrap: true },
+                ],
               }
             ] : []),
             ...(billDescription && billDescription !== "-" && lineItems.length === 0 ? [
@@ -673,6 +806,8 @@ export function createDailySummaryFlex(summary: {
   pendingCount: number;
   approvedCount: number;
   paidCount?: number;
+  globalPendingCount?: number;
+  bills?: Array<Record<string, any>>;
   title?: string;
 }): Record<string, any> {
   const title = summary.title || "📊 สรุปรายงานการเงินประจำวัน";
@@ -719,6 +854,17 @@ export function createDailySummaryFlex(summary: {
     });
   }
 
+  if (typeof summary.globalPendingCount === "number" && summary.globalPendingCount > 0) {
+    bodyContents.push({
+      type: "box",
+      layout: "horizontal",
+      contents: [
+        { type: "text", text: "📌 รออนุมัติสะสมในระบบ", color: "#64748B", size: "xs" },
+        { type: "text", text: `${summary.globalPendingCount} รายการ`, weight: "bold", color: "#D97706", size: "xs", align: "end" },
+      ],
+    });
+  }
+
   bodyContents.push(
     { type: "separator", margin: "md" },
     {
@@ -731,6 +877,76 @@ export function createDailySummaryFlex(summary: {
       ],
     }
   );
+
+  const previewBills = summary.bills || [];
+  if (previewBills.length > 0) {
+    bodyContents.push(
+      { type: "separator", margin: "md" },
+      {
+        type: "text",
+        text: `📝 รายการบิล (${previewBills.length} รายการ):`,
+        weight: "bold",
+        color: "#475569",
+        size: "xs",
+        margin: "sm"
+      }
+    );
+
+    previewBills.slice(0, 5).forEach((b, idx) => {
+      const d = (b.data && typeof b.data === "object") ? b.data : {};
+      const rawAmt = b["ยอดเงิน"] ?? d["ยอดเงิน"] ?? b.amount ?? d.amount ?? b["ค่าแรง+พนักงาน+อื่นๆ"] ?? d["ค่าแรง+พนักงาน+อื่นๆ"] ?? b["ค่าแรง"] ?? d["ค่าแรง"] ?? b["ค่าจ้าง"] ?? d["ค่าจ้าง"] ?? b["ยอดโอน"] ?? d["ยอดโอน"] ?? 0;
+      const bAmt = typeof rawAmt === "number" ? rawAmt : Number(String(rawAmt).replace(/,/g, "").trim()) || 0;
+      const payee = String(b["ร้าน/บุคคล"] || b.vendor_or_person || b["ผู้รับเหมา"] || b["ร้านค้า"] || b["ผู้เบิก"] || "-").trim();
+      const st = String(b["สถานะ"] || b.status || "-").trim();
+      const isPaid = st.includes("เบิกแล้ว") || st.includes("ปิดงาน") || st.includes("จ่ายแล้ว");
+      const isApproved = !isPaid && st.includes("อนุมัติ");
+      const stColor = isPaid ? "#0284C7" : isApproved ? "#16A34A" : "#D97706";
+
+      bodyContents.push({
+        type: "box",
+        layout: "horizontal",
+        spacing: "xs",
+        contents: [
+          {
+            type: "text",
+            text: `${idx + 1}. [${b.bill_no || b.id || b["ลำดับ"] || "-"}] ${payee}`,
+            size: "xs",
+            color: "#334155",
+            flex: 6,
+            maxLines: 1
+          },
+          {
+            type: "text",
+            text: `฿${bAmt.toLocaleString("th-TH")}`,
+            size: "xs",
+            weight: "bold",
+            color: "#0F172A",
+            align: "end",
+            flex: 4
+          },
+          {
+            type: "text",
+            text: `[${st}]`,
+            size: "xxs",
+            color: stColor,
+            align: "end",
+            flex: 3
+          }
+        ]
+      });
+    });
+
+    if (previewBills.length > 5) {
+      bodyContents.push({
+        type: "text",
+        text: `...และอีก ${previewBills.length - 5} รายการ`,
+        size: "xxs",
+        color: "#94A3B8",
+        align: "center",
+        margin: "xs"
+      });
+    }
+  }
 
   return {
     type: "bubble",
@@ -925,6 +1141,8 @@ export function createEveningSummaryCarouselFlex(summary: {
   totalAmount: number;
   pendingCount: number;
   approvedCount: number;
+  paidCount?: number;
+  globalPendingCount?: number;
   activeWorksCount: number;
   completedWorksCount: number;
   lateTasks?: Array<{ id: any; details: string; assignee?: string }>;
@@ -967,7 +1185,7 @@ export function createEveningSummaryCarouselFlex(summary: {
           type: "box",
           layout: "horizontal",
           contents: [
-            { type: "text", text: "รออนุมัติ", color: "#64748B", size: "sm" },
+            { type: "text", text: "⏳ รออนุมัติ (วันนี้)", color: "#64748B", size: "sm" },
             { type: "text", text: `${summary.pendingCount} รายการ`, weight: "bold", color: "#D97706", size: "sm", align: "end" },
           ],
         },
@@ -975,10 +1193,26 @@ export function createEveningSummaryCarouselFlex(summary: {
           type: "box",
           layout: "horizontal",
           contents: [
-            { type: "text", text: "อนุมัติแล้ว", color: "#64748B", size: "sm" },
+            { type: "text", text: "✅ อนุมัติแล้ว (วันนี้)", color: "#64748B", size: "sm" },
             { type: "text", text: `${summary.approvedCount} รายการ`, weight: "bold", color: "#16A34A", size: "sm", align: "end" },
           ],
         },
+        ...(typeof summary.paidCount === "number" ? [{
+          type: "box",
+          layout: "horizontal",
+          contents: [
+            { type: "text", text: "💸 ปิดงาน/จ่ายแล้ว", color: "#64748B", size: "sm" },
+            { type: "text", text: `${summary.paidCount} รายการ`, weight: "bold", color: "#0284C7", size: "sm", align: "end" },
+          ],
+        }] : []),
+        ...(typeof summary.globalPendingCount === "number" && summary.globalPendingCount > 0 ? [{
+          type: "box",
+          layout: "horizontal",
+          contents: [
+            { type: "text", text: "📌 รออนุมัติสะสมในระบบ", color: "#94A3B8", size: "xs" },
+            { type: "text", text: `${summary.globalPendingCount} รายการ`, weight: "bold", color: "#D97706", size: "xs", align: "end" },
+          ],
+        }] : []),
         { type: "separator" },
         {
           type: "box",
@@ -1117,7 +1351,8 @@ export function createBillSearchResultFlex(
   totalSumAmount?: number,
   filterQuery: string = "",
   peopleMap?: Map<string, string> | Record<string, string>,
-  bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>
+  bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>,
+  carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>
 ): Record<string, any> {
   const count = totalCount ?? bills.length;
   const grandTotal = totalSumAmount ?? bills.reduce((sum, b) => sum + Number(b.amount || 0), 0);
@@ -1213,6 +1448,15 @@ export function createBillSearchResultFlex(
 
           const hasImages = imgList.length > 0;
 
+          const rawCarRef = (b as any)["ทะเบียน"] || (b as any).plate_no || (b as any)["id_car"] || (b as any).id_car;
+          const carPlate = resolveCarDisplayName(rawCarRef, carsMap);
+
+          const rawStaffRef = (b as any)["ชื่อพนักงาน"] || (b as any).staff_name || (b as any)["รหัสพนักงาน"];
+          const staffName = resolveStaffDisplayName(rawStaffRef, peopleMap);
+
+          const rawDesc = b.description || (b as any)["สินค้า/ทำงาน"] || (b as any)["รายละเอียด"] || "-";
+          const cleanDesc = sanitizeFlexItemDescription(rawDesc, carsMap, peopleMap);
+
           const rawItems = (b as any).items || (b as any).data?.items || (b as any)["รายการสินค้า"] || (b as any).line_items;
           let lineItems: Array<{ category?: string; categoryType?: string; amount?: string | number; name?: string; type?: string; price?: string | number; total?: string | number }> = [];
           if (Array.isArray(rawItems) && rawItems.length > 0) {
@@ -1245,8 +1489,57 @@ export function createBillSearchResultFlex(
                   { type: "text", text: requesterName, size: "xxs", color: "#1E293B", flex: 7, wrap: true }
                 ]
               },
-              // Bank Account Information Box (only for main bills)
-              ...(!itemIsSub ? (
+              // Bank Account Information Box
+              ...(itemIsSub ? (() => {
+                const reqBank = resolveRequesterBankInfo(b, bankInfoMap, peopleMap);
+                return [
+                  {
+                    type: "box",
+                    layout: "vertical",
+                    margin: "xs",
+                    paddingAll: "4px",
+                    backgroundColor: "#FFFBEB",
+                    cornerRadius: "4px",
+                    borderWidth: "1px",
+                    borderColor: "#FDE68A",
+                    spacing: "xs",
+                    contents: [
+                      {
+                        type: "box",
+                        layout: "baseline",
+                        contents: [
+                          { type: "text", text: "ผู้เบิก:", size: "xxs", color: "#92400E", flex: 3 },
+                          { type: "text", text: reqBank.accountName || reqBank.requesterName || requesterName, size: "xxs", color: "#78350F", weight: "bold", flex: 7, wrap: true }
+                        ]
+                      },
+                      {
+                        type: "box",
+                        layout: "baseline",
+                        contents: [
+                          { type: "text", text: "ธนาคาร:", size: "xxs", color: "#92400E", flex: 3 },
+                          { type: "text", text: reqBank.bankName || "-", size: "xxs", color: reqBank.bankName ? "#78350F" : "#94A3B8", weight: "bold", flex: 7, wrap: true }
+                        ]
+                      },
+                      {
+                        type: "box",
+                        layout: "baseline",
+                        contents: [
+                          { type: "text", text: "เลขบัญชี:", size: "xxs", color: "#92400E", flex: 3 },
+                          {
+                            type: "text",
+                            text: reqBank.accountNo || "ไม่มีเลขบัญชี",
+                            size: "xxs",
+                            color: reqBank.accountNo ? "#047857" : "#DC2626",
+                            weight: "bold",
+                            flex: 7,
+                            wrap: true
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ];
+              })() : (
                 bankInfo && (bankInfo.accountNo || bankInfo.bankName || bankInfo.accountName) ? [
                   {
                     type: "box",
@@ -1304,15 +1597,37 @@ export function createBillSearchResultFlex(
                     ]
                   }
                 ]
-              ) : []),
-              ...(b.description && b.description !== "-" && lineItems.length === 0 ? [
+              )),
+              ...(carPlate ? [
+                {
+                  type: "box",
+                  layout: "baseline",
+                  margin: "xs",
+                  contents: [
+                    { type: "text", text: "ทะเบียนรถ:", size: "xxs", color: "#64748B", flex: 3 },
+                    { type: "text", text: carPlate, size: "xxs", color: "#0F172A", weight: "bold", flex: 7, wrap: true }
+                  ]
+                }
+              ] : []),
+              ...(staffName && String((b as any)["ประเภท"] || "").includes("พนักงาน") ? [
+                {
+                  type: "box",
+                  layout: "baseline",
+                  margin: "xs",
+                  contents: [
+                    { type: "text", text: "ชื่อพนักงาน:", size: "xxs", color: "#64748B", flex: 3 },
+                    { type: "text", text: staffName, size: "xxs", color: "#0F172A", weight: "bold", flex: 7, wrap: true }
+                  ]
+                }
+              ] : []),
+              ...(cleanDesc && cleanDesc !== "-" && lineItems.length === 0 ? [
                 {
                   type: "box",
                   layout: "baseline",
                   margin: "xs",
                   contents: [
                     { type: "text", text: "รายละเอียด:", size: "xxs", color: "#64748B", flex: 3 },
-                    { type: "text", text: b.description || "-", size: "xxs", color: "#334155", flex: 7, wrap: true }
+                    { type: "text", text: cleanDesc, size: "xxs", color: "#334155", flex: 7, wrap: true }
                   ]
                 }
               ] : []),
@@ -2370,6 +2685,155 @@ export async function getPeopleMap(forceRefresh = false): Promise<Map<string, st
   return peopleMap;
 }
 
+export type CarLookupInfo = {
+  id: string;
+  plateNo: string;
+  brand: string;
+  color: string;
+  responsiblePerson: string;
+  owner: string;
+  displayName: string;
+};
+
+let cachedCarsMap: Map<string, CarLookupInfo> | null = null;
+let cachedCarsMapTime = 0;
+
+export async function getCarsMap(forceRefresh = false): Promise<Map<string, CarLookupInfo>> {
+  const now = Date.now();
+  if (!forceRefresh && cachedCarsMap && (now - cachedCarsMapTime < CACHE_TTL_MS)) {
+    return cachedCarsMap;
+  }
+
+  const carsMap = new Map<string, CarLookupInfo>();
+  try {
+    const { data: cars } = await supabaseAdmin.from("cars").select("*");
+    if (cars && cars.length > 0) {
+      for (const c of cars) {
+        const dataObj = (c.data && typeof c.data === "object") ? c.data : {};
+        const id = String(c.id || c.id_car || c["id_car"] || dataObj.id || dataObj.id_car || "").trim();
+        const plateNo = String(c.plate_no || c["หมายเลขทะเบียน"] || c["ทะเบียน"] || dataObj.plate_no || dataObj["หมายเลขทะเบียน"] || "").trim();
+        const brand = String(c.brand || c["ยี่ห้อรถ"] || dataObj.brand || dataObj["ยี่ห้อรถ"] || "").trim();
+        const color = String(c.color || c["สี"] || dataObj.color || dataObj["สี"] || "").trim();
+        const responsiblePerson = String(c.responsible_person || c["รับผิดชอบ"] || dataObj.responsible_person || dataObj["รับผิดชอบ"] || "").trim();
+        const owner = String(c.owner || c["รถของ"] || dataObj.owner || dataObj["รถของ"] || "").trim();
+
+        // Build human-friendly displayName (e.g. "1ฒล3982 (Toyota)" or "1ฒล3982")
+        let displayName = plateNo;
+        if (brand && !displayName.includes(brand)) {
+          displayName = displayName ? `${displayName} (${brand})` : brand;
+        }
+        if (!displayName) displayName = id;
+
+        const info: CarLookupInfo = {
+          id,
+          plateNo,
+          brand,
+          color,
+          responsiblePerson,
+          owner,
+          displayName
+        };
+
+        if (id) {
+          carsMap.set(id, info);
+          carsMap.set(id.toLowerCase(), info);
+          carsMap.set(id.toUpperCase(), info);
+          const cleanId = id.toLowerCase().replace(/^car[-_]?/i, "").trim();
+          if (cleanId) {
+            carsMap.set(cleanId, info);
+            carsMap.set(`car${cleanId}`, info);
+            carsMap.set(`Car${cleanId}`, info);
+            carsMap.set(`CAR${cleanId}`, info);
+          }
+        }
+        if (plateNo) {
+          carsMap.set(plateNo, info);
+          carsMap.set(plateNo.toLowerCase(), info);
+          carsMap.set(plateNo.replace(/\s+/g, ""), info);
+        }
+      }
+    }
+    cachedCarsMap = carsMap;
+    cachedCarsMapTime = now;
+  } catch (e) {
+    console.warn("⚠️ Failed to fetch cars map for Flex resolution:", e);
+  }
+
+  return carsMap;
+}
+
+export function resolveCarDisplayName(
+  rawCar: unknown,
+  carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>
+): string {
+  const raw = String(rawCar || "").trim();
+  if (!raw || raw === "-" || raw === "non") return "";
+
+  const map = carsMap || cachedCarsMap || undefined;
+  if (map) {
+    if (map instanceof Map) {
+      if (map.has(raw)) return map.get(raw)!.displayName;
+      if (map.has(raw.toLowerCase())) return map.get(raw.toLowerCase())!.displayName;
+      if (map.has(raw.toUpperCase())) return map.get(raw.toUpperCase())!.displayName;
+      const clean = raw.toLowerCase().replace(/^car[-_]?/i, "").trim();
+      if (clean && map.has(clean)) return map.get(clean)!.displayName;
+      if (clean && map.has(`car${clean}`)) return map.get(`car${clean}`)!.displayName;
+      if (clean && map.has(`Car${clean}`)) return map.get(`Car${clean}`)!.displayName;
+      if (clean && map.has(`CAR${clean}`)) return map.get(`CAR${clean}`)!.displayName;
+    } else if (typeof map === "object") {
+      if (map[raw]) return map[raw].displayName;
+      if (map[raw.toLowerCase()]) return map[raw.toLowerCase()].displayName;
+      if (map[raw.toUpperCase()]) return map[raw.toUpperCase()].displayName;
+    }
+  }
+
+  return raw;
+}
+
+export function resolveStaffDisplayName(
+  rawStaff: unknown,
+  peopleMap?: Map<string, string> | Record<string, string>
+): string {
+  const raw = String(rawStaff || "").trim();
+  if (!raw || raw === "-" || raw === "non") return "";
+  return resolveRequesterNameFromMap(raw, peopleMap);
+}
+
+export function sanitizeFlexItemDescription(
+  desc: string,
+  carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>,
+  peopleMap?: Map<string, string> | Record<string, string>
+): string {
+  if (!desc || desc === "-") return desc;
+  let result = desc;
+
+  const mapC = carsMap || cachedCarsMap || undefined;
+  if (mapC && mapC instanceof Map) {
+    for (const [key, info] of mapC.entries()) {
+      if (key && key.length >= 3 && /^[a-zA-Z0-9\-_]+$/.test(key) && !/^\d+$/.test(key)) {
+        const regex = new RegExp(`\\b${key}\\b`, "gi");
+        if (regex.test(result)) {
+          result = result.replace(regex, info.displayName);
+        }
+      }
+    }
+  }
+
+  const mapP = peopleMap || cachedPeopleMap || undefined;
+  if (mapP && mapP instanceof Map) {
+    for (const [key, name] of mapP.entries()) {
+      if (key && key.length >= 3 && /^pt\d+/i.test(key)) {
+        const regex = new RegExp(`\\b${key}\\b`, "gi");
+        if (regex.test(result)) {
+          result = result.replace(regex, name);
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
 export type BankLookupInfo = {
   accountName?: string;
   accountNo?: string;
@@ -3164,6 +3628,102 @@ export function resolveBankInfo(
   };
 }
 
+/**
+ * Resolve requester's personal bank account information for sub-bills ("บิลย่อย")
+ */
+export function resolveRequesterBankInfo(
+  bill: any,
+  bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>,
+  peopleMap?: Map<string, string> | Record<string, string>
+): {
+  requesterName: string;
+  accountName?: string;
+  accountNo?: string;
+  bankName?: string;
+} {
+  const getFromMap = (key: string): BankLookupInfo | undefined => {
+    if (!key) return undefined;
+    const cleanKey = key.trim();
+    const mapsToCheck: Array<Map<string, BankLookupInfo> | Record<string, BankLookupInfo> | undefined> = [
+      bankInfoMap,
+      cachedBankInfoMap || undefined
+    ];
+
+    for (const map of mapsToCheck) {
+      if (!map) continue;
+      if (map instanceof Map) {
+        if (map.has(cleanKey)) return map.get(cleanKey);
+        if (map.has(cleanKey.toLowerCase())) return map.get(cleanKey.toLowerCase());
+        if (map.has(cleanKey.toUpperCase())) return map.get(cleanKey.toUpperCase());
+        const cleanId = cleanKey.toLowerCase().replace(/^(pt|pe)[-_]?/i, "").trim();
+        if (cleanId && map.has(cleanId)) return map.get(cleanId);
+      } else if (typeof map === "object") {
+        if (map[cleanKey]) return map[cleanKey];
+        if (map[cleanKey.toLowerCase()]) return map[cleanKey.toLowerCase()];
+        if (map[cleanKey.toUpperCase()]) return map[cleanKey.toUpperCase()];
+        const cleanId = cleanKey.toLowerCase().replace(/^(pt|pe)[-_]?/i, "").trim();
+        if (cleanId && map[cleanId]) return map[cleanId];
+      }
+    }
+    return undefined;
+  };
+
+  const cleanBankVal = (raw?: string) => {
+    if (!raw || raw === "non" || raw === "-") return "";
+    const trimmed = String(raw).trim();
+    const lower = trimmed.toLowerCase();
+    const mapped = DEFAULT_THAI_BANKS[lower];
+    if (mapped) return mapped;
+    const stripped = trimmed.replace(/^Ba\d+\s*[-–—]?\s*/i, "").replace(/^ธนาคาร\s*/, "").trim();
+    if (stripped && stripped !== "non" && stripped !== "-") {
+      const strippedMapped = DEFAULT_THAI_BANKS[stripped.toLowerCase()];
+      if (strippedMapped) return strippedMapped;
+      return stripped;
+    }
+    return "";
+  };
+
+  const rawRequester = String(
+    bill["ผู้เบิก"] ||
+    bill.requester ||
+    bill.data?.["ผู้เบิก"] ||
+    bill.data?.requester ||
+    bill.data?.data?.["ผู้เบิก"] ||
+    ""
+  ).trim();
+
+  let requesterInfo = getFromMap(rawRequester);
+  if (!requesterInfo && rawRequester.includes(" - ")) {
+    const parts = rawRequester.split(" - ");
+    requesterInfo = getFromMap(parts[0].trim()) || getFromMap(parts[1].trim());
+  }
+  if (!requesterInfo && rawRequester.includes("/")) {
+    const parts = rawRequester.split("/");
+    requesterInfo = getFromMap(parts[0].trim()) || getFromMap(parts[1].trim());
+  }
+
+  // Resolve display name for requester
+  let displayName = resolveRequesterNameFromMap(rawRequester, peopleMap);
+  if (!displayName || displayName === "-" || displayName === rawRequester) {
+    displayName = requesterInfo?.accountName || requesterInfo?.storeName || rawRequester || "-";
+  }
+
+  const directAccountNo = String(bill["เลขบัญชี"] || bill.bank_account || bill.data?.["เลขบัญชี"] || bill.data?.bank_account || bill.data?.data?.["เลขบัญชี"] || "").trim();
+  const rawDirectBank = String(bill["ธนาคาร"] || bill.bank_name || bill.bank || bill.data?.["ธนาคาร"] || bill.data?.bank_name || bill.data?.data?.["ธนาคาร"] || "").trim();
+  const directAccountName = String(bill["ชื่อบัญชี"] || bill.account_name || bill.data?.["ชื่อบัญชี"] || bill.data?.account_name || bill.data?.data?.["ชื่อบัญชี"] || "").trim();
+
+  const accountNo = (directAccountNo && directAccountNo !== "non" && directAccountNo !== "-") ? directAccountNo : (requesterInfo?.accountNo || "");
+  const accountName = directAccountName || requesterInfo?.accountName || displayName || "";
+  const bankName = cleanBankVal(rawDirectBank || requesterInfo?.bankName);
+
+  return {
+    requesterName: displayName,
+    accountName: accountName || undefined,
+    accountNo: (accountNo && accountNo !== "non" && accountNo !== "-") ? accountNo : undefined,
+    bankName: bankName || undefined,
+  };
+}
+
 export async function getOperatorDisplayName(userId?: string, fallbackRole = "เจ้าของโครงการ"): Promise<string> {
   if (!userId) return "ระบบ Web Dashboard";
   const pMap = await getPeopleMap();
@@ -3377,7 +3937,8 @@ export function createMultiBillFlex(
   peopleMap?: Map<string, string> | Record<string, string>,
   bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>,
   contractMap?: Map<string, any> | Record<string, any>,
-  projectBudgetMap?: Map<string, any> | Record<string, any>
+  projectBudgetMap?: Map<string, any> | Record<string, any>,
+  carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>
 ): Record<string, any> {
   const bills = Array.isArray(billsInput) ? billsInput : [billsInput];
   if (bills.length === 0) {
@@ -3395,34 +3956,99 @@ export function createMultiBillFlex(
     if (b.requester_name || b["ชื่อผู้เบิก"] || b.requesterName) {
       return String(b.requester_name || b["ชื่อผู้เบิก"] || b.requesterName);
     }
-    const raw = String(b["ผู้เบิก"] || b.requester || "").trim();
+    const raw = String(
+      b["ผู้เบิก"] ||
+      b.requester ||
+      b.data?.["ผู้เบิก"] ||
+      b.data?.requester ||
+      b.data?.["ชื่อผู้เบิก"] ||
+      ""
+    ).trim();
     if (!raw) return "-";
     return resolveRequesterNameFromMap(raw, peopleMap);
   }
 
   function getCreatorDisplayName(b: Record<string, any>): string {
-    const raw = String(b["ผู้สร้างบิล"] || b.created_by || b["ผู้บันทึก"] || "").trim();
+    const raw = String(
+      b["ผู้สร้างบิล"] ||
+      b.created_by ||
+      b["ผู้บันทึก"] ||
+      b["ผู้สร้างบิลตั้งเบิก"] ||
+      b.creator ||
+      b.data?.["ผู้สร้างบิล"] ||
+      b.data?.created_by ||
+      b.data?.["ผู้บันทึก"] ||
+      b.data?.["ผู้สร้างบิลตั้งเบิก"] ||
+      ""
+    ).trim();
     if (!raw) return "";
     return resolveRequesterNameFromMap(raw, peopleMap);
   }
 
   const mode = options.mode || "search";
 
+  // Helper to reliably check if a bill has active deduction (ignores spreadsheet formulas when deduction is not requested)
+  function resolveBillDeductionInfo(b: Record<string, any>): { hasDeduct: boolean; deductAmt: number; deductPercent: string } {
+    const rawD = String(b["หัก"] || b.deduct_percent || b.deduct || b.data?.["หัก"] || b.data?.deduct_percent || "").trim();
+    const rawDLower = rawD.toLowerCase();
+    const isActive = Boolean(
+      rawD &&
+      rawD !== "-" &&
+      rawD !== "0" &&
+      rawD !== "0%" &&
+      rawDLower !== "ไม่มี" &&
+      !rawDLower.includes("ไม่มีการหักภาษี") &&
+      !rawDLower.includes("ไม่มีหัก") &&
+      rawDLower !== "false" &&
+      rawDLower !== "no"
+    );
+
+    const gross = Number(b["ยอดเงิน"] || b.amount || 0);
+    if (!isActive) {
+      return { hasDeduct: false, deductAmt: 0, deductPercent: "" };
+    }
+
+    const cleanD = rawD.replace(/หัก|\s|%/g, "").trim();
+    const numRate = Number(cleanD);
+    const rawCustom = Number(b["จำนวนหัก"] || b.deduct_amount || 0);
+
+    let deductAmt = 0;
+    let deductPercent = "";
+
+    if (rawCustom > 0) {
+      deductAmt = rawCustom;
+      deductPercent = gross > 0 ? String(Math.round((deductAmt / gross) * 100)) : (numRate > 0 ? String(numRate) : "");
+    } else if (numRate > 0 && gross > 0) {
+      deductPercent = String(numRate);
+      deductAmt = Math.round((gross * numRate) / 100 * 100) / 100;
+    } else {
+      const sheet3Percent = Number(b["3เปอร์"] || 0);
+      if (sheet3Percent > 0) {
+        deductAmt = sheet3Percent;
+        deductPercent = gross > 0 ? String(Math.round((deductAmt / gross) * 100)) : "3";
+      }
+    }
+
+    return {
+      hasDeduct: deductAmt > 0 || isActive,
+      deductAmt,
+      deductPercent
+    };
+  }
+
   const totalGrossAmount = bills.reduce((sum, b) => sum + Number(b["ยอดเงิน"] || b.amount || 0), 0);
   const totalNetTransfer = bills.reduce((sum, b) => {
     const gross = Number(b["ยอดเงิน"] || b.amount || 0);
-    const deductAmt = Number(b["จำนวนหัก"] || b["3เปอร์"] || b.deduct_amount || 0);
+    const dInfo = resolveBillDeductionInfo(b);
     const net = Number(b["ยอดโอน"] || b.net_amount || 0);
-    if (net > 0) return sum + net;
-    if (deductAmt > 0) return sum + (gross - deductAmt);
-    return sum + gross;
+    if (net > 0 && dInfo.hasDeduct) return sum + net;
+    if (dInfo.hasDeduct && dInfo.deductAmt > 0) return sum + (gross - dInfo.deductAmt);
+    return sum + (net > 0 && !dInfo.hasDeduct ? net : gross);
   }, 0);
 
   const hasAnyDeduction = bills.some(b => {
-    const gross = Number(b["ยอดเงิน"] || b.amount || 0);
-    const deductAmt = Number(b["จำนวนหัก"] || b["3เปอร์"] || b.deduct_amount || 0);
-    const net = Number(b["ยอดโอน"] || b.net_amount || 0);
-    return deductAmt > 0 || (net > 0 && net !== gross);
+    const dInfo = resolveBillDeductionInfo(b);
+    return dInfo.hasDeduct && dInfo.deductAmt > 0;
   });
 
   const formattedGrossTotal = totalGrossAmount.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -3505,28 +4131,32 @@ export function createMultiBillFlex(
     const itemsContents = pageBills.map((b, idx) => {
       const bId = String(b._sheetRow || b.id || b["ลำดับ"] || startNum + idx);
       const grossAmt = Number(b["ยอดเงิน"] || b.amount || 0);
-      const deductPercent = String(b["หัก"] || b.deduct_percent || "").trim();
-      let deductAmt = Number(b["จำนวนหัก"] || b["3เปอร์"] || b.deduct_amount || 0);
-      if (!deductAmt && deductPercent && Number(deductPercent.replace(/หัก|\s|%/g, "")) > 0 && grossAmt > 0) {
-        deductAmt = Math.round((grossAmt * Number(deductPercent.replace(/หัก|\s|%/g, ""))) / 100 * 100) / 100;
-      }
+      const dInfo = resolveBillDeductionInfo(b);
+      const deductAmt = dInfo.deductAmt;
+      const hasDeduct = dInfo.hasDeduct;
       const rawNet = Number(b["ยอดโอน"] || b.net_amount || 0);
-      const netTransferAmt = rawNet > 0 ? rawNet : (deductAmt > 0 ? grossAmt - deductAmt : grossAmt);
-      const hasDeduct = deductAmt > 0 || (netTransferAmt > 0 && netTransferAmt !== grossAmt);
+      const netTransferAmt = hasDeduct
+        ? (rawNet > 0 ? rawNet : (deductAmt > 0 ? grossAmt - deductAmt : grossAmt))
+        : (rawNet > 0 ? rawNet : grossAmt);
 
-      let cleanPercent = String(deductPercent || "").replace(/หัก|\s|%/g, "").trim();
-      if (!cleanPercent && deductAmt > 0 && grossAmt > 0) {
-        cleanPercent = String(Math.round((deductAmt / grossAmt) * 100));
-      }
+      const cleanPercent = dInfo.deductPercent;
       const percentLabel = cleanPercent ? `หัก ${cleanPercent}%` : "หัก ณ ที่จ่าย";
 
       const requesterName = getRequesterDisplayName(b);
       const creatorName = getCreatorDisplayName(b);
+
+      const rawCatName = String(b["ประเภท"] || b.category || b.data?.["ประเภท"] || "").trim();
+      const rawStaffRef = b["ชื่อพนักงาน"] || b.staff_name || b["รหัสพนักงาน"] || b.data?.["ชื่อพนักงาน"] || b.data?.staff_name;
+      const staffName = resolveStaffDisplayName(rawStaffRef, peopleMap);
+      const isStaffBill = rawCatName.includes("พนักงาน") || rawCatName.startsWith("3.") || Boolean(rawStaffRef && !b["ผู้รับเหมา"]);
+
       const rawVendorType = String(b["ร้านค้า/ผู้รับเหมา"] || b.vendor_type || "").trim();
-      const isContractor = rawVendorType === "ผู้รับเหมา" || Boolean(b["ผู้รับเหมา"]) || Boolean(b.contractor_id);
-      const vendorLabel = isContractor ? "ผู้รับเหมา" : "ร้าน";
+      const isContractor = !isStaffBill && (rawVendorType === "ผู้รับเหมา" || Boolean(b["ผู้รับเหมา"]) || Boolean(b.contractor_id));
+      const vendorLabel = isStaffBill ? "พนักงาน" : (isContractor ? "ผู้รับเหมา" : "ร้าน");
       let rawVendorCandidate = "";
-      if (isContractor) {
+      if (isStaffBill) {
+        rawVendorCandidate = staffName || rawStaffRef || "พนักงาน";
+      } else if (isContractor) {
         rawVendorCandidate = b["ชื่อผู้รับเหมา"] || b.contractor_name || b["ผู้รับเหมา"] || b.contractor_id || b["ร้าน/บุคคล"] || b.vendor_or_person || "-";
       } else {
         const namedVendor = String(b["ชื่อร้านค้า"] || b.store_name || b["ร้าน/บุคคล"] || b.vendor_or_person || b.data?.["ร้าน/บุคคล"] || b.data?.vendor_or_person || "").trim();
@@ -3541,7 +4171,8 @@ export function createMultiBillFlex(
       }
       const bankInfo = resolveBankInfo(b, bankInfoMap);
       const isSubBill = isSubBillRecord(b);
-      let vendorName = resolveVendorName(rawVendorCandidate, bankInfoMap, b, peopleMap);
+      const reqBank = resolveRequesterBankInfo(b, bankInfoMap, peopleMap);
+      let vendorName = isStaffBill ? (staffName || rawVendorCandidate) : resolveVendorName(rawVendorCandidate, bankInfoMap, b, peopleMap);
       if ((!vendorName || vendorName === "-" || /^[a-zA-Z]{1,3}[-_]?\d+$/.test(vendorName)) && bankInfo) {
         vendorName = bankInfo.storeName || bankInfo.accountName || vendorName;
       }
@@ -3625,8 +4256,41 @@ export function createMultiBillFlex(
       const billKey = String(b.id || b._sheetRow || b["ลำดับ"] || b.data?.id || b.data?.["ลำดับ"] || "").trim();
       const alreadyCountedInPaid = Boolean(billKey && projInfo?.paidBillIds && projInfo.paidBillIds.has(billKey));
 
-      const rawCatName = String(b["ประเภท"] || b.category || b.data?.["ประเภท"] || "").trim();
-      const isLaborBill = isContractor || rawCatName.includes("ค่าแรง") || rawCatName.startsWith("2.") || Boolean(matchedContract) || derivedContractTotal > 0;
+      const isLaborBill = !isStaffBill && (isContractor || rawCatName.includes("ค่าแรง") || rawCatName.startsWith("2.") || Boolean(matchedContract) || derivedContractTotal > 0);
+
+      // Detect VAT tag (แสดงเฉพาะบิลที่มีการระบุ VAT จริงเท่านั้น)
+      let vatTag = "";
+      const rawVat = b.vat ?? b["vat"] ?? b["VAT"] ?? b["Vat"] ?? b["ภาษี"] ?? b["ภาษีมูลค่าเพิ่ม"] ??
+        b.data?.vat ?? b.data?.["vat"] ?? b.data?.["VAT"] ?? b.data?.["Vat"] ?? b.data?.["ภาษี"] ?? b.data?.["ภาษีมูลค่าเพิ่ม"];
+      if (rawVat !== null && rawVat !== undefined) {
+        const str = String(rawVat).trim();
+        const lower = str.toLowerCase();
+        if (str && str !== "-" && str !== "0" && str !== "0%" && str !== "0.00" && lower !== "ไม่มี" && lower !== "ไม่มี vat" && lower !== "false" && lower !== "no") {
+          const numMatch = str.match(/\d+(\.\d+)?/);
+          if (numMatch && Number(numMatch[0]) > 0) {
+            vatTag = `(VAT ${numMatch[0]}%)`;
+          } else {
+            vatTag = "(VAT 7%)";
+          }
+        }
+      }
+      if (!vatTag) {
+        const rawVatTotal = b["ยอดรวม vat"] ?? b["ยอดรวม VAT"] ?? b.data?.["ยอดรวม vat"] ?? b.data?.["ยอดรวม VAT"];
+        if (rawVatTotal !== null && rawVatTotal !== undefined && String(rawVatTotal).trim() !== "" && String(rawVatTotal).trim() !== "-") {
+          const num = Number(String(rawVatTotal).replace(/,/g, ""));
+          if (!isNaN(num) && grossAmt > 0 && num > grossAmt * 1.01) {
+            vatTag = "(VAT 7%)";
+          }
+        }
+      }
+
+      // Deduction tag (only when deduction is actually active)
+      const deductTag = dInfo.hasDeduct
+        ? (dInfo.deductPercent ? `(หัก ${dInfo.deductPercent}%)` : "(หัก)")
+        : "";
+
+      // Combined Sub-tag under price
+      const priceSubTag = [vatTag, deductTag].filter(Boolean).join(" ");
 
       let laborLine1 = "";
       let laborLine2 = "";
@@ -3651,80 +4315,128 @@ export function createMultiBillFlex(
           ? `งบค่าแรงทั้งหมด ${totalLaborBudget.toLocaleString("th-TH")} | ${projectLaborSpent.toLocaleString("th-TH")} (${laborPercent}%)`
           : (projectLaborSpent > 0 ? `งบค่าแรงทั้งหมด: ไม่ได้ตั้ง | ${projectLaborSpent.toLocaleString("th-TH")}` : `งบค่าแรงทั้งหมด: -`);
 
-        // Line 2: งบเปิดจ้าง [ยอดงบเปิดจ้าง] | ใช้ไป [ค่าที่เปิดสำเร็จไปแล้ว]([%])
-        const pIdKey = String(b["ID Project"] || b.project_id || b.data?.project_id || b.data?.["ID Project"] || "").trim();
-        const pNameKey = String(b["ชื่อ Project"] || b.project_name || b.data?.project_name || b.data?.["ชื่อ Project"] || "").trim();
-        const totalContractedSoFar = Number(
-          (activeContractMap instanceof Map
-            ? (activeContractMap.get(`__total_contracted_${pIdKey}`) ||
-               activeContractMap.get(`__total_contracted_${pIdKey.toLowerCase()}`) ||
-               activeContractMap.get(`__total_contracted_${pNameKey}`) ||
-               activeContractMap.get(`__total_contracted_${pNameKey.toLowerCase()}`))
-            : ((activeContractMap as any)?.[`__total_contracted_${pIdKey}`] || (activeContractMap as any)?.[`__total_contracted_${pNameKey}`])) ||
-          0
-        );
-
-        // Line 2: งบเปิดจ้าง [ยอดงบเปิดจ้าง] | เบิก [ยอดขอเบิกบิลนี้]([หัก %])
+        // Line 2: งบเปิดจ้าง [ยอดงบเปิดจ้าง] | จ่ายแล้ว [ยอดจ่ายสะสมของสัญญา] ([%])
         const hireBudgetCap = derivedContractTotal > 0 ? derivedContractTotal : openHireBudget;
 
-        // ดึงเปอร์เซ็นต์หัก ณ ที่จ่าย (เช่น 3% สำหรับค่าแรงบุคคลธรรมดา หรือตามที่ระบุในบิล)
-        let billDeductPercent = cleanPercent;
-        if (!billDeductPercent) {
-          const rawD = String(b["หัก"] || b.deduct_percent || b.data?.["หัก"] || "").replace(/หัก|\s|%/g, "").trim();
-          if (rawD && Number(rawD) > 0) {
-            billDeductPercent = rawD;
-          }
-        }
-        if (!billDeductPercent && deductAmt > 0 && grossAmt > 0) {
-          billDeductPercent = String(Math.round((deductAmt / grossAmt) * 100));
-        }
-        if (!billDeductPercent && isLaborBill) {
-          const laborStatus = String(b["statusค่าแรง"] || b.labor_status || b.data?.["statusค่าแรง"] || "").trim();
-          if (laborStatus === "บุคคลธรรมดา" || isContractor || Boolean(matchedContract)) {
-            billDeductPercent = "3";
+        if (hireBudgetCap > 0 || paidNum > 0) {
+          if (derivedContractTotal > 0) {
+            const paidPercent = Math.round((paidNum / derivedContractTotal) * 100);
+            laborLine2 = `งบเปิดจ้าง ${hireBudgetCap.toLocaleString("th-TH")} | จ่ายแล้ว ${paidNum.toLocaleString("th-TH")} (${paidPercent}%)`;
+          } else if (hireBudgetCap > 0) {
+            laborLine2 = paidNum > 0
+              ? `งบเปิดจ้าง ${hireBudgetCap.toLocaleString("th-TH")} | จ่ายแล้ว ${paidNum.toLocaleString("th-TH")}`
+              : `งบเปิดจ้าง ${hireBudgetCap.toLocaleString("th-TH")} | จ่ายแล้ว 0 (0%)`;
+          } else {
+            laborLine2 = `จ่ายแล้ว ${paidNum.toLocaleString("th-TH")}`;
           }
         }
 
-        const deductTag = billDeductPercent ? `(หัก ${billDeductPercent}%)` : (hasDeduct ? "(หัก)" : "");
-
-        if (hireBudgetCap > 0 || grossAmt > 0) {
-          laborLine2 = `งบเปิดจ้าง ${hireBudgetCap.toLocaleString("th-TH")} | เบิก ${grossAmt.toLocaleString("th-TH")}${deductTag}`;
+        // Line 3: เบิก [ยอดขอเบิกบิลนี้]
+        if (grossAmt > 0) {
+          laborLine3 = `เบิก ${grossAmt.toLocaleString("th-TH")}`;
         }
+      } else if (isStaffBill) {
+        // Staff Expense / Advance -> Staff Budget Control ("งบพนักงาน" หรือ "งบค่าแรงทั้งหมด" หากไม่ได้ตั้งค่าแรงพนักงาน)
+        const staffBudget = Number(
+          b["งบไม่เกินพนักงาน"] ||
+          b.data?.["งบไม่เกินพนักงาน"] ||
+          projInfo?.catBudgets?.["พนักงาน"] ||
+          projInfo?.allBudgets?.["งบไม่เกินพนักงาน"] ||
+          0
+        );
+        const staffPaid = Number(projInfo?.catPaidSpent?.["พนักงาน"] || 0) + (isBillPaid && !alreadyCountedInPaid ? grossAmt : 0);
 
-        // Line 3: จ่ายแล้ว [ยอดจ่ายสะสมของสัญญา] ([%])
-        if (derivedContractTotal > 0) {
-          const paidPercent = Math.round((paidNum / derivedContractTotal) * 100);
-          laborLine3 = `จ่ายแล้ว ${paidNum.toLocaleString("th-TH")} (${paidPercent}%)`;
-        } else if (paidNum > 0) {
-          laborLine3 = `จ่ายแล้ว ${paidNum.toLocaleString("th-TH")}`;
+        if (staffBudget > 0) {
+          percentUsed = Math.round((staffPaid / staffBudget) * 100);
+          budgetSummaryText = `งบพนักงาน   ฿${staffBudget.toLocaleString("th-TH")} / เบิกแล้ว ฿${staffPaid.toLocaleString("th-TH")} (${percentUsed}%)`;
+        } else {
+          // หากไม่ได้ตั้งค่าแรงพนักงาน -> ดึงควบคุมค่าแรงทั้งหมดของโครงการมาแสดง
+          const openHireBudget = Number(
+            b["งบไม่เกินค่าแรง"] ||
+            b.data?.["งบไม่เกินค่าแรง"] ||
+            projInfo?.catBudgets?.["ค่าแรง"] ||
+            projInfo?.allBudgets?.["งบไม่เกินค่าแรง"] ||
+            0
+          );
+          const totalLaborBudget = openHireBudget > 0 ? openHireBudget : Number(projInfo?.budget || 0);
+
+          let totalLaborPaid = Number(projInfo?.catPaidSpent?.["ค่าแรง"] || 0) + Number(projInfo?.catPaidSpent?.["พนักงาน"] || 0);
+          if (totalLaborPaid === 0) {
+            const spentSum = Number(projInfo?.catSpent?.["ค่าแรง"] || 0) + Number(projInfo?.catSpent?.["พนักงาน"] || 0);
+            if (spentSum > 0) {
+              totalLaborPaid = spentSum;
+            }
+          }
+          if (isBillPaid && !alreadyCountedInPaid) {
+            totalLaborPaid += grossAmt;
+          }
+
+          if (totalLaborBudget > 0) {
+            percentUsed = Math.round((totalLaborPaid / totalLaborBudget) * 100);
+            budgetSummaryText = `งบค่าแรงทั้งหมด   ฿${totalLaborBudget.toLocaleString("th-TH")} / เบิกแล้ว ฿${totalLaborPaid.toLocaleString("th-TH")} (${percentUsed}%)`;
+          } else if (totalLaborPaid > 0) {
+            budgetSummaryText = `งบค่าแรงทั้งหมด   เบิกแล้ว ฿${totalLaborPaid.toLocaleString("th-TH")}`;
+          }
         }
       } else {
-        // General Store Bill / Bill without contract -> Category Budget or Project Budget Control
+        // General Store Bill / Non-labor Bill -> Material Budget Control ("งบค่าของ")
         if (projInfo) {
-          const billCategory = resolveBillExpenseCategory(b);
-          const catBudget = billCategory && projInfo.catBudgets ? Number(projInfo.catBudgets[billCategory] || 0) : 0;
+          // 1. คำนวณงบค่าของ (Material Budget):
+          // ดึงจาก catBudgets["ค่าของ"] หรือ allBudgets["งบไม่เกินค่าของ"]
+          let materialBudget = Number(projInfo.catBudgets?.["ค่าของ"] || projInfo.allBudgets?.["งบไม่เกินค่าของ"] || 0);
 
-          if (catBudget > 0) {
-            let catPaid = Number(projInfo.catPaidSpent?.[billCategory] || 0);
-            if (isBillPaid && !alreadyCountedInPaid) {
-              catPaid += grossAmt;
+          // หักลบงบค่าแรงทั้งหมดกรณีระบุแค่งบโครงการรวม
+          const laborDirectBudget = Number(projInfo.catBudgets?.["ค่าแรง"] || projInfo.allBudgets?.["งบไม่เกินค่าแรง"] || 0);
+          const staffLaborBudget = Number(projInfo.catBudgets?.["พนักงาน"] || projInfo.allBudgets?.["งบไม่เกินพนักงาน"] || 0);
+          const totalLaborBudget = laborDirectBudget + staffLaborBudget;
+
+          if (materialBudget <= 0 && Number(projInfo.budget) > 0) {
+            materialBudget = Math.max(0, Number(projInfo.budget) - totalLaborBudget);
+            if (materialBudget <= 0) {
+              materialBudget = Number(projInfo.budget);
             }
-            percentUsed = Math.round((catPaid / catBudget) * 100);
-            budgetSummaryText = `งบ${billCategory}   ฿${catBudget.toLocaleString("th-TH")} / เบิกแล้ว ฿${catPaid.toLocaleString("th-TH")} (${percentUsed}%)`;
-          } else if (Number(projInfo.budget) > 0) {
-            const pBudget = Number(projInfo.budget);
-            let pPaid = Number(projInfo.paidSpent || 0);
-            if (isBillPaid && !alreadyCountedInPaid) {
-              pPaid += grossAmt;
-            }
-            percentUsed = Math.round((pPaid / pBudget) * 100);
-            budgetSummaryText = `งบโครงการ   ฿${pBudget.toLocaleString("th-TH")} / เบิกแล้ว ฿${pPaid.toLocaleString("th-TH")} (${percentUsed}%)`;
+          }
+
+          // 2. คำนวณยอดเบิกจ่ายจริงของหมวดค่าของ (Material Paid/Spent):
+          // รวมยอดเบิกจ่ายทุกหมวดที่ไม่ใช่ค่าแรง (ค่าของ, เครื่องจักร, น้ำมัน, ซ่อมรถ, เครื่องมือ, อื่นๆ, ฯลฯ)
+          const totalLaborPaid = Number(projInfo.catPaidSpent?.["ค่าแรง"] || 0) + Number(projInfo.catPaidSpent?.["พนักงาน"] || 0);
+          const nonLaborCatPaid = Object.entries(projInfo.catPaidSpent || {})
+            .filter(([cat]) => cat !== "ค่าแรง" && cat !== "พนักงาน")
+            .reduce((sum, [, val]) => sum + Number(val || 0), 0);
+
+          let materialPaid = Math.max(
+            Number(projInfo.catPaidSpent?.["ค่าของ"] || 0),
+            nonLaborCatPaid,
+            Math.max(0, Number(projInfo.paidSpent || 0) - totalLaborPaid)
+          );
+
+          if (isBillPaid && !alreadyCountedInPaid) {
+            materialPaid += grossAmt;
+          }
+
+          percentUsed = materialBudget > 0 ? Math.round((materialPaid / materialBudget) * 100) : 0;
+
+          if (materialBudget > 0) {
+            budgetSummaryText = `งบค่าของ   ฿${materialBudget.toLocaleString("th-TH")} / เบิกแล้ว ฿${materialPaid.toLocaleString("th-TH")} (${percentUsed}%)`;
+          } else if (materialPaid > 0) {
+            budgetSummaryText = `งบค่าของ   เบิกแล้ว ฿${materialPaid.toLocaleString("th-TH")}`;
           }
         }
       }
 
       const imgList = getBillImages(b);
       const hasImages = imgList.length > 0;
+
+      const isFuelBill = rawCatName.includes("น้ำมัน") || rawCatName.startsWith("4.");
+      const isRepairBill = rawCatName.includes("ซ่อมรถ") || rawCatName.startsWith("5.");
+      const isToolBill = rawCatName.includes("เครื่องมือ") || rawCatName.startsWith("7.");
+      const isOtherBill = rawCatName.includes("อื่นๆ") || rawCatName.startsWith("8.");
+
+      const rawCarRef = b["ทะเบียน"] || b.plate_no || b["id_car"] || b.id_car;
+      const carPlate = resolveCarDisplayName(rawCarRef, carsMap);
+
+      const toolName = String(b["ชื่อเครื่องมือ"] || b.tool_name || "").trim();
+      const otherName = String(b["รายการ"] || b.sub_category || "").trim();
 
       const productName = b["สินค้า"] || b.product || "";
       const categoryName = b["ประเภท"] || b.category || "";
@@ -3744,24 +4456,110 @@ export function createMultiBillFlex(
         layout: "vertical",
         spacing: "none",
         contents: [
-          // Row 1: Title & Net Transfer Amount
+          // Row 0 (Sub-bill): Prominent header with requester name, bank, and account number
+          ...(isSubBill ? [
+            {
+              type: "box",
+              layout: "vertical",
+              margin: "none",
+              paddingAll: "6px",
+              backgroundColor: "#FEF3C7",
+              cornerRadius: "6px",
+              borderWidth: "1px",
+              borderColor: "#F59E0B",
+              spacing: "none",
+              contents: [
+                {
+                  type: "box",
+                  layout: "horizontal",
+                  contents: [
+                    {
+                      type: "text",
+                      text: `👤 ผู้เบิก: ${reqBank.accountName || reqBank.requesterName || requesterName}`,
+                      size: "xxs",
+                      color: "#92400E",
+                      weight: "bold",
+                      flex: 1,
+                      wrap: true
+                    }
+                  ]
+                },
+                {
+                  type: "box",
+                  layout: "horizontal",
+                  margin: "xs",
+                  alignItems: "center",
+                  contents: [
+                    {
+                      type: "text",
+                      text: `เลข: ${reqBank.accountNo || "ไม่มีเลขบัญชี"}`,
+                      size: "xs",
+                      color: reqBank.accountNo ? "#047857" : "#DC2626",
+                      weight: "bold",
+                      flex: 7
+                    },
+                    {
+                      type: "text",
+                      text: `ธ.${reqBank.bankName || "-"}`,
+                      size: "xxs",
+                      color: "#78350F",
+                      align: "end",
+                      flex: 5,
+                      wrap: false,
+                      maxLines: 1
+                    }
+                  ]
+                }
+              ]
+            }
+          ] : []),
+          // Row 1: Title & Net Transfer Amount (with VAT / Deduct tags underneath price)
           {
             type: "box",
             layout: "horizontal",
+            margin: isSubBill ? "xs" : "none",
             contents: [
-              { type: "text", text: `#${bId} | ${projName}`, weight: "bold", size: "xs", color: "#0F172A", flex: 7, wrap: true },
-              { type: "text", text: `฿${netTransferAmt.toLocaleString("th-TH")}${hasDeduct && cleanPercent ? ` (หัก ${cleanPercent}%)` : ""}`, weight: "bold", size: "xs", color: "#DC2626", flex: 5, align: "end" }
+              { type: "text", text: `#${bId}${isSubBill ? " [บิลย่อย]" : ""} | ${projName}`, weight: "bold", size: "xs", color: "#0F172A", flex: 7, wrap: true },
+              {
+                type: "box",
+                layout: "vertical",
+                flex: 5,
+                spacing: "none",
+                contents: [
+                  {
+                    type: "text",
+                    text: `฿${netTransferAmt.toLocaleString("th-TH")}`,
+                    weight: "bold",
+                    size: "xs",
+                    color: "#DC2626",
+                    align: "end"
+                  },
+                  ...(priceSubTag ? [
+                    {
+                      type: "text",
+                      text: priceSubTag,
+                      weight: "bold",
+                      size: "xxs",
+                      color: "#DC2626",
+                      align: "end",
+                      wrap: true
+                    }
+                  ] : [])
+                ]
+              }
             ]
           },
-          // Row 2: Vendor/Contractor (Highlighted & removed redundant requester)
-          {
-            type: "box",
-            layout: "horizontal",
-            margin: "xs",
-            contents: [
-              { type: "text", text: `${vendorLabel}: ${vendorName}`, size: "xxs", color: "#1E293B", weight: "bold", wrap: true }
-            ]
-          },
+          // Row 2: Vendor/Contractor (Omit for staff bills to avoid duplication with item line)
+          ...(!isStaffBill && vendorName && vendorName !== "-" ? [
+            {
+              type: "box",
+              layout: "horizontal",
+              margin: "xs",
+              contents: [
+                { type: "text", text: `${vendorLabel}: ${vendorName}`, size: "xxs", color: "#1E293B", weight: "bold", wrap: true }
+              ]
+            }
+          ] : []),
           // Row 3: Labor Breakdown (3 Clean Lines as requested by user)
           ...(isLaborBill ? [
             {
@@ -3820,17 +4618,6 @@ export function createMultiBillFlex(
               }
             ] : [])
           ]),
-          // Row 4 (Creator): If recorded on behalf of someone else
-          ...(creatorName && creatorName !== requesterName && creatorName !== "-" ? [
-            {
-              type: "box",
-              layout: "horizontal",
-              margin: "none",
-              contents: [
-                { type: "text", text: `ผู้สร้างบิล: ${creatorName} (บันทึกแทน)`, size: "xxs", color: "#64748B", wrap: true }
-              ]
-            }
-          ] : []),
           // Row 6: Bank Account Information (2 Clean Lines - skip for sub-bills / บิลย่อย)
           ...(!isSubBill && bankInfo && (bankInfo.accountNo || bankInfo.bankName || bankInfo.accountName) ? [
             {
@@ -3882,9 +4669,24 @@ export function createMultiBillFlex(
             }
           ] : []),
           // Row 7 (Store): Single Product Category Row
-          ...(productName && productName !== "-" && lineItems.length === 0 && !isContractor ? (() => {
-            const cleanProdName = productName.replace(/^\d+[\.\s\-]+/, "").trim() || productName;
-            const singleBudgetField = resolveProductBudgetField(productName);
+          ...((productName || isFuelBill || isRepairBill || isStaffBill || isToolBill || isOtherBill) && productName !== "-" && lineItems.length === 0 && !isContractor ? (() => {
+            let resolvedTitle = productName;
+            if (isFuelBill) {
+              resolvedTitle = carPlate ? `น้ำมัน (${carPlate})` : (productName || "น้ำมัน");
+            } else if (isRepairBill) {
+              resolvedTitle = carPlate ? `ซ่อมรถ (${carPlate})` : (productName || "ซ่อมรถ");
+            } else if (isStaffBill) {
+              resolvedTitle = staffName ? `พนักงาน (${staffName})` : (productName || "พนักงาน");
+            } else if (isToolBill) {
+              resolvedTitle = toolName ? `เครื่องมือ (${toolName})` : (productName || "เครื่องมือ");
+            } else if (isOtherBill) {
+              resolvedTitle = otherName ? `อื่นๆ (${otherName})` : (productName || "อื่นๆ");
+            } else {
+              resolvedTitle = sanitizeFlexItemDescription(productName, carsMap, peopleMap);
+            }
+
+            const cleanProdName = resolvedTitle.replace(/^\d+[\.\s\-]+/, "").trim() || resolvedTitle;
+            const singleBudgetField = resolveProductBudgetField(productName || resolvedTitle || categoryName);
             const { cap: singleCap, actualField } = getBudgetCapForField(singleBudgetField, projInfo?.allBudgets);
             let singleTag = "";
             let singleIsOver = false;
@@ -3903,7 +4705,7 @@ export function createMultiBillFlex(
               singleTag = `(${singleRemTag} | งบ ${singleCap.toLocaleString("th-TH")})`;
             } else if (categoryName) {
               const cleanType = categoryName.replace(/^\d+[\.\s\-]+/, "").trim();
-              if (cleanType) singleTag = `(${cleanType})`;
+              if (cleanType && !cleanProdName.includes(cleanType)) singleTag = `(${cleanType})`;
             }
             return [
               {
@@ -3966,6 +4768,7 @@ export function createMultiBillFlex(
                   } else {
                     itemTitle = cleanName || cleanCat || `สินค้า ${iIdx + 1}`;
                   }
+                  itemTitle = sanitizeFlexItemDescription(itemTitle, carsMap, peopleMap);
 
                   const budgetField = resolveProductBudgetField(rawCat) || resolveProductBudgetField(cleanCat) || resolveProductBudgetField(rawName);
                   const { cap: budgetCap, actualField } = getBudgetCapForField(budgetField, projInfo?.allBudgets);
@@ -3993,7 +4796,7 @@ export function createMultiBillFlex(
                   } else {
                     const rawType = String(item.categoryType || item.type || "").trim();
                     const cleanType = rawType.replace(/^\d+\.?\s*/, "").trim();
-                    if (cleanType) {
+                    if (cleanType && !itemTitle.includes(cleanType)) {
                       budgetTag = `(${cleanType})`;
                     }
                   }
@@ -4286,7 +5089,8 @@ export function createWithdrawRequesterFlex(
   peopleMap?: Map<string, string> | Record<string, string>,
   bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>,
   contractMap?: Map<string, any> | Record<string, any>,
-  projectBudgetMap?: Map<string, any> | Record<string, any>
+  projectBudgetMap?: Map<string, any> | Record<string, any>,
+  carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>
 ): Record<string, any> {
   const bills = (Array.isArray(billsInput) ? billsInput : [billsInput]).map(b => ({
     ...b,
@@ -4296,7 +5100,7 @@ export function createWithdrawRequesterFlex(
   return createMultiBillFlex(bills, {
     title: "📄 แจ้งเตือนรายการตั้งเบิกเงิน",
     mode: "requester"
-  }, peopleMap, bankInfoMap, contractMap, projectBudgetMap);
+  }, peopleMap, bankInfoMap, contractMap, projectBudgetMap, carsMap);
 }
 
 export function createWithdrawOwnerFlex(
@@ -4304,7 +5108,8 @@ export function createWithdrawOwnerFlex(
   peopleMap?: Map<string, string> | Record<string, string>,
   bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>,
   contractMap?: Map<string, any> | Record<string, any>,
-  projectBudgetMap?: Map<string, any> | Record<string, any>
+  projectBudgetMap?: Map<string, any> | Record<string, any>,
+  carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>
 ): Record<string, any> {
   const bills = (Array.isArray(billsInput) ? billsInput : [billsInput]).map(b => ({
     ...b,
@@ -4314,7 +5119,7 @@ export function createWithdrawOwnerFlex(
   return createMultiBillFlex(bills, {
     title: "📋 คำขออนุมัติเบิกเงิน (ส่งจากผู้เบิก)",
     mode: "owner"
-  }, peopleMap, bankInfoMap, contractMap, projectBudgetMap);
+  }, peopleMap, bankInfoMap, contractMap, projectBudgetMap, carsMap);
 }
 
 export function createWithdrawApproverFlex(
@@ -4322,7 +5127,8 @@ export function createWithdrawApproverFlex(
   peopleMap?: Map<string, string> | Record<string, string>,
   bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>,
   contractMap?: Map<string, any> | Record<string, any>,
-  projectBudgetMap?: Map<string, any> | Record<string, any>
+  projectBudgetMap?: Map<string, any> | Record<string, any>,
+  carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>
 ): Record<string, any> {
   const bills = (Array.isArray(billsInput) ? billsInput : [billsInput]).map(b => ({
     ...b,
@@ -4332,7 +5138,7 @@ export function createWithdrawApproverFlex(
   return createMultiBillFlex(bills, {
     title: "✅ รายการอนุมัติสำเร็จ (รอปิดงาน)",
     mode: "approver"
-  }, peopleMap, bankInfoMap, contractMap, projectBudgetMap);
+  }, peopleMap, bankInfoMap, contractMap, projectBudgetMap, carsMap);
 }
 
 export function createWithdrawCompletedRequesterFlex(
@@ -4340,7 +5146,8 @@ export function createWithdrawCompletedRequesterFlex(
   peopleMap?: Map<string, string> | Record<string, string>,
   bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>,
   contractMap?: Map<string, any> | Record<string, any>,
-  projectBudgetMap?: Map<string, any> | Record<string, any>
+  projectBudgetMap?: Map<string, any> | Record<string, any>,
+  carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>
 ): Record<string, any> {
   const bills = (Array.isArray(billsInput) ? billsInput : [billsInput]).map(b => ({
     ...b,
@@ -4350,7 +5157,7 @@ export function createWithdrawCompletedRequesterFlex(
   return createMultiBillFlex(bills, {
     title: "🎉 รายการเบิกเงินสำเร็จเรียบร้อย (ปิดงาน)",
     mode: "completed"
-  }, peopleMap, bankInfoMap, contractMap, projectBudgetMap);
+  }, peopleMap, bankInfoMap, contractMap, projectBudgetMap, carsMap);
 }
 
 export interface DailyTransferGroup {
@@ -4360,12 +5167,14 @@ export interface DailyTransferGroup {
   accountNo: string;
   accountName: string;
   totalAmount: number;
+  category: "main" | "sub";
   bills: Array<{
     id: string;
     billNo: string;
     projectName: string;
     amount: number;
     description: string;
+    isSubBill: boolean;
   }>;
 }
 
@@ -4396,95 +5205,7 @@ export function createDailyTransferSummaryFlex(
     }
   }
 
-  // Group bills by payee / account
-  const groupsMap = new Map<string, DailyTransferGroup>();
-
-  for (const b of rawBills) {
-    const grossAmt = Number(b["ยอดเงิน"] || b.amount || 0);
-    const deductPercent = String(b["หัก"] || b.deduct_percent || "").trim();
-    let deductAmt = Number(b["จำนวนหัก"] || b["3เปอร์"] || b.deduct_amount || 0);
-    if (!deductAmt && deductPercent && Number(deductPercent.replace(/หัก|\s|%/g, "")) > 0 && grossAmt > 0) {
-      deductAmt = Math.round((grossAmt * Number(deductPercent.replace(/หัก|\s|%/g, ""))) / 100 * 100) / 100;
-    }
-    const rawNet = Number(b["ยอดโอน"] || b.net_amount || 0);
-    const netTransferAmt = rawNet > 0 ? rawNet : (deductAmt > 0 ? grossAmt - deductAmt : grossAmt);
-
-    // Resolve Payee / Store / Contractor
-    const rawVendorType = String(b["ร้านค้า/ผู้รับเหมา"] || b.vendor_type || "").trim();
-    const isContractor = rawVendorType === "ผู้รับเหมา" || Boolean(b["ผู้รับเหมา"]) || Boolean(b.contractor_id);
-    let rawVendorCandidate = "";
-    if (isContractor) {
-      rawVendorCandidate = b["ชื่อผู้รับเหมา"] || b.contractor_name || b["ผู้รับเหมา"] || b.contractor_id || b["ร้าน/บุคคล"] || b.vendor_or_person || "-";
-    } else {
-      const namedVendor = String(b["ชื่อร้านค้า"] || b.store_name || b["ร้าน/บุคคล"] || b.vendor_or_person || b.data?.["ร้าน/บุคคล"] || b.data?.vendor_or_person || "").trim();
-      const idStore = String(b["ร้านค้า"] || b.store_id || b.data?.["ร้านค้า"] || "").trim();
-      if (namedVendor && namedVendor !== "-" && namedVendor !== "non" && !/^[a-zA-Z]{1,3}[-_]?\d+$/.test(namedVendor)) {
-        rawVendorCandidate = namedVendor;
-      } else if (idStore) {
-        rawVendorCandidate = idStore;
-      } else {
-        rawVendorCandidate = namedVendor || "-";
-      }
-    }
-
-    const bankInfo = resolveBankInfo(b, bankInfoMap);
-    let payeeName = resolveVendorName(rawVendorCandidate, bankInfoMap, b, peopleMap);
-    if ((!payeeName || payeeName === "-" || /^[a-zA-Z]{1,3}[-_]?\d+$/.test(payeeName)) && bankInfo) {
-      payeeName = bankInfo.storeName || bankInfo.accountName || payeeName;
-    }
-    if (!payeeName || payeeName === "-") {
-      payeeName = String(b["ผู้เบิก"] || b.requester || "ผู้รับเงิน").trim();
-    }
-    // Clean leading numbers
-    payeeName = payeeName.replace(/^\d+[\.\s\-]+/, "").trim() || payeeName;
-
-    const bankName = String(bankInfo?.bankName || b["ธนาคาร"] || b.bank_name || "").trim();
-    const accountNo = String(bankInfo?.accountNo || b["เลขบัญชี"] || b.bank_account || "").trim();
-    const accountName = String(bankInfo?.accountName || b["ชื่อบัญชี"] || b.account_name || "").trim();
-
-    const cleanAccDigits = accountNo.replace(/\D/g, "");
-    const groupKey = cleanAccDigits.length >= 6
-      ? `ACC_${cleanAccDigits}`
-      : (accountNo && accountNo !== "-" ? `ACC_${accountNo}_${bankName}` : `NAME_${payeeName.toLowerCase()}`);
-
-    const bId = String(b.id || b["ลำดับ"] || b._sheetRow || "-").trim();
-    const pName = String(b["ชื่อ Project"] || b.project_name || "").trim();
-    const bDesc = String(b["สินค้า/ทำงาน"] || b.description || "").trim();
-
-    const billItem = {
-      id: bId,
-      billNo: bId,
-      projectName: pName,
-      amount: netTransferAmt,
-      description: bDesc
-    };
-
-    if (groupsMap.has(groupKey)) {
-      const existing = groupsMap.get(groupKey)!;
-      existing.totalAmount += netTransferAmt;
-      existing.bills.push(billItem);
-      if (!existing.accountNo && accountNo) existing.accountNo = accountNo;
-      if (!existing.bankName && bankName) existing.bankName = bankName;
-      if (!existing.accountName && accountName) existing.accountName = accountName;
-    } else {
-      groupsMap.set(groupKey, {
-        groupKey,
-        payeeName,
-        bankName,
-        accountNo,
-        accountName,
-        totalAmount: netTransferAmt,
-        bills: [billItem]
-      });
-    }
-  }
-
-  const groupsList = Array.from(groupsMap.values()).sort((a, b) => b.totalAmount - a.totalAmount);
-  const grandTotal = groupsList.reduce((sum, g) => sum + g.totalAmount, 0);
-  const totalBillsCount = rawBills.length;
-  const formattedGrandTotal = grandTotal.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-  if (groupsList.length === 0) {
+  if (rawBills.length === 0) {
     return {
       type: "bubble",
       size: "mega",
@@ -4509,18 +5230,155 @@ export function createDailyTransferSummaryFlex(
     };
   }
 
-  const pageSize = 5;
-  const maxBubbles = 10;
-  const totalPages = Math.max(1, Math.ceil(groupsList.length / pageSize));
+  // Partition bills into Main Bills and Sub-bills
+  const mainBills = rawBills.filter(b => !isSubBillRecord(b));
+  const subBills = rawBills.filter(b => isSubBillRecord(b));
 
-  function buildBubblePage(pageGroups: DailyTransferGroup[], pageIndex: number) {
+  function groupBills(bills: Array<Record<string, any>>, category: "main" | "sub"): DailyTransferGroup[] {
+    const map = new Map<string, DailyTransferGroup>();
+
+    for (const b of bills) {
+      const grossAmt = Number(b["ยอดเงิน"] || b.amount || 0);
+      const rawD = String(b["หัก"] || b.deduct_percent || "").trim();
+      const rawDLower = rawD.toLowerCase();
+      const isDeduct = Boolean(
+        rawD &&
+        rawD !== "-" &&
+        rawD !== "0" &&
+        rawD !== "0%" &&
+        rawDLower !== "ไม่มี" &&
+        !rawDLower.includes("ไม่มี") &&
+        rawDLower !== "false" &&
+        rawDLower !== "no"
+      );
+      let deductAmt = 0;
+      if (isDeduct) {
+        deductAmt = Number(b["จำนวนหัก"] || b["3เปอร์"] || b.deduct_amount || 0);
+        if (!deductAmt && rawD && Number(rawD.replace(/หัก|\s|%/g, "")) > 0 && grossAmt > 0) {
+          deductAmt = Math.round((grossAmt * Number(rawD.replace(/หัก|\s|%/g, ""))) / 100 * 100) / 100;
+        }
+      }
+      const rawNet = Number(b["ยอดโอน"] || b.net_amount || 0);
+      const netTransferAmt = rawNet > 0 && (isDeduct || rawNet === grossAmt) ? rawNet : (deductAmt > 0 ? grossAmt - deductAmt : grossAmt);
+
+      let payeeName = "";
+      let bankName = "";
+      let accountNo = "";
+      let accountName = "";
+
+      if (category === "sub") {
+        // Sub-bill: transfer goes to the requester (ผู้เบิก)
+        const reqBank = resolveRequesterBankInfo(b, bankInfoMap, peopleMap);
+        payeeName = reqBank.accountName || reqBank.requesterName || String(b["ผู้เบิก"] || b.requester || "ผู้เบิก").trim();
+        bankName = reqBank.bankName || "";
+        accountNo = reqBank.accountNo || "";
+        accountName = reqBank.accountName || "";
+      } else {
+        // Main bill: transfer goes to store / contractor
+        const rawVendorType = String(b["ร้านค้า/ผู้รับเหมา"] || b.vendor_type || "").trim();
+        const isContractor = rawVendorType === "ผู้รับเหมา" || Boolean(b["ผู้รับเหมา"]) || Boolean(b.contractor_id);
+        let rawVendorCandidate = "";
+        if (isContractor) {
+          rawVendorCandidate = b["ชื่อผู้รับเหมา"] || b.contractor_name || b["ผู้รับเหมา"] || b.contractor_id || b["ร้าน/บุคคล"] || b.vendor_or_person || "-";
+        } else {
+          const namedVendor = String(b["ชื่อร้านค้า"] || b.store_name || b["ร้าน/บุคคล"] || b.vendor_or_person || b.data?.["ร้าน/บุคคล"] || b.data?.vendor_or_person || "").trim();
+          const idStore = String(b["ร้านค้า"] || b.store_id || b.data?.["ร้านค้า"] || "").trim();
+          if (namedVendor && namedVendor !== "-" && namedVendor !== "non" && !/^[a-zA-Z]{1,3}[-_]?\d+$/.test(namedVendor)) {
+            rawVendorCandidate = namedVendor;
+          } else if (idStore) {
+            rawVendorCandidate = idStore;
+          } else {
+            rawVendorCandidate = namedVendor || "-";
+          }
+        }
+
+        const bankInfo = resolveBankInfo(b, bankInfoMap);
+        payeeName = resolveVendorName(rawVendorCandidate, bankInfoMap, b, peopleMap);
+        if ((!payeeName || payeeName === "-" || /^[a-zA-Z]{1,3}[-_]?\d+$/.test(payeeName)) && bankInfo) {
+          payeeName = bankInfo.storeName || bankInfo.accountName || payeeName;
+        }
+        if (!payeeName || payeeName === "-") {
+          payeeName = String(b["ผู้เบิก"] || b.requester || "ผู้รับเงิน").trim();
+        }
+        payeeName = payeeName.replace(/^\d+[\.\s\-]+/, "").trim() || payeeName;
+
+        bankName = String(bankInfo?.bankName || b["ธนาคาร"] || b.bank_name || "").trim();
+        accountNo = String(bankInfo?.accountNo || b["เลขบัญชี"] || b.bank_account || "").trim();
+        accountName = String(bankInfo?.accountName || b["ชื่อบัญชี"] || b.account_name || "").trim();
+      }
+
+      const cleanAccDigits = accountNo.replace(/\D/g, "");
+      const groupKey = cleanAccDigits.length >= 6
+        ? `${category.toUpperCase()}_ACC_${cleanAccDigits}`
+        : (accountNo && accountNo !== "-" ? `${category.toUpperCase()}_ACC_${accountNo}_${bankName}` : `${category.toUpperCase()}_NAME_${payeeName.toLowerCase()}`);
+
+      const bId = String(b.id || b["ลำดับ"] || b._sheetRow || "-").trim();
+      const pName = String(b["ชื่อ Project"] || b.project_name || "").trim();
+      const bDesc = String(b["สินค้า/ทำงาน"] || b.description || "").trim();
+
+      const billItem = {
+        id: bId,
+        billNo: bId,
+        projectName: pName,
+        amount: netTransferAmt,
+        description: bDesc,
+        isSubBill: category === "sub"
+      };
+
+      if (map.has(groupKey)) {
+        const existing = map.get(groupKey)!;
+        existing.totalAmount += netTransferAmt;
+        existing.bills.push(billItem);
+        if (!existing.accountNo && accountNo) existing.accountNo = accountNo;
+        if (!existing.bankName && bankName) existing.bankName = bankName;
+        if (!existing.accountName && accountName) existing.accountName = accountName;
+      } else {
+        map.set(groupKey, {
+          groupKey,
+          payeeName,
+          bankName,
+          accountNo,
+          accountName,
+          totalAmount: netTransferAmt,
+          category,
+          bills: [billItem]
+        });
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => b.totalAmount - a.totalAmount);
+  }
+
+  const mainGroups = groupBills(mainBills, "main");
+  const subGroups = groupBills(subBills, "sub");
+
+  const mainTotal = mainGroups.reduce((sum, g) => sum + g.totalAmount, 0);
+  const subTotal = subGroups.reduce((sum, g) => sum + g.totalAmount, 0);
+  const grandTotal = mainTotal + subTotal;
+  const totalBillsCount = rawBills.length;
+  const hasBothCategories = mainBills.length > 0 && subBills.length > 0;
+
+  function buildCategoryBubblePage(
+    pageGroups: DailyTransferGroup[],
+    pageIndex: number,
+    totalPagesForCategory: number,
+    category: "main" | "sub",
+    categoryTotal: number,
+    categoryBillsCount: number
+  ) {
+    const isSub = category === "sub";
+    const categoryLabel = isSub ? "หมวดบิลย่อย (โอนคืนผู้เบิก)" : "หมวดบิลหลัก (ร้านค้า/ผู้รับเหมา)";
+    const categoryBadge = isSub ? "👤 บิลย่อย" : "🏛️ บิลหลัก";
+    const headerBg = isSub ? "#1E293B" : "#0F172A";
+    const headerBadgeColor = isSub ? "#F59E0B" : "#38BDF8";
+
     return {
       type: "bubble",
       size: "mega",
       header: {
         type: "box",
         layout: "vertical",
-        backgroundColor: "#0F172A",
+        backgroundColor: headerBg,
         paddingAll: "12px",
         contents: [
           {
@@ -4538,9 +5396,9 @@ export function createDailyTransferSummaryFlex(
               },
               {
                 type: "text",
-                text: `รวม ฿${grandTotal.toLocaleString("th-TH")}`,
+                text: `${categoryBadge} ฿${categoryTotal.toLocaleString("th-TH")}`,
                 weight: "bold",
-                color: "#34D399",
+                color: isSub ? "#FBBF24" : "#34D399",
                 size: "xs",
                 align: "end",
                 flex: 5
@@ -4548,13 +5406,35 @@ export function createDailyTransferSummaryFlex(
             ]
           },
           {
+            type: "box",
+            layout: "horizontal",
+            margin: "xs",
+            contents: [
+              {
+                type: "text",
+                text: `${categoryLabel}${totalPagesForCategory > 1 ? ` • หน้า ${pageIndex + 1}/${totalPagesForCategory}` : ""}`,
+                color: headerBadgeColor,
+                size: "xxs",
+                weight: "bold",
+                flex: 8,
+                wrap: true
+              },
+              {
+                type: "text",
+                text: `${categoryBillsCount} บิล`,
+                color: "#94A3B8",
+                size: "xxs",
+                align: "end",
+                flex: 2
+              }
+            ]
+          },
+          {
             type: "text",
-            text: totalPages > 1
-              ? `หน้า ${pageIndex + 1}/${totalPages} • วันที่ ${displayDate} (${totalBillsCount} บิล • ${groupsList.length} ผู้รับ)`
-              : `วันที่ ${displayDate} • ปิดงานทั้งหมด ${totalBillsCount} บิล (${groupsList.length} ผู้รับ)`,
-            color: "#94A3B8",
+            text: `วันที่ ${displayDate} • (${pageGroups.length} ผู้รับ)`,
+            color: "#64748B",
             size: "xxs",
-            margin: "xs"
+            margin: "none"
           }
         ]
       },
@@ -4571,10 +5451,10 @@ export function createDailyTransferSummaryFlex(
           return {
             type: "box",
             layout: "vertical",
-            backgroundColor: "#F8FAFC",
+            backgroundColor: isSub ? "#FFFBEB" : "#F8FAFC",
             cornerRadius: "8px",
             borderWidth: "1px",
-            borderColor: "#E2E8F0",
+            borderColor: isSub ? "#FDE68A" : "#E2E8F0",
             paddingAll: "8px",
             margin: idx > 0 ? "xs" : "none",
             contents: [
@@ -4585,9 +5465,9 @@ export function createDailyTransferSummaryFlex(
                 contents: [
                   {
                     type: "text",
-                    text: `🏪 ${g.payeeName}`,
+                    text: isSub ? `👤 ผู้เบิก: ${g.payeeName}` : `🏪 ${g.payeeName}`,
                     weight: "bold",
-                    color: "#0F172A",
+                    color: isSub ? "#92400E" : "#0F172A",
                     size: "xs",
                     flex: 7,
                     wrap: true
@@ -4596,7 +5476,7 @@ export function createDailyTransferSummaryFlex(
                     type: "text",
                     text: `฿${formattedAmt}`,
                     weight: "bold",
-                    color: "#059669",
+                    color: isSub ? "#D97706" : "#059669",
                     size: "xs",
                     align: "end",
                     flex: 5
@@ -4613,7 +5493,7 @@ export function createDailyTransferSummaryFlex(
                   {
                     type: "text",
                     text: g.accountNo ? `เลข: ${g.accountNo}` : "ไม่มีเลขบัญชี",
-                    color: g.accountNo ? "#0284C7" : "#94A3B8",
+                    color: g.accountNo ? (isSub ? "#047857" : "#0284C7") : "#DC2626",
                     size: "xs",
                     weight: "bold",
                     flex: 7
@@ -4621,14 +5501,14 @@ export function createDailyTransferSummaryFlex(
                   {
                     type: "text",
                     text: g.bankName ? `ธ.${g.bankName}` : "-",
-                    color: "#475569",
+                    color: isSub ? "#78350F" : "#475569",
                     size: "xxs",
                     align: "end",
                     flex: 5
                   }
                 ]
               },
-              // Optional: Account Name if specified
+              // Optional: Account Name if specified and distinct
               ...(g.accountName && g.accountName !== g.payeeName ? [
                 {
                   type: "box",
@@ -4638,7 +5518,7 @@ export function createDailyTransferSummaryFlex(
                     {
                       type: "text",
                       text: `ชื่อบัญชี: ${g.accountName}`,
-                      color: "#64748B",
+                      color: isSub ? "#78350F" : "#64748B",
                       size: "xxs",
                       wrap: true
                     }
@@ -4653,8 +5533,10 @@ export function createDailyTransferSummaryFlex(
                 contents: [
                   {
                     type: "text",
-                    text: `📦 ${isMulti ? `รวม ${g.bills.length} บิล:` : "บิล:"} ${billTags}`,
-                    color: isMulti ? "#2563EB" : "#64748B",
+                    text: isSub
+                      ? `🧾 ${isMulti ? `รวม ${g.bills.length} บิลย่อย:` : "บิลย่อย:"} ${billTags}`
+                      : `📦 ${isMulti ? `รวม ${g.bills.length} บิล:` : "บิล:"} ${billTags}`,
+                    color: isSub ? "#B45309" : (isMulti ? "#2563EB" : "#64748B"),
                     size: "xxs",
                     weight: isMulti ? "bold" : "regular",
                     wrap: true
@@ -4669,7 +5551,7 @@ export function createDailyTransferSummaryFlex(
         type: "box",
         layout: "vertical",
         paddingAll: "10px",
-        backgroundColor: "#ECFDF5",
+        backgroundColor: isSub ? "#FEF3C7" : "#ECFDF5",
         contents: [
           {
             type: "box",
@@ -4678,27 +5560,57 @@ export function createDailyTransferSummaryFlex(
             contents: [
               {
                 type: "text",
-                text: "💰 ยอดโอนรวมทั้งหมด",
+                text: hasBothCategories
+                  ? (isSub ? "👤 ยอดโอนบิลย่อย" : "🏛️ ยอดโอนบิลหลัก")
+                  : "💰 ยอดโอนรวมทั้งหมด",
                 weight: "bold",
-                color: "#065F46",
+                color: isSub ? "#92400E" : "#065F46",
                 size: "xs",
                 flex: 6
               },
               {
                 type: "text",
-                text: `฿${formattedGrandTotal}`,
+                text: `฿${categoryTotal.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
                 weight: "bold",
-                color: "#059669",
+                color: isSub ? "#D97706" : "#059669",
                 size: "md",
                 align: "end",
                 flex: 6
               }
             ]
           },
+          ...(hasBothCategories ? [
+            {
+              type: "box",
+              layout: "horizontal",
+              margin: "xs",
+              contents: [
+                {
+                  type: "text",
+                  text: "💰 รวมทั้งหมด (หลัก+ย่อย):",
+                  color: isSub ? "#78350F" : "#047857",
+                  size: "xxs",
+                  weight: "bold",
+                  flex: 6
+                },
+                {
+                  type: "text",
+                  text: `฿${grandTotal.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                  color: isSub ? "#78350F" : "#047857",
+                  size: "xxs",
+                  weight: "bold",
+                  align: "end",
+                  flex: 6
+                }
+              ]
+            }
+          ] : []),
           {
             type: "text",
-            text: `ปิดงานแล้วทั้งหมด ${totalBillsCount} บิล • รวม ${groupsList.length} รายการโอน`,
-            color: "#047857",
+            text: hasBothCategories
+              ? `${categoryBadge}: ${categoryBillsCount} บิล • โอน ${pageGroups.length} รายการ (รวมทั้งวัน ${totalBillsCount} บิล)`
+              : `ปิดงานแล้วทั้งหมด ${totalBillsCount} บิล • รวม ${pageGroups.length} รายการโอน`,
+            color: isSub ? "#92400E" : "#047857",
             size: "xxs",
             margin: "xs"
           }
@@ -4708,9 +5620,36 @@ export function createDailyTransferSummaryFlex(
   }
 
   const bubbles: any[] = [];
-  for (let i = 0; i < totalPages && i < maxBubbles; i++) {
-    const chunk = groupsList.slice(i * pageSize, (i + 1) * pageSize);
-    bubbles.push(buildBubblePage(chunk, i));
+  const pageSize = 5;
+
+  if (mainGroups.length > 0) {
+    const totalMainPages = Math.ceil(mainGroups.length / pageSize);
+    for (let i = 0; i < totalMainPages && bubbles.length < 9; i++) {
+      const chunk = mainGroups.slice(i * pageSize, (i + 1) * pageSize);
+      bubbles.push(buildCategoryBubblePage(
+        chunk,
+        i,
+        totalMainPages,
+        "main",
+        mainTotal,
+        mainBills.length
+      ));
+    }
+  }
+
+  if (subGroups.length > 0) {
+    const totalSubPages = Math.ceil(subGroups.length / pageSize);
+    for (let i = 0; i < totalSubPages && bubbles.length < 10; i++) {
+      const chunk = subGroups.slice(i * pageSize, (i + 1) * pageSize);
+      bubbles.push(buildCategoryBubblePage(
+        chunk,
+        i,
+        totalSubPages,
+        "sub",
+        subTotal,
+        subBills.length
+      ));
+    }
   }
 
   if (bubbles.length === 1) {

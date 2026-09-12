@@ -2,7 +2,7 @@ import { hydrateBillRows } from "@/lib/formulas";
 import { TABLES } from "@/lib/config";
 import { getRows } from "@/lib/db";
 import { toNumber } from "@/lib/utils/numbers";
-import { parseDeductPercent, isVatActive } from "@/lib/project-summary";
+import { parseDeductPercent, isDeductActive, isVatActive } from "@/lib/project-summary";
 import { formatDateDisplay, getTodayDateIso } from "@/lib/utils/dates";
 import type { SheetRow } from "@/lib/types";
 import { getSampleDocumentsAsSheetRows } from "@/lib/documents/sample-documents-data";
@@ -186,43 +186,74 @@ export async function getBillDocumentData(
   }
 
   // Tax calculation: parse % correctly even if string is "3%", "หัก 3%", etc.
-  const rawDeduct = billRow["หัก"] ?? billRow.deduct ?? billRow.withholding_tax;
-  let taxPercent = parseDeductPercent(rawDeduct);
-  let customWht = toNumber(billRow["3เปอร์เซ็น"] || billRow["3เปอร์"] || billRow["หัก 3%"] || billRow["จำนวนหัก"] || billRow.deduct_amount);
+  const rawWhtCol = toNumber(billRow["หัก 3%"]);
+  const rawCustom = toNumber(
+    billRow["3เปอร์เซ็น"] || billRow["3เปอร์"] || billRow["จำนวนหัก"] || billRow.deduct_amount
+  );
+  let customWht = 0;
+  if (rawCustom > 0) {
+    customWht = rawCustom;
+  } else if (rawWhtCol > 0) {
+    // If "หัก 3%" column contains net amount (greater than half of wage), compute withholding tax as wage - net
+    if (laborAndStaff > 0 && rawWhtCol > laborAndStaff * 0.5) {
+      customWht = Math.max(0, Math.round((laborAndStaff - rawWhtCol) * 100) / 100);
+    } else {
+      customWht = rawWhtCol;
+    }
+  }
 
-  if (!taxPercent && customWht > 0) {
+  const rawDeduct = billRow["หัก"] ?? billRow.deduct ?? billRow.withholding_tax;
+  const hasExplicitZeroWht =
+    (billRow.withholding_tax !== null && billRow.withholding_tax !== undefined && Number(billRow.withholding_tax) === 0) ||
+    String(billRow["หัก"] ?? "").includes("ไม่มี");
+
+  const isDeductActiveOnBill = !hasExplicitZeroWht && (customWht > 0 || isDeductActive(rawDeduct));
+  let taxPercent = isDeductActiveOnBill ? parseDeductPercent(rawDeduct) : 0;
+  if (isDeductActiveOnBill && !taxPercent && customWht > 0) {
     taxPercent = laborAndStaff > 0 ? Math.round((customWht / laborAndStaff) * 100) : 3;
   }
 
   let withholdingTax = customWht;
-  if (!withholdingTax && taxPercent > 0) {
+  if (isDeductActiveOnBill && !withholdingTax && taxPercent > 0) {
     const hasVat = isVatActive(billRow.vat ?? billRow["vat"] ?? billRow.VAT);
     if (hasVat) {
       withholdingTax = Math.round(((laborAndStaff / 1.07) * (taxPercent / 100)) * 100) / 100;
     } else {
       withholdingTax = Math.round((laborAndStaff * (taxPercent / 100)) * 100) / 100;
     }
-  } else if (taxPercent === 0) {
+  } else if (!isDeductActiveOnBill) {
     withholdingTax = 0;
   }
 
-  const rawNet = toNumber(billRow["ยอดโอน"] || billRow["คงเหลือ"] || billRow["ยอดเงิน"]);
+  const rawNetFromCol = toNumber(billRow["จ่าย"] || billRow["ยอดโอน"] || billRow["คงเหลือ"]);
+  const rawNetFromCsvWht = toNumber(billRow["หัก 3%"]) > laborAndStaff * 0.5 ? toNumber(billRow["หัก 3%"]) : 0;
+  const rawNet = rawNetFromCol || rawNetFromCsvWht || toNumber(billRow["ยอดเงิน"]);
   const netPayable = rawNet || (laborAndStaff - withholdingTax);
 
   const isCorporate =
-    String(billRow["statusค่าแรง"] || "").includes("บริษัท") ||
+    String(billRow["Statusค่าแรง"] || billRow["statusค่าแรง"] || "").includes("บริษัท") ||
     String(billRow["ร้านค้า/ผู้รับเหมา"] || "") === "ร้านค้า" ||
     Boolean(contractor["เลขประจำตัวผู้เสียภาษี"]);
 
   const contractorFullName =
     String(contractor["ชื่อ-นามสกุล"] || "").trim() ||
     String(billRow["ชื่อ-นามสกุล"] || "").trim() ||
+    String(billRow["ร้าน/บุคคล"] || "").trim() ||
+    String(billRow["ผู้รับเหมา"] || "").trim() ||
     String(contractor["ชื่อเล่น"] || "").trim() ||
     contractorRef ||
     "ไม่ระบุผู้รับเหมา";
 
   const contractorIdCard =
-    String(contractor["บัตรประจำตัวประชาชน"] || contractor["เลขบัตรประชาชน"] || billRow["บัตรประจำตัวประชาชน"] || "").trim();
+    String(
+      contractor["บัตรประจำตัวประชาชน"] ||
+      contractor["เลขบัตรประชาชน"] ||
+      billRow["บัตรประจำตัวประชาชน"] ||
+      billRow["เลขประจำตัวประชาชน"] ||
+      contractor["เลขประจำตัวผู้เสียภาษี"] ||
+      billRow["เลขประจำตัวผู้เสียภาษี"] ||
+      "-"
+    ).trim();
 
   const contractorAddress =
     String(contractor["ที่อยู่"] || billRow["ที่อยู่"] || "-").trim();
@@ -244,8 +275,8 @@ export async function getBillDocumentData(
   const issuer = peopleMap.get(rawIssuer) || rawIssuer || "-";
 
   return {
-    billSequence: String(billRow["ลำดับ"] || billRow["ลำดับtest"] || billRow._sheetRow || "-"),
-    billDate: formatDateDisplay(billRow["ว/ด/ป"] || billRow["วันได้บิล"] || getTodayDateIso()),
+    billSequence: String(billRow.id || billRow["ลำดับ"] || billRow["ลำดับtest"] || billRow._sheetRow || "-"),
+    billDate: formatDateDisplay(billRow["วันที่"] || billRow["ว/ด/ป"] || billRow["วันได้บิล"] || getTodayDateIso()),
     status: String(billRow["สถานะ"] || "รออนุมัติ"),
 
     company: {
@@ -274,8 +305,20 @@ export async function getBillDocumentData(
       location: String(project["สถานที่"] || project["ชื่อ Project"] || billRow["ชื่อ Project"] || "-").trim(),
     },
 
-    jobDescription: String(billRow["รายละเอียดงาน"] || billRow["สินค้า/ทำงาน"] || billRow["สินค้า"] || "-").trim(),
-    itemDescription: String(billRow["สินค้า/ทำงาน"] || billRow["สินค้า"] || billRow["รายละเอียดงาน"] || "-").trim(),
+    jobDescription: String(
+      billRow["ชื่องาน หรือ หมายเหตุ"] ||
+      billRow["รายละเอียดงาน"] ||
+      billRow["สินค้า/ทำงาน"] ||
+      billRow["สินค้า"] ||
+      "-"
+    ).trim(),
+    itemDescription: String(
+      billRow["ชื่องาน หรือ หมายเหตุ"] ||
+      billRow["สินค้า/ทำงาน"] ||
+      billRow["สินค้า"] ||
+      billRow["รายละเอียดงาน"] ||
+      "-"
+    ).trim(),
 
     amounts: {
       laborAndStaff,

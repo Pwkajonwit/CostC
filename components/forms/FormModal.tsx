@@ -3037,10 +3037,17 @@ function parseCreditDays(value: unknown): number {
 
 function parseDeductPercent(value: unknown): number {
   if (value === null || value === undefined) return 0;
-  const str = String(value).trim();
-  if (str === "ไม่มี" || str === "0" || str === "0%" || str === "" || str === "false") return 0;
+  const str = String(value).trim().toLowerCase();
+  if (!str || str === "-" || str === "0" || str === "0%" || str === "false" || str.includes("ไม่มี")) return 0;
   const match = str.match(/\d+(\.\d+)?/);
   return match ? parseFloat(match[0]) : 0;
+}
+
+function isDeductActive(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  const str = String(value).trim().toLowerCase();
+  if (!str || str === "-" || str === "0" || str === "0%" || str === "false" || str.includes("ไม่มี")) return false;
+  return parseDeductPercent(value) > 0 || str.includes("หัก");
 }
 
 function applyLocalFormulas(values: Record<string, string>, tableName: string) {
@@ -3093,7 +3100,7 @@ function applyBillDeductAmount(values: Record<string, string>) {
   let deductAmount = 0;
 
   const hasVat = isVatActive(values["vat"]);
-  const hasDeduct = hasValue(deductValue) && deductPercent > 0;
+  const hasDeduct = isDeductActive(deductValue) && deductPercent > 0;
 
   if (!hasDeduct) {
     values["จำนวนหัก"] = "";
@@ -3159,6 +3166,15 @@ function sanitizeValuesForSubmit(values: Record<string, string>, form: FormPaylo
   const next = { ...values };
   pruneHiddenConditionalValues(next, form);
   applyLocalFormulas(next, form.tableName);
+  if (form.tableName === TABLES.DATA || form.tableName === "Data" || form.tableName === "bills") {
+    const cat = String(next["ประเภท"] || "").trim();
+    if (cat.startsWith("3.") || cat.includes("พนักงาน")) {
+      next["ร้านค้า/ผู้รับเหมา"] = "พนักงาน";
+      if (next["ชื่อพนักงาน"] && (!next["ร้าน/บุคคล"] || next["ร้าน/บุคคล"] === "ผู้รับเหมา" || next["ร้าน/บุคคล"] === "-")) {
+        next["ร้าน/บุคคล"] = next["ชื่อพนักงาน"];
+      }
+    }
+  }
   return next;
 }
 
@@ -3201,6 +3217,17 @@ function pruneHiddenConditionalValues(values: Record<string, string>, form: Form
 }
 
 function isFieldVisible(field: FieldSchema, values: Record<string, string>) {
+  if (field.name === "ผู้รับเหมา") {
+    const category = String(values["ประเภท"] || "").trim();
+    if (
+      category.startsWith("3.") ||
+      category.includes("พนักงาน") ||
+      category.startsWith("8.") ||
+      category.includes("อื่นๆ")
+    ) {
+      return false;
+    }
+  }
   if (field.name === "วันได้บิล") {
     // วันที่ได้บิลทำงานร่วมกับ vat โดยยังไม่เลือกเครดิต (หากเลือกเครดิต จะซ่อนและเคลียข้อมูล)
     const hasVat = isVatActive(values["vat"]);
@@ -3234,6 +3261,8 @@ function getFieldClassName(field: FieldSchema) {
 }
 
 function getFieldLabel(field: FieldSchema) {
+  if (field.label) return field.label;
+  if (field.name === "พนักงาน") return "จำนวน";
   if (field.name === "LINE User ID" || field.name === "LINE") return "LINE User ID (ไอดีไลน์สำหรับแจ้งเตือน)";
   if (field.name === "วันออก 3%") return "วันออก";
   if (field.name === "id_Contractor" || field.name === "id_contractor") return "ผู้รับเหมา";

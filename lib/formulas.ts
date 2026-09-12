@@ -1,6 +1,6 @@
 import { TABLES } from "@/lib/config";
 import { isCommittedBill } from "@/lib/bills/bill-status";
-import { computeBillAmount, computeBillDeductMultiplier, computeBillTransferAmount, isVatActive, parseDeductPercent } from "@/lib/project-summary";
+import { computeBillAmount, computeBillDeductMultiplier, computeBillTransferAmount, isVatActive, isDeductActive, parseDeductPercent } from "@/lib/project-summary";
 import { getRows } from "@/lib/db";
 import type { SheetRow } from "@/lib/types";
 import { getTodayDateIso } from "@/lib/utils/dates";
@@ -13,12 +13,23 @@ export async function applyBillFormulas(row: SheetRow) {
 
 export async function hydrateBillRows(
   rows: SheetRow[],
-  preloadedContext?: { projects?: SheetRow[]; stores?: SheetRow[]; contracts?: SheetRow[]; contractors?: SheetRow[] }
+  preloadedContext?: {
+    projects?: SheetRow[];
+    stores?: SheetRow[];
+    contracts?: SheetRow[];
+    contractors?: SheetRow[];
+    cars?: SheetRow[];
+    people?: SheetRow[];
+    products?: SheetRow[];
+  }
 ) {
   const projects = preloadedContext?.projects || await getRows(TABLES.PROJECT, 120_000);
   const stores = preloadedContext?.stores || await getRows(TABLES.STORE, 120_000);
   const rawContracts = preloadedContext?.contracts || await getRows(TABLES.CONTRACT_WORK, 60_000);
   const contractors = preloadedContext?.contractors || await getRows(TABLES.CONTRACTOR, 60_000).catch(() => []);
+  const cars = preloadedContext?.cars || await getRows(TABLES.CAR, 120_000).catch(() => []);
+  const people = preloadedContext?.people || await getRows(TABLES.PEOPLE, 120_000).catch(() => []);
+  const products = preloadedContext?.products || await getRows(TABLES.PRODUCT, 120_000).catch(() => []);
 
   const contractorMap = new Map<string, string>();
   for (const c of contractors) {
@@ -72,7 +83,45 @@ export async function hydrateBillRows(
     if (k4) contractMap.set(k4, hydratedItem);
   }
 
-  const indexedContext = { projectMap, storeMap, contractMap };
+  const carMap = new Map<string, SheetRow>();
+  for (const item of cars) {
+    const k1 = String(item["id_car"] || item.id || "").trim();
+    const plate = String(item["หมายเลขทะเบียน"] || item.plate_no || item["ทะเบียน"] || "").trim();
+    if (k1) {
+      carMap.set(k1, item);
+      carMap.set(k1.toLowerCase(), item);
+      carMap.set(k1.toUpperCase(), item);
+    }
+    if (plate) {
+      carMap.set(plate, item);
+      carMap.set(plate.toLowerCase(), item);
+      carMap.set(plate.replace(/\s+/g, ""), item);
+    }
+  }
+
+  const peopleMap = new Map<string, SheetRow>();
+  for (const item of people) {
+    const k1 = String(item["รหัสพนักงาน"] || item.id || "").trim();
+    const nick = String(item["ชื่อเล่น"] || item.nickname || "").trim();
+    const full = String(item["ชื่อ-นามสกุล"] || item.full_name || "").trim();
+    if (k1) {
+      peopleMap.set(k1, item);
+      peopleMap.set(k1.toLowerCase(), item);
+      peopleMap.set(k1.toUpperCase(), item);
+    }
+    if (nick) peopleMap.set(nick, item);
+    if (full) peopleMap.set(full, item);
+  }
+
+  const productMap = new Map<string, SheetRow>();
+  for (const item of products) {
+    const k1 = String(item["id_product"] || item["รหัสสินค้า"] || item.id || "").trim();
+    const name = String(item["ชื่อประเภทสินค้า"] || item["ชื่อสินค้า"] || item.name || "").trim();
+    if (k1) productMap.set(k1, item);
+    if (name) productMap.set(name, item);
+  }
+
+  const indexedContext = { projectMap, storeMap, contractMap, carMap, peopleMap, productMap };
   return rows.map(row => applyBillFormulasFast({ ...row }, indexedContext));
 }
 
@@ -266,10 +315,13 @@ function firstValue(row: SheetRow, columns: string[]) {
 }
 
 async function getBillFormulaContext() {
-  const [projects, stores, contracts] = await Promise.all([
+  const [projects, stores, contracts, cars, people, products] = await Promise.all([
     getRows(TABLES.PROJECT, 120_000),
     getRows(TABLES.STORE, 120_000),
-    getRows(TABLES.CONTRACT_WORK, 60_000)
+    getRows(TABLES.CONTRACT_WORK, 60_000),
+    getRows(TABLES.CAR, 120_000).catch(() => []),
+    getRows(TABLES.PEOPLE, 120_000).catch(() => []),
+    getRows(TABLES.PRODUCT, 120_000).catch(() => [])
   ]);
 
   const projectMap = new Map<string, SheetRow>();
@@ -290,12 +342,57 @@ async function getBillFormulaContext() {
     if (key) contractMap.set(key, item);
   }
 
-  return { projectMap, storeMap, contractMap };
+  const carMap = new Map<string, SheetRow>();
+  for (const item of cars) {
+    const k1 = String(item["id_car"] || item.id || "").trim();
+    const plate = String(item["หมายเลขทะเบียน"] || item.plate_no || item["ทะเบียน"] || "").trim();
+    if (k1) {
+      carMap.set(k1, item);
+      carMap.set(k1.toLowerCase(), item);
+      carMap.set(k1.toUpperCase(), item);
+    }
+    if (plate) {
+      carMap.set(plate, item);
+      carMap.set(plate.toLowerCase(), item);
+      carMap.set(plate.replace(/\s+/g, ""), item);
+    }
+  }
+
+  const peopleMap = new Map<string, SheetRow>();
+  for (const item of people) {
+    const k1 = String(item["รหัสพนักงาน"] || item.id || "").trim();
+    const nick = String(item["ชื่อเล่น"] || item.nickname || "").trim();
+    const full = String(item["ชื่อ-นามสกุล"] || item.full_name || "").trim();
+    if (k1) {
+      peopleMap.set(k1, item);
+      peopleMap.set(k1.toLowerCase(), item);
+      peopleMap.set(k1.toUpperCase(), item);
+    }
+    if (nick) peopleMap.set(nick, item);
+    if (full) peopleMap.set(full, item);
+  }
+
+  const productMap = new Map<string, SheetRow>();
+  for (const item of products) {
+    const k1 = String(item["id_product"] || item["รหัสสินค้า"] || item.id || "").trim();
+    const name = String(item["ชื่อประเภทสินค้า"] || item["ชื่อสินค้า"] || item.name || "").trim();
+    if (k1) productMap.set(k1, item);
+    if (name) productMap.set(name, item);
+  }
+
+  return { projectMap, storeMap, contractMap, carMap, peopleMap, productMap };
 }
 
 function applyBillFormulasFast(
   row: SheetRow,
-  context: { projectMap: Map<string, SheetRow>; storeMap: Map<string, SheetRow>; contractMap: Map<string, SheetRow> }
+  context: {
+    projectMap: Map<string, SheetRow>;
+    storeMap: Map<string, SheetRow>;
+    contractMap: Map<string, SheetRow>;
+    carMap?: Map<string, SheetRow>;
+    peopleMap?: Map<string, SheetRow>;
+    productMap?: Map<string, SheetRow>;
+  }
 ) {
   const projKey = String(row["ID Project"] || "").trim();
   if (projKey) {
@@ -324,12 +421,13 @@ function applyBillFormulasFast(
   const sumAmount = computeBillAmount(row);
   row["ยอดเงิน"] = sumAmount > 0 ? sumAmount : (hasValue(row["ยอดเงิน"]) ? toNumber(row["ยอดเงิน"]) : 0);
   row["ค่าแรง+พนักงาน+อื่น"] = toNumber(row["ค่าแรง"]) + toNumber(row["พนักงาน"]) + toNumber(row["อื่นๆ"]);
-  row["3เปอร์"] = hasValue(row["หัก"]) ? deductAmount(row) : "";
-  row["รวม"] = hasValue(row["หัก"]) ? toNumber(row["ค่าแรง+พนักงาน+อื่น"]) - toNumber(row["3เปอร์"]) : "";
-  row["ค่าแรง(หัก)"] = hasValue(row["หัก"]) ? computeBillDeductMultiplier(row) : "";
+  const isDeduct = isDeductActive(row["หัก"]);
+  row["3เปอร์"] = isDeduct ? deductAmount(row) : "";
+  row["รวม"] = isDeduct ? toNumber(row["ค่าแรง+พนักงาน+อื่น"]) - toNumber(row["3เปอร์"]) : "";
+  row["ค่าแรง(หัก)"] = isDeduct ? computeBillDeductMultiplier(row) : "";
   row["ยอดโอน(มีvat)"] = row["ยอดเงิน"];
-  row["ยอดโอน(มีหัก)"] = hasValue(row["หัก"]) ? computeBillTransferAmount(row) : "";
-  row["ยอดโอน(vat,หัก)"] = hasValue(row["vat"]) && hasValue(row["หัก"]) ? computeBillTransferAmount(row) : "";
+  row["ยอดโอน(มีหัก)"] = isDeduct ? computeBillTransferAmount(row) : "";
+  row["ยอดโอน(vat,หัก)"] = hasValue(row["vat"]) && isDeduct ? computeBillTransferAmount(row) : "";
   row["ยอดโอน"] = computeBillTransferAmount(row);
   
   const vendorNameResult = vendorNameFast(row, context.storeMap, contract);
@@ -338,24 +436,77 @@ function applyBillFormulasFast(
     row["ผู้รับเหมา"] = vendorNameResult;
   }
 
-  const pFast = String(row["สินค้า"] || row.product || "").trim();
+  const cat = String(row["ประเภท"] || row.category || "").trim();
+  const rawP = String(row["สินค้า"] || row.product || "").trim();
   const itemFast = String(row["รายการ"] || row.sub_category || "").trim();
   const toolFast = String(row["ชื่อเครื่องมือ"] || "").trim();
-  const carFast = String(row["ทะเบียน"] || "").trim();
-  const staffFast = String(row["ชื่อพนักงาน"] || "").trim();
+  const carFast = String(row["ทะเบียน"] || row.plate_no || "").trim();
+  const staffFast = String(row["ชื่อพนักงาน"] || row.staff_name || "").trim();
   const dFast = String(row["รายละเอียดงาน"] || row.work_details || "").trim();
 
-  let combinedDesc = pFast;
-  if (itemFast) {
-    combinedDesc = combinedDesc ? `${combinedDesc} (${itemFast})` : itemFast;
-  } else if (toolFast) {
-    combinedDesc = combinedDesc ? `${combinedDesc} (${toolFast})` : toolFast;
-  } else if (carFast) {
-    combinedDesc = combinedDesc ? `${combinedDesc} (${carFast})` : carFast;
-  } else if (staffFast) {
-    combinedDesc = combinedDesc ? `${combinedDesc} (${staffFast})` : staffFast;
-  } else if (dFast) {
-    combinedDesc = combinedDesc ? `${combinedDesc} / ${dFast}` : dFast;
+  // Resolve Product name if it's an ID
+  let pFast = rawP;
+  if (context.productMap && rawP) {
+    const prod = context.productMap.get(rawP) || context.productMap.get(rawP.toLowerCase());
+    if (prod) {
+      pFast = prod["ชื่อประเภทสินค้า"] || prod["ชื่อสินค้า"] || prod.name || rawP;
+    }
+  }
+
+  // Resolve Vehicle display name (e.g. "1ฒล3982 (Toyota)" or "1ฒล3982")
+  let carName = carFast;
+  if (context.carMap && carFast) {
+    const car = context.carMap.get(carFast) || context.carMap.get(carFast.toLowerCase()) || context.carMap.get(carFast.toUpperCase());
+    if (car) {
+      const plate = String(car["หมายเลขทะเบียน"] || car.plate_no || "").trim();
+      const brand = String(car["ยี่ห้อรถ"] || car.brand || "").trim();
+      if (plate) {
+        carName = brand && !plate.includes(brand) ? `${plate} (${brand})` : plate;
+      }
+    }
+  }
+
+  // Resolve Staff display name
+  let staffName = staffFast;
+  if (context.peopleMap && staffFast) {
+    const person = context.peopleMap.get(staffFast) || context.peopleMap.get(staffFast.toLowerCase()) || context.peopleMap.get(staffFast.toUpperCase());
+    if (person) {
+      const nick = String(person["ชื่อเล่น"] || person.nickname || "").trim();
+      const full = String(person["ชื่อ-นามสกุล"] || person.full_name || "").trim();
+      staffName = nick || full || staffFast;
+    }
+  }
+
+  // Category-aware description construction
+  let combinedDesc = "";
+  if (cat.includes("น้ำมัน") || cat.startsWith("4.")) {
+    combinedDesc = carName ? `น้ำมัน (${carName})` : (pFast || "น้ำมัน");
+    if (!row["สินค้า"]) row["สินค้า"] = "น้ำมัน";
+  } else if (cat.includes("ซ่อมรถ") || cat.startsWith("5.")) {
+    combinedDesc = carName ? `ซ่อมรถ (${carName})` : (pFast || "ซ่อมรถ");
+    if (!row["สินค้า"]) row["สินค้า"] = "ซ่อมรถ";
+  } else if (cat.includes("พนักงาน") || cat.startsWith("3.")) {
+    combinedDesc = staffName ? `พนักงาน (${staffName})` : (pFast || "พนักงาน");
+    if (!row["สินค้า"]) row["สินค้า"] = "พนักงาน";
+  } else if (cat.includes("เครื่องมือ") || cat.startsWith("7.")) {
+    combinedDesc = toolFast ? `เครื่องมือ (${toolFast})` : (pFast || "เครื่องมือ");
+    if (!row["สินค้า"]) row["สินค้า"] = toolFast || "เครื่องมือ";
+  } else if (cat.includes("อื่นๆ") || cat.startsWith("8.")) {
+    combinedDesc = itemFast ? `อื่นๆ (${itemFast})` : (pFast || "อื่นๆ");
+    if (!row["สินค้า"]) row["สินค้า"] = itemFast || "อื่นๆ";
+  } else {
+    combinedDesc = pFast;
+    if (itemFast) {
+      combinedDesc = combinedDesc ? `${combinedDesc} (${itemFast})` : itemFast;
+    } else if (toolFast) {
+      combinedDesc = combinedDesc ? `${combinedDesc} (${toolFast})` : toolFast;
+    } else if (carName) {
+      combinedDesc = combinedDesc ? `${combinedDesc} (${carName})` : carName;
+    } else if (staffName) {
+      combinedDesc = combinedDesc ? `${combinedDesc} (${staffName})` : staffName;
+    } else if (dFast) {
+      combinedDesc = combinedDesc ? `${combinedDesc} / ${dFast}` : dFast;
+    }
   }
   row["สินค้า/ทำงาน"] = combinedDesc || row["สินค้า/ทำงาน"] || row.description || "";
   return row;
@@ -383,7 +534,14 @@ function vendorNameFast(row: SheetRow, storeMap: Map<string, SheetRow>, contract
 
 function applyBillFormulasWithContext(
   row: SheetRow,
-  context: { projects: SheetRow[]; stores: SheetRow[]; contracts: SheetRow[] }
+  context: {
+    projects: SheetRow[];
+    stores: SheetRow[];
+    contracts: SheetRow[];
+    cars?: SheetRow[];
+    people?: SheetRow[];
+    products?: SheetRow[];
+  }
 ) {
   const project = context.projects.find(item => String(item["ID Project"]) === String(row["ID Project"]));
   if (project) {
@@ -400,33 +558,85 @@ function applyBillFormulasWithContext(
   const sumAmount = computeBillAmount(row);
   row["ยอดเงิน"] = sumAmount > 0 ? sumAmount : (hasValue(row["ยอดเงิน"]) ? toNumber(row["ยอดเงิน"]) : 0);
   row["ค่าแรง+พนักงาน+อื่น"] = toNumber(row["ค่าแรง"]) + toNumber(row["พนักงาน"]) + toNumber(row["อื่นๆ"]);
-  row["3เปอร์"] = hasValue(row["หัก"]) ? deductAmount(row) : "";
-  row["รวม"] = hasValue(row["หัก"]) ? toNumber(row["ค่าแรง+พนักงาน+อื่น"]) - toNumber(row["3เปอร์"]) : "";
-  row["ค่าแรง(หัก)"] = hasValue(row["หัก"]) ? computeBillDeductMultiplier(row) : "";
+  const isDeduct = isDeductActive(row["หัก"]);
+  row["3เปอร์"] = isDeduct ? deductAmount(row) : "";
+  row["รวม"] = isDeduct ? toNumber(row["ค่าแรง+พนักงาน+อื่น"]) - toNumber(row["3เปอร์"]) : "";
+  row["ค่าแรง(หัก)"] = isDeduct ? computeBillDeductMultiplier(row) : "";
   row["ยอดโอน(มีvat)"] = row["ยอดเงิน"];
-  row["ยอดโอน(มีหัก)"] = hasValue(row["หัก"]) ? computeBillTransferAmount(row) : "";
-  row["ยอดโอน(vat,หัก)"] = hasValue(row["vat"]) && hasValue(row["หัก"]) ? computeBillTransferAmount(row) : "";
+  row["ยอดโอน(มีหัก)"] = isDeduct ? computeBillTransferAmount(row) : "";
+  row["ยอดโอน(vat,หัก)"] = hasValue(row["vat"]) && isDeduct ? computeBillTransferAmount(row) : "";
   row["ยอดโอน"] = computeBillTransferAmount(row);
   row["ร้าน/บุคคล"] = vendorName(row, context.stores, contract);
-  const pVal = String(row["สินค้า"] || row.product || "").trim();
+  
+  const cat = String(row["ประเภท"] || row.category || "").trim();
+  const rawP = String(row["สินค้า"] || row.product || "").trim();
   const itemVal = String(row["รายการ"] || row.sub_category || "").trim();
   const toolVal = String(row["ชื่อเครื่องมือ"] || "").trim();
-  const carVal = String(row["ทะเบียน"] || "").trim();
-  const staffVal = String(row["ชื่อพนักงาน"] || "").trim();
+  const carVal = String(row["ทะเบียน"] || row.plate_no || "").trim();
+  const staffVal = String(row["ชื่อพนักงาน"] || row.staff_name || "").trim();
   const dVal = String(row["รายละเอียดงาน"] || row.work_details || "").trim();
 
-  let combinedVal = pVal;
-  if (itemVal) {
-    combinedVal = combinedVal ? `${combinedVal} (${itemVal})` : itemVal;
-  } else if (toolVal) {
-    combinedVal = combinedVal ? `${combinedVal} (${toolVal})` : toolVal;
-  } else if (carVal) {
-    combinedVal = combinedVal ? `${combinedVal} (${carVal})` : carVal;
-  } else if (staffVal) {
-    combinedVal = combinedVal ? `${combinedVal} (${staffVal})` : staffVal;
-  } else if (dVal) {
-    combinedVal = combinedVal ? `${combinedVal} / ${dVal}` : dVal;
+  let pVal = rawP;
+  if (context.products && rawP) {
+    const prod = context.products.find(item => String(item["id_product"]) === rawP || String(item["รหัสสินค้า"]) === rawP || String(item.id) === rawP);
+    if (prod) {
+      pVal = prod["ชื่อประเภทสินค้า"] || prod["ชื่อสินค้า"] || prod.name || rawP;
+    }
   }
+
+  let carName = carVal;
+  if (context.cars && carVal) {
+    const car = context.cars.find(item => String(item["id_car"]) === carVal || String(item.id) === carVal || String(item["หมายเลขทะเบียน"]) === carVal);
+    if (car) {
+      const plate = String(car["หมายเลขทะเบียน"] || car.plate_no || "").trim();
+      const brand = String(car["ยี่ห้อรถ"] || car.brand || "").trim();
+      if (plate) {
+        carName = brand && !plate.includes(brand) ? `${plate} (${brand})` : plate;
+      }
+    }
+  }
+
+  let staffName = staffVal;
+  if (context.people && staffVal) {
+    const person = context.people.find(item => String(item["รหัสพนักงาน"]) === staffVal || String(item.id) === staffVal);
+    if (person) {
+      const nick = String(person["ชื่อเล่น"] || person.nickname || "").trim();
+      const full = String(person["ชื่อ-นามสกุล"] || person.full_name || "").trim();
+      staffName = nick || full || staffVal;
+    }
+  }
+
+  let combinedVal = "";
+  if (cat.includes("น้ำมัน") || cat.startsWith("4.")) {
+    combinedVal = carName ? `น้ำมัน (${carName})` : (pVal || "น้ำมัน");
+    if (!row["สินค้า"]) row["สินค้า"] = "น้ำมัน";
+  } else if (cat.includes("ซ่อมรถ") || cat.startsWith("5.")) {
+    combinedVal = carName ? `ซ่อมรถ (${carName})` : (pVal || "ซ่อมรถ");
+    if (!row["สินค้า"]) row["สินค้า"] = "ซ่อมรถ";
+  } else if (cat.includes("พนักงาน") || cat.startsWith("3.")) {
+    combinedVal = staffName ? `พนักงาน (${staffName})` : (pVal || "พนักงาน");
+    if (!row["สินค้า"]) row["สินค้า"] = "พนักงาน";
+  } else if (cat.includes("เครื่องมือ") || cat.startsWith("7.")) {
+    combinedVal = toolVal ? `เครื่องมือ (${toolVal})` : (pVal || "เครื่องมือ");
+    if (!row["สินค้า"]) row["สินค้า"] = toolVal || "เครื่องมือ";
+  } else if (cat.includes("อื่นๆ") || cat.startsWith("8.")) {
+    combinedVal = itemVal ? `อื่นๆ (${itemVal})` : (pVal || "อื่นๆ");
+    if (!row["สินค้า"]) row["สินค้า"] = itemVal || "อื่นๆ";
+  } else {
+    combinedVal = pVal;
+    if (itemVal) {
+      combinedVal = combinedVal ? `${combinedVal} (${itemVal})` : itemVal;
+    } else if (toolVal) {
+      combinedVal = combinedVal ? `${combinedVal} (${toolVal})` : toolVal;
+    } else if (carName) {
+      combinedVal = combinedVal ? `${combinedVal} (${carName})` : carName;
+    } else if (staffName) {
+      combinedVal = combinedVal ? `${combinedVal} (${staffName})` : staffName;
+    } else if (dVal) {
+      combinedVal = combinedVal ? `${combinedVal} / ${dVal}` : dVal;
+    }
+  }
+
   row["สินค้า/ทำงาน"] = combinedVal || row["สินค้า/ทำงาน"] || row.description || "";
   return row;
 }
@@ -441,6 +651,7 @@ function vendorName(row: SheetRow, stores: SheetRow[], contract?: SheetRow) {
 }
 
 function deductAmount(row: SheetRow) {
+  if (!isDeductActive(row["หัก"])) return 0;
   if (hasValue(row["จำนวนหัก"])) return toNumber(row["จำนวนหัก"]);
   const hasVat = isVatActive(row.vat);
   const baseAmt = toNumber(row["ยอดเงิน"]) || toNumber(row["ค่าแรง+พนักงาน+อื่น"]);

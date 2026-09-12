@@ -407,22 +407,25 @@ export function isVatActive(vatValue: unknown): boolean {
 
 export function parseDeductPercent(value: unknown): number {
   if (value === null || value === undefined) return 0;
-  const str = String(value).trim();
-  if (str === "ไม่มี" || str === "0" || str === "0%" || str === "" || str === "false") return 0;
+  const str = String(value).trim().toLowerCase();
+  if (!str || str === "-" || str === "0" || str === "0%" || str === "false" || str.includes("ไม่มี")) return 0;
   const match = str.match(/\d+(\.\d+)?/);
   return match ? parseFloat(match[0]) : 0;
 }
 
 export function parseCreditDays(value: unknown): number {
   if (value === null || value === undefined) return 0;
-  const str = String(value).trim();
-  if (str === "เงินสด" || str === "ไม่มี" || str === "0" || str === "" || str === "false") return 0;
+  const str = String(value).trim().toLowerCase();
+  if (!str || str === "เงินสด" || str === "-" || str === "0" || str === "false" || str.includes("ไม่มี")) return 0;
   const match = str.match(/\d+/);
   return match ? parseInt(match[0], 10) : 0;
 }
 
 export function isDeductActive(value: unknown): boolean {
-  return parseDeductPercent(value) > 0;
+  if (value === null || value === undefined) return false;
+  const str = String(value).trim().toLowerCase();
+  if (!str || str === "-" || str === "0" || str === "0%" || str === "false" || str.includes("ไม่มี")) return false;
+  return parseDeductPercent(value) > 0 || str.includes("หัก");
 }
 
 export function isCreditActive(value: unknown): boolean {
@@ -433,15 +436,15 @@ function computeTransferAmount(row: SheetRow) {
   const amount = hasValue(row["ยอดเงิน"]) ? toNumber(row["ยอดเงิน"]) : computeBillAmount(row);
   const hasVat = isVatActive(row.vat ?? row["vat"] ?? row["VAT"]);
   const deductRate = parseDeductPercent(row["หัก"] ?? row["หัก ณ ที่จ่าย"] ?? row["หักณที่จ่าย"]);
-  const hasDeduct = deductRate > 0;
-  const customDeduct = hasValue(row["จำนวนหัก"]) 
-    ? toNumber(row["จำนวนหัก"]) 
-    : (hasValue(row["3เปอร์เซ็น"]) ? toNumber(row["3เปอร์เซ็น"]) : null);
+  const hasDeduct = isDeductActive(row["หัก"] ?? row["หัก ณ ที่จ่าย"] ?? row["หักณที่จ่าย"]);
+  const customDeduct = hasDeduct 
+    ? (hasValue(row["จำนวนหัก"]) ? toNumber(row["จำนวนหัก"]) : (hasValue(row["3เปอร์เซ็น"]) ? toNumber(row["3เปอร์เซ็น"]) : 0))
+    : 0;
 
   if (!hasVat && !hasDeduct) return amount;
 
   if (hasVat && hasDeduct) {
-    if (customDeduct !== null && customDeduct > 0) return amount - customDeduct;
+    if (customDeduct > 0) return amount - customDeduct;
     const deductAmt = (amount / 1.07) * (deductRate / 100);
     return amount - deductAmt;
   }
@@ -449,7 +452,7 @@ function computeTransferAmount(row: SheetRow) {
   if (hasVat) return amount;
 
   if (hasDeduct) {
-    if (customDeduct !== null && customDeduct > 0) return amount - customDeduct;
+    if (customDeduct > 0) return amount - customDeduct;
     const deductAmt = (amount * deductRate) / 100;
     return amount - deductAmt;
   }

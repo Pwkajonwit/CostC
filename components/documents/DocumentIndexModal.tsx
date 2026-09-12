@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import type { BillDocumentModel } from "@/lib/bills/bill-document";
 import { renderMultipleBillsDocumentHtml } from "@/lib/bills/document-template-html";
+import { toNumber } from "@/lib/utils/numbers";
 
 type DocumentIndexModalProps = {
   isOpen: boolean;
@@ -49,8 +50,26 @@ export function DocumentIndexModal({
 
   const summary = useMemo(() => {
     const totalLabor = documents.reduce((acc, d) => acc + (d.amounts.laborAndStaff || 0), 0);
-    const totalWht = documents.reduce((acc, d) => acc + (d.amounts.withholdingTax || 0), 0);
-    const totalNet = documents.reduce((acc, d) => acc + (d.amounts.netPayable || 0), 0);
+    const totalWht = documents.reduce((acc, d) => {
+      const wage = d.amounts.laborAndStaff || 0;
+      const rawWht = toNumber(d.rawBill?.["หัก 3%"]);
+      const rawNet = toNumber(d.rawBill?.["จ่าย"] || d.rawBill?.["ยอดโอน"] || d.rawBill?.["คงเหลือ"]);
+      const net = rawNet > 0 ? rawNet : (rawWht > wage * 0.5 ? rawWht : d.amounts.netPayable || wage);
+      const wht =
+        d.amounts.withholdingTax > 0 && d.amounts.withholdingTax < wage
+          ? d.amounts.withholdingTax
+          : wage > net && net > 0
+          ? Math.round((wage - net) * 100) / 100
+          : 0;
+      return acc + wht;
+    }, 0);
+    const totalNet = documents.reduce((acc, d) => {
+      const wage = d.amounts.laborAndStaff || 0;
+      const rawWht = toNumber(d.rawBill?.["หัก 3%"]);
+      const rawNet = toNumber(d.rawBill?.["จ่าย"] || d.rawBill?.["ยอดโอน"] || d.rawBill?.["คงเหลือ"]);
+      const net = rawNet > 0 ? rawNet : (rawWht > wage * 0.5 ? rawWht : d.amounts.netPayable || wage);
+      return acc + net;
+    }, 0);
     const pnd3Count = documents.filter((d) => !d.contractor.isCorporate).length;
     const pnd53Count = documents.filter((d) => d.contractor.isCorporate).length;
     return { totalLabor, totalWht, totalNet, pnd3Count, pnd53Count };
@@ -83,34 +102,70 @@ export function DocumentIndexModal({
     if (documents.length === 0) return;
 
     const headers = [
-      "ลำดับ",
-      "ว/ด/ป",
+      "id",
+      "วันที่",
       "ชื่อ-นามสกุล",
-      "บัตรประจำตัวประชาชน",
+      "เลขประจำตัวประชาชน",
       "ที่อยู่",
       "ค่าจ้าง",
       "หัก 3%",
-      "คงเหลือ",
-      "ผู้จ่าย",
-      "รายละเอียดงาน",
-      "แบบภาษี",
-      "สถานะ",
+      "จ่าย",
+      "ผู้ออก",
+      "ชื่องาน หรือ หมายเหตุ",
+      "Statusค่าแรง",
     ];
 
-    const rows = documents.map((doc) => [
-      doc.billSequence,
-      doc.billDate,
-      `"${(doc.contractor.fullName || "").replace(/"/g, '""')}"`,
-      `"${(doc.contractor.idCard || doc.contractor.taxId || "").replace(/"/g, '""')}"`,
-      `"${(doc.contractor.address || "").replace(/"/g, '""')}"`,
-      doc.amounts.laborAndStaff.toFixed(2),
-      doc.amounts.withholdingTax.toFixed(2),
-      doc.amounts.netPayable.toFixed(2),
-      `"${(doc.issuer || doc.rawBill?.["ผู้จ่าย"] || "").replace(/"/g, '""')}"`,
-      `"${(doc.jobDescription || "").replace(/"/g, '""')}"`,
-      doc.contractor.isCorporate ? "ภ.ง.ด.53" : "ภ.ง.ด.3",
-      doc.status || "เรียบร้อย",
-    ]);
+    const rows = documents.map((doc) => {
+      const wage = doc.amounts.laborAndStaff || 0;
+      const rawWht3 = toNumber(doc.rawBill?.["หัก 3%"]);
+      const rawNet = toNumber(doc.rawBill?.["จ่าย"] || doc.rawBill?.["ยอดโอน"] || doc.rawBill?.["คงเหลือ"]);
+      const netPayable =
+        rawNet > 0
+          ? rawNet
+          : rawWht3 > wage * 0.5
+          ? rawWht3
+          : doc.amounts.netPayable || wage;
+      const whtAmt =
+        doc.amounts.withholdingTax > 0 && doc.amounts.withholdingTax < wage
+          ? doc.amounts.withholdingTax
+          : wage > netPayable && netPayable > 0
+          ? Math.round((wage - netPayable) * 100) / 100
+          : rawWht3 > 0 && rawWht3 < wage * 0.5
+          ? rawWht3
+          : 0;
+      const isCorp =
+        doc.contractor.isCorporate ||
+        String(doc.rawBill?.["Statusค่าแรง"] || doc.rawBill?.["statusค่าแรง"] || "").includes("บริษัท") ||
+        String(doc.rawBill?.["ร้านค้า/ผู้รับเหมา"] || "") === "ร้านค้า";
+      const statusLabor = String(
+        doc.rawBill?.["Statusค่าแรง"] ||
+        doc.rawBill?.["statusค่าแรง"] ||
+        (isCorp ? "บริษัท" : "บุคคลธรรมดา")
+      );
+      const issuer =
+        doc.issuer ||
+        doc.rawBill?.["ผู้สร้างบิล"] ||
+        doc.rawBill?.["ผู้ออก"] ||
+        doc.rawBill?.["ผู้จ่าย"] ||
+        "-";
+      const address = doc.contractor.address || doc.rawBill?.["ที่อยู่"] || "-";
+      const idCard = doc.contractor.idCard || doc.contractor.taxId || doc.rawBill?.["เลขประจำตัวประชาชน"] || "-";
+      const jobDesc = doc.jobDescription || doc.rawBill?.["ชื่องาน หรือ หมายเหตุ"] || doc.rawBill?.["รายละเอียดงาน"] || "-";
+
+      return [
+        doc.billSequence,
+        doc.billDate,
+        `"${(doc.contractor.fullName || "").replace(/"/g, '""')}"`,
+        `"${idCard.replace(/"/g, '""')}"`,
+        `"${address.replace(/"/g, '""')}"`,
+        wage.toFixed(2),
+        whtAmt.toFixed(2),
+        netPayable.toFixed(2),
+        `"${issuer.replace(/"/g, '""')}"`,
+        `"${jobDesc.replace(/"/g, '""')}"`,
+        statusLabor,
+      ];
+    });
 
     const csvContent = "\uFEFF" + [headers.join(","), ...rows.map((r) => r.join(","))].join("\r\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -270,17 +325,17 @@ export function DocumentIndexModal({
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
-                      <th className="py-2.5 px-3 w-16 text-center">ลำดับ</th>
-                      <th className="py-2.5 px-3 w-24 text-center">ว/ด/ป</th>
-                      <th className="py-2.5 px-3 min-w-[160px]">ชื่อผู้รับเงิน / ผู้รับเหมา</th>
-                      <th className="py-2.5 px-3 w-36 text-center">เลขบัตร/เลขภาษี</th>
-                      <th className="py-2.5 px-3 min-w-[180px]">รายละเอียดงาน</th>
-                      <th className="py-2.5 px-3 w-28 text-right">ค่าจ้าง</th>
+                      <th className="py-2.5 px-3 w-16 text-center">id</th>
+                      <th className="py-2.5 px-3 w-20 text-center">วันที่</th>
+                      <th className="py-2.5 px-3 min-w-[140px]">ชื่อ-นามสกุล</th>
+                      <th className="py-2.5 px-3 w-28 text-center">เลขประจำตัวประชาชน</th>
+                      <th className="py-2.5 px-3 min-w-[150px]">ที่อยู่</th>
+                      <th className="py-2.5 px-3 w-24 text-right">ค่าจ้าง</th>
                       <th className="py-2.5 px-3 w-24 text-right">หัก 3%</th>
-                      <th className="py-2.5 px-3 w-28 text-right">คงเหลือสุทธิ</th>
-                      <th className="py-2.5 px-3 w-20 text-center">แบบ</th>
-                      <th className="py-2.5 px-3 w-20 text-center">ผู้จ่าย</th>
-                      <th className="py-2.5 px-3 w-20 text-center">สถานะ</th>
+                      <th className="py-2.5 px-3 w-24 text-right">จ่าย</th>
+                      <th className="py-2.5 px-3 w-16 text-center">ผู้ออก</th>
+                      <th className="py-2.5 px-3 min-w-[150px]">ชื่องาน หรือ หมายเหตุ</th>
+                      <th className="py-2.5 px-3 w-24 text-center">Statusค่าแรง</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -291,77 +346,113 @@ export function DocumentIndexModal({
                         </td>
                       </tr>
                     ) : (
-                      filteredDocs.map((doc, idx) => (
-                        <tr key={`${doc.billSequence}-${idx}`} className="hover:bg-slate-50/80 transition-colors">
-                          <td className="py-2 px-3 text-center font-mono font-medium text-slate-700">
-                            {doc.billSequence}
-                          </td>
-                          <td className="py-2 px-3 text-center text-slate-600 whitespace-nowrap">
-                            {doc.billDate}
-                          </td>
-                          <td className="py-2 px-3 font-medium text-slate-900">
-                            <div>{doc.contractor.fullName}</div>
-                            {doc.contractor.address && doc.contractor.address !== "-" && (
-                              <div className="text-[11px] text-slate-400 truncate max-w-xs">
-                                {doc.contractor.address}
+                      filteredDocs.map((doc, idx) => {
+                        const wage = doc.amounts.laborAndStaff || 0;
+                        const rawWht3 = toNumber(doc.rawBill?.["หัก 3%"]);
+                        const rawNet = toNumber(doc.rawBill?.["จ่าย"] || doc.rawBill?.["ยอดโอน"] || doc.rawBill?.["คงเหลือ"]);
+                        const netPayable =
+                          rawNet > 0
+                            ? rawNet
+                            : rawWht3 > wage * 0.5
+                            ? rawWht3
+                            : doc.amounts.netPayable || wage;
+                        const whtAmt =
+                          doc.amounts.withholdingTax > 0 && doc.amounts.withholdingTax < wage
+                            ? doc.amounts.withholdingTax
+                            : wage > netPayable && netPayable > 0
+                            ? Math.round((wage - netPayable) * 100) / 100
+                            : rawWht3 > 0 && rawWht3 < wage * 0.5
+                            ? rawWht3
+                            : 0;
+                        const isCorp =
+                          doc.contractor.isCorporate ||
+                          String(doc.rawBill?.["Statusค่าแรง"] || doc.rawBill?.["statusค่าแรง"] || "").includes("บริษัท") ||
+                          String(doc.rawBill?.["ร้านค้า/ผู้รับเหมา"] || "") === "ร้านค้า";
+                        const statusLabor = String(
+                          doc.rawBill?.["Statusค่าแรง"] ||
+                          doc.rawBill?.["statusค่าแรง"] ||
+                          (isCorp ? "บริษัท" : "บุคคลธรรมดา")
+                        );
+                        const issuer =
+                          doc.issuer ||
+                          doc.rawBill?.["ผู้สร้างบิล"] ||
+                          doc.rawBill?.["ผู้ออก"] ||
+                          doc.rawBill?.["ผู้จ่าย"] ||
+                          "-";
+                        const address = doc.contractor.address || doc.rawBill?.["ที่อยู่"] || "-";
+                        const idCard = doc.contractor.idCard || doc.contractor.taxId || doc.rawBill?.["เลขประจำตัวประชาชน"] || "-";
+                        const jobDesc = doc.jobDescription || doc.rawBill?.["ชื่องาน หรือ หมายเหตุ"] || doc.rawBill?.["รายละเอียดงาน"] || "-";
+
+                        return (
+                          <tr key={`${doc.billSequence}-${idx}`} className="hover:bg-slate-50/80 transition-colors">
+                            <td className="py-2.5 px-3 text-center font-medium text-slate-800 text-[11px]">
+                              {doc.billSequence}
+                            </td>
+                            <td className="py-2.5 px-3 text-center text-slate-600 whitespace-nowrap text-[11px]">
+                              {doc.billDate}
+                            </td>
+                            <td className="py-2.5 px-3 font-medium text-slate-900 text-xs">
+                              <div className="truncate max-w-[150px]" title={doc.contractor.fullName}>
+                                {doc.contractor.fullName}
                               </div>
-                            )}
-                          </td>
-                          <td className="py-2 px-3 text-center font-mono text-[11px] text-slate-600 whitespace-nowrap">
-                            {doc.contractor.idCard || doc.contractor.taxId || "-"}
-                          </td>
-                          <td className="py-2 px-3 text-slate-700">
-                            <div className="truncate max-w-xs">{doc.jobDescription || "-"}</div>
-                          </td>
-                          <td className="py-2 px-3 text-right font-mono font-medium text-slate-800">
-                            {doc.amounts.laborAndStaff.toLocaleString("th-TH", { minimumFractionDigits: 2 })}
-                          </td>
-                          <td className="py-2 px-3 text-right font-mono text-rose-600">
-                            {doc.amounts.withholdingTax.toLocaleString("th-TH", { minimumFractionDigits: 2 })}
-                          </td>
-                          <td className="py-2 px-3 text-right font-mono font-bold text-emerald-700">
-                            {doc.amounts.netPayable.toLocaleString("th-TH", { minimumFractionDigits: 2 })}
-                          </td>
-                          <td className="py-2 px-3 text-center">
-                            <span
-                              className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                                doc.contractor.isCorporate
-                                  ? "bg-purple-50 text-purple-700 border border-purple-200"
-                                  : "bg-indigo-50 text-indigo-700 border border-indigo-200"
-                              }`}
-                            >
-                              {doc.contractor.isCorporate ? "ภ.ง.ด.53" : "ภ.ง.ด.3"}
-                            </span>
-                          </td>
-                          <td className="py-2 px-3 text-center text-slate-600 text-[11px]">
-                            {doc.issuer || doc.rawBill?.["ผู้จ่าย"] || "-"}
-                          </td>
-                          <td className="py-2 px-3 text-center">
-                            <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                              <CheckCircle2 size={10} />
-                              {doc.status || "เรียบร้อย"}
-                            </span>
-                          </td>
-                        </tr>
-                      ))
+                            </td>
+                            <td className="py-2.5 px-3 text-center text-[11px] text-slate-600 whitespace-nowrap">
+                              {idCard}
+                            </td>
+                            <td className="py-2.5 px-3 text-slate-600 text-[11px]">
+                              <div className="truncate max-w-[160px]" title={address}>
+                                {address}
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-medium text-slate-900 text-[11px]">
+                              {wage.toLocaleString("th-TH", { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-medium text-amber-700 text-[11px]">
+                              {whtAmt.toLocaleString("th-TH", { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-bold text-emerald-700 text-[11px]">
+                              {netPayable.toLocaleString("th-TH", { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="py-2.5 px-3 text-center text-slate-600 text-[11px]">
+                              {issuer}
+                            </td>
+                            <td className="py-2.5 px-3 text-slate-700 text-[11px]">
+                              <div className="truncate max-w-[160px]" title={jobDesc}>
+                                {jobDesc}
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-3 text-center text-[11px]">
+                              <span
+                                className={`inline-block px-2 py-0.5 rounded text-[11px] font-medium ${
+                                  isCorp
+                                    ? "bg-purple-50 text-purple-700 border border-purple-200"
+                                    : "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                                }`}
+                              >
+                                {statusLabor}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                   {filteredDocs.length > 0 && (
                     <tfoot>
                       <tr className="bg-slate-50 border-t-2 border-slate-300 font-bold text-slate-900">
-                        <td colSpan={5} className="py-2.5 px-3 text-center">
+                        <td colSpan={5} className="py-2.5 px-3 text-center text-xs">
                           รวมรายการทั้งหมด ({filteredDocs.length} ฉบับ)
                         </td>
-                        <td className="py-2.5 px-3 text-right font-mono">
-                          {summary.totalLabor.toLocaleString("th-TH", { minimumFractionDigits: 2 })}
+                        <td className="py-2.5 px-3 text-right font-medium text-slate-900 text-xs">
+                          ฿{summary.totalLabor.toLocaleString("th-TH", { minimumFractionDigits: 2 })}
                         </td>
-                        <td className="py-2.5 px-3 text-right font-mono text-rose-600">
-                          {summary.totalWht.toLocaleString("th-TH", { minimumFractionDigits: 2 })}
+                        <td className="py-2.5 px-3 text-right font-medium text-amber-700 text-xs">
+                          ฿{summary.totalWht.toLocaleString("th-TH", { minimumFractionDigits: 2 })}
                         </td>
-                        <td className="py-2.5 px-3 text-right font-mono text-emerald-700">
-                          {summary.totalNet.toLocaleString("th-TH", { minimumFractionDigits: 2 })}
+                        <td className="py-2.5 px-3 text-right font-bold text-emerald-700 text-xs">
+                          ฿{summary.totalNet.toLocaleString("th-TH", { minimumFractionDigits: 2 })}
                         </td>
-                        <td colSpan={3} className="py-2.5 px-3 text-center text-slate-500 font-normal">
+                        <td colSpan={3} className="py-2.5 px-3 text-center text-slate-500 font-normal text-xs">
                           บาท
                         </td>
                       </tr>

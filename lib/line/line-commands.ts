@@ -19,8 +19,10 @@ import {
   getBankInfoMap,
   getContractWorkMap,
   getProjectBudgetMap,
+  getCarsMap,
   createDailyTransferSummaryFlex,
-  createDailySummaryFlex
+  createDailySummaryFlex,
+  isSubBillRecord
 } from "@/lib/line/line";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 import { insertRowToSupabase } from "@/lib/supabase/supabase-db";
@@ -193,11 +195,15 @@ export async function handleLineCommand(
         // Strictly filter by actual closed/paid date today in Bangkok timezone (excluding updated_at)
         const todayBills = targetBills.filter(b => {
           const d = (b.data && typeof b.data === "object") ? b.data : {};
-          const pDateRaw = String(b.paid_date || b["วันจ่าย"] || d.paid_date || d["วันจ่าย"] || "").trim();
-          if (pDateRaw) {
-            if (pDateRaw.startsWith(todayYmd) || pDateRaw.includes(todayYmd) || (todayDmy && pDateRaw.includes(todayDmy))) {
-              return true;
-            }
+          const pCandidates = [
+            b.paid_date, d.paid_date,
+            b["วันจ่าย"], d["วันจ่าย"],
+            b["ว/ด/ป"], d["ว/ด/ป"],
+            b["วันที่"], d["วันที่"],
+            b.bill_date, d.bill_date
+          ];
+          for (const cand of pCandidates) {
+            if (cand && normalizeDateToIso(cand) === todayYmd) return true;
           }
           const rawPaidAt = b.paid_at || d.paid_at;
           if (rawPaidAt) {
@@ -248,9 +254,20 @@ export async function handleLineCommand(
       const altText = `💸 ยอดโอนประจำวัน (${targetBills.length} บิลปิดงานแล้ว)`;
       const sent = await replyFlexMessage(replyToken, altText, transferFlex);
       if (!sent && replyToken) {
+        const mainBills = targetBills.filter(b => !isSubBillRecord(b));
+        const subBills = targetBills.filter(b => isSubBillRecord(b));
+        const mainTotal = mainBills.reduce((s, b) => s + Number(b["ยอดโอน"] || b["ยอดเงิน"] || b.amount || 0), 0);
+        const subTotal = subBills.reduce((s, b) => s + Number(b["ยอดโอน"] || b["ยอดเงิน"] || b.amount || 0), 0);
+        const grandTotal = mainTotal + subTotal;
+
         let textFallback = `💸 สรุปยอดโอนประจำวัน (ปิดงานแล้วทั้งหมด ${targetBills.length} รายการ):\n\n`;
-        const total = targetBills.reduce((s, b) => s + Number(b["ยอดโอน"] || b["ยอดเงิน"] || b.amount || 0), 0);
-        textFallback += `💰 ยอดโอนรวมทั้งหมด: ฿${total.toLocaleString("th-TH")}\n`;
+        if (mainBills.length > 0) {
+          textFallback += `🏛️ หมวดบิลหลัก (${mainBills.length} บิล): ฿${mainTotal.toLocaleString("th-TH")}\n`;
+        }
+        if (subBills.length > 0) {
+          textFallback += `👤 หมวดบิลย่อย (${subBills.length} บิล): ฿${subTotal.toLocaleString("th-TH")}\n`;
+        }
+        textFallback += `\n💰 ยอดโอนรวมทั้งหมด: ฿${grandTotal.toLocaleString("th-TH")}`;
         await replyTextMessage(replyToken, textFallback.trim());
       }
       return true;
@@ -779,13 +796,14 @@ export async function handleLineCommand(
         return true;
       }
 
-      const [resolvedPeopleMap, bankInfoMap, contractsMap, projectBudgetMap] = await Promise.all([
+      const [resolvedPeopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap] = await Promise.all([
         getPeopleMap(),
         getBankInfoMap(),
         getContractWorkMap(),
-        getProjectBudgetMap()
+        getProjectBudgetMap(),
+        getCarsMap()
       ]);
-      const flexForApprovers = createWithdrawOwnerFlex(pendingBills, resolvedPeopleMap, bankInfoMap, contractsMap, projectBudgetMap);
+      const flexForApprovers = createWithdrawOwnerFlex(pendingBills, resolvedPeopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap);
       const totalAmount = pendingBills.reduce((sum, b) => sum + Number(b["ยอดเงิน"] || b.amount || 0), 0);
       const amountStr = totalAmount.toLocaleString("th-TH");
 
@@ -1036,13 +1054,14 @@ export async function handleLineCommand(
 
       // When Approver Approves successfully, forward Multi-Item Flex Message to Finance / Closers to pay & close job
       if (isApprove && targetFinanceList.length > 0) {
-        const [peopleMap, bankInfoMap, contractsMap, projectBudgetMap] = await Promise.all([
+        const [peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap] = await Promise.all([
           getPeopleMap(),
           getBankInfoMap(),
           getContractWorkMap(),
-          getProjectBudgetMap()
+          getProjectBudgetMap(),
+          getCarsMap()
         ]);
-        const flexForFinance = createWithdrawApproverFlex(targetBills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap);
+        const flexForFinance = createWithdrawApproverFlex(targetBills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap);
         const totalAmtStr = totalAmount.toLocaleString("th-TH");
         const altText = targetBills.length === 1
           ? `✅ รายการอนุมัติสำเร็จ (รอปิดงาน) #${targetBills[0]["ลำดับ"] || targetBills[0].id || ""} (฿${totalAmtStr})`
@@ -1084,13 +1103,14 @@ export async function handleLineCommand(
           if (recipients.size === 0 && validGroup) recipients.add(validGroup);
 
           if (recipients.size > 0) {
-            const [peopleMap, bankInfoMap, contractsMap, projectBudgetMap] = await Promise.all([
+            const [peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap] = await Promise.all([
               getPeopleMap(),
               getBankInfoMap(),
               getContractWorkMap(),
-              getProjectBudgetMap()
+              getProjectBudgetMap(),
+              getCarsMap()
             ]);
-            const flexForRequester = createWithdrawCompletedRequesterFlex(reqBills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap);
+            const flexForRequester = createWithdrawCompletedRequesterFlex(reqBills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap);
             const totalAmt = reqBills.reduce((sum, b) => sum + Number(b["ยอดเงิน"] || b.amount || 0), 0);
             const totalAmtStr = totalAmt.toLocaleString("th-TH");
             const altText = reqBills.length === 1
@@ -1303,16 +1323,17 @@ export async function handleLineCommand(
             ? `ผลการค้นหาบิล${isSub ? "ย่อย" : isMain ? "หลัก" : ""}ของ "${filterQuery}"`
             : `รายการเบิกเงิน${isSub ? "บิลย่อย" : isMain ? "บิลหลัก" : "บิล"}`;
 
-      const [bankInfoMap, contractsMap, projectBudgetMap] = await Promise.all([
+      const [bankInfoMap, contractsMap, projectBudgetMap, carsMap] = await Promise.all([
         getBankInfoMap(),
         getContractWorkMap(),
-        getProjectBudgetMap()
+        getProjectBudgetMap(),
+        getCarsMap()
       ]);
 
       // For approved bills awaiting finance closing, use createWithdrawApproverFlex with close buttons & bank details
       const flexPayload = isApprovedFilter
-        ? createWithdrawApproverFlex(bills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap)
-        : createBillSearchResultFlex(flexTitle, bills, isSub, isMain, totalCount, totalSumAmount, filterQuery, peopleMap, bankInfoMap);
+        ? createWithdrawApproverFlex(bills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap)
+        : createBillSearchResultFlex(flexTitle, bills, isSub, isMain, totalCount, totalSumAmount, filterQuery, peopleMap, bankInfoMap, carsMap);
 
       const sent = await replyFlexMessage(replyToken, `🧾 ${flexTitle} (${bills.length} รายการ)`, flexPayload);
       if (!sent && replyToken) {
@@ -1372,11 +1393,21 @@ export async function handleLineCommand(
         // Strictly filter bills of today: transaction date today, created today, approved today, or closed today
         targetBills = bills.filter(b => {
           const d = (b.data && typeof b.data === "object") ? b.data : {};
-          const dateField = String(b["ว/ด/ป"] || d["ว/ด/ป"] || b.paid_date || d.paid_date || b["วันจ่าย"] || d["วันจ่าย"] || "").trim();
-          if (dateField && (dateField.startsWith(todayYmd) || dateField.includes(todayYmd) || (todayDmy && dateField.includes(todayDmy)))) {
-            return true;
+          const dateCandidates = [
+            b["วันที่"], d["วันที่"],
+            b["ว/ด/ป"], d["ว/ด/ป"],
+            b.bill_date, d.bill_date,
+            b["วันจ่าย"], d["วันจ่าย"],
+            b.paid_date, d.paid_date,
+            b["วันได้บิล"], d["วันได้บิล"],
+            b.bill_received_date, d.bill_received_date
+          ];
+          for (const cand of dateCandidates) {
+            if (cand && normalizeDateToIso(cand) === todayYmd) {
+              return true;
+            }
           }
-          for (const isoField of [b.created_at, b.paid_at, b.approved_at]) {
+          for (const isoField of [b.created_at, b.paid_at, b.approved_at, d.created_at, d.paid_at, d.approved_at]) {
             if (isoField) {
               try {
                 const bkk = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(isoField));
@@ -1393,22 +1424,27 @@ export async function handleLineCommand(
       // Count global pending bills (current queue waiting for approval across entire system)
       const globalPendingCount = bills.filter(b => {
         const normSt = normalizeBillStatus(b["สถานะ"] || b.status);
-        return normSt === "รออนุมัติ" || normSt === "รอตั้งเบิก" || normSt === "ตั้งเบิก";
+        return normSt === "รออนุมัติ" || normSt === "รอตั้งเบิก" || normSt === "ตั้งเบิก" || normSt === "รอตรวจสอบ";
       }).length;
 
-      let approvedCount = 0;
-      let paidCount = 0;
+      let todayPendingCount = 0;
+      let todayApprovedCount = 0;
+      let todayPaidCount = 0;
       let totalAmount = 0;
 
       targetBills.forEach(b => {
-        const amt = Number(b["ยอดเงิน"] || b.amount || 0);
+        const d = (b.data && typeof b.data === "object") ? b.data : {};
+        const rawAmt = b["ยอดเงิน"] ?? d["ยอดเงิน"] ?? b.amount ?? d.amount ?? b["ค่าแรง+พนักงาน+อื่นๆ"] ?? d["ค่าแรง+พนักงาน+อื่นๆ"] ?? b["ค่าแรง"] ?? d["ค่าแรง"] ?? b["ค่าจ้าง"] ?? d["ค่าจ้าง"] ?? b["ยอดโอน"] ?? d["ยอดโอน"] ?? 0;
+        const amt = typeof rawAmt === "number" ? (Number.isFinite(rawAmt) ? rawAmt : 0) : (Number(String(rawAmt).replace(/,/g, "").trim()) || 0);
         totalAmount += amt;
 
         const normSt = normalizeBillStatus(b["สถานะ"] || b.status);
         if (normSt === "อนุมัติ") {
-          approvedCount++;
+          todayApprovedCount++;
         } else if (normSt === "เบิกแล้ว") {
-          paidCount++;
+          todayPaidCount++;
+        } else if (normSt === "รออนุมัติ" || normSt === "รอตั้งเบิก" || normSt === "ตั้งเบิก" || normSt === "รอตรวจสอบ") {
+          todayPendingCount++;
         }
       });
 
@@ -1425,9 +1461,11 @@ export async function handleLineCommand(
         dateStr: isAll ? `ข้อมูลทั้งหมด (${targetBills.length} บิล)` : todayDisplay,
         totalBills: targetBills.length,
         totalAmount,
-        pendingCount: globalPendingCount,
-        approvedCount,
-        paidCount
+        pendingCount: isAll ? globalPendingCount : todayPendingCount,
+        approvedCount: todayApprovedCount,
+        paidCount: todayPaidCount,
+        globalPendingCount: isAll ? undefined : globalPendingCount,
+        bills: targetBills
       });
 
       const altText = isAll
@@ -1438,11 +1476,30 @@ export async function handleLineCommand(
       if (!sent && replyToken) {
         let textFallback = `${isAll ? "📊 สรุปรายงานการเงินทั้งหมด (สะสม)" : `📊 สรุปรายงานการเงินประจำวัน (${todayDisplay})`}\n\n`;
         textFallback += `- บิล${isAll ? "ทั้งหมด" : "วันนี้"}: ${targetBills.length} รายการ\n`;
-        textFallback += `- ⏳ รออนุมัติ (ค้างระบบ): ${globalPendingCount} รายการ\n`;
-        textFallback += `- ✅ อนุมัติแล้ว: ${approvedCount} รายการ\n`;
-        textFallback += `- 💸 ปิดงาน/จ่ายแล้ว: ${paidCount} รายการ\n`;
-        textFallback += `- 💰 ยอดรวม: ฿${totalAmount.toLocaleString("th-TH")}`;
-        await replyTextMessage(replyToken, textFallback);
+        textFallback += `- ⏳ รออนุมัติ: ${isAll ? globalPendingCount : todayPendingCount} รายการ\n`;
+        textFallback += `- ✅ อนุมัติแล้ว: ${todayApprovedCount} รายการ\n`;
+        textFallback += `- 💸 ปิดงาน/จ่ายแล้ว: ${todayPaidCount} รายการ\n`;
+        if (!isAll && globalPendingCount > 0) {
+          textFallback += `- 📌 รออนุมัติสะสมในระบบ: ${globalPendingCount} รายการ\n`;
+        }
+        textFallback += `- 💰 ยอดรวม: ฿${totalAmount.toLocaleString("th-TH")}\n\n`;
+
+        if (targetBills.length > 0) {
+          textFallback += `📝 รายการบิล${isAll ? "" : "วันนี้"}:\n`;
+          targetBills.slice(0, 10).forEach((b, idx) => {
+            const d = (b.data && typeof b.data === "object") ? b.data : {};
+            const rawAmt = b["ยอดเงิน"] ?? d["ยอดเงิน"] ?? b.amount ?? d.amount ?? b["ค่าแรง+พนักงาน+อื่นๆ"] ?? d["ค่าแรง+พนักงาน+อื่นๆ"] ?? b["ค่าแรง"] ?? d["ค่าแรง"] ?? b["ค่าจ้าง"] ?? d["ค่าจ้าง"] ?? b["ยอดโอน"] ?? d["ยอดโอน"] ?? 0;
+            const amt = (typeof rawAmt === "number" ? rawAmt : (Number(String(rawAmt).replace(/,/g, "").trim()) || 0)).toLocaleString("th-TH");
+            const payee = b["ร้าน/บุคคล"] || b.vendor_or_person || b["ผู้รับเหมา"] || b["ร้านค้า"] || b["ผู้เบิก"] || "-";
+            const proj = b["ชื่อ Project"] || b.project_name || "";
+            const st = b["สถานะ"] || b.status || "-";
+            textFallback += `${idx + 1}. [${b.bill_no || b.id || b["ลำดับ"] || "-"}] ${payee} ${proj ? `(${proj})` : ""} : ฿${amt} [${st}]\n`;
+          });
+          if (targetBills.length > 10) {
+            textFallback += `...และอีก ${targetBills.length - 10} รายการ\n`;
+          }
+        }
+        await replyTextMessage(replyToken, textFallback.trim());
       }
       return true;
     }

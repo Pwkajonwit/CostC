@@ -34,7 +34,7 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
     { name: "จำนวนหัก", type: "Decimal", showIf: { column: "หัก", notBlank: true } },
     { name: "วันออก 3%", type: "Date", showIf: { column: "หัก", notBlank: true } },
     { name: "ชื่อพนักงาน", type: "Ref", refTable: TABLES.PEOPLE, refKey: "รหัสพนักงาน", refLabel: "ชื่อเล่น", required: true, showIf: { column: "ประเภท", equals: "3.พนักงาน" } },
-    { name: "พนักงาน", type: "Decimal", required: true, showIf: { column: "ประเภท", equals: "3.พนักงาน" } },
+    { name: "พนักงาน", label: "จำนวน", type: "Decimal", required: true, showIf: { column: "ประเภท", equals: "3.พนักงาน" } },
     { name: "ผู้เบิก", type: "Ref", refTable: TABLES.PEOPLE, refKey: "รหัสพนักงาน", refLabel: "ชื่อเล่น", required: true },
     { name: "ผู้สร้างบิล", type: "Hidden" },
     { name: "ว/ด/ป", type: "Date", initialValue: "today" },

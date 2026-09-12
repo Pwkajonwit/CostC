@@ -76,7 +76,13 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
   const [isResending, setIsResending] = useState(false);
 
   useEffect(() => {
-    setFilters(normalizeFilters(initialFilters));
+    setFilters(current => ({
+      ...current,
+      requester: initialFilters.requester !== undefined ? String(initialFilters.requester) : current.requester,
+      bill: initialFilters.bill !== undefined ? String(initialFilters.bill) : current.bill,
+      search: initialFilters.search !== undefined ? String(initialFilters.search) : current.search,
+      date: initialFilters.date !== undefined ? String(initialFilters.date) : current.date,
+    }));
   }, [initialFilters.requester, initialFilters.date, initialFilters.bill, initialFilters.search]);
 
   // Client-side fallback to match logged-in requester for non-admin users if not already filtered
@@ -147,6 +153,95 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
     }
   }
 
+  // Active bill type of currently selected rows (if any)
+  const currentSelectedBillType = useMemo(() => {
+    if (selectedRows.size === 0) return "";
+    for (const r of rows) {
+      const rowId = Number(r.id ?? r["ลำดับ"] ?? r._sheetRow);
+      if (selectedRows.has(rowId)) {
+        return getRowBillType(r);
+      }
+    }
+    return "";
+  }, [selectedRows, rows]);
+
+  // Handle bill filter change from buttons or dropdown
+  function handleBillFilterChange(newBill: string) {
+    if (newBill && currentSelectedBillType && newBill !== currentSelectedBillType && selectedRows.size > 0) {
+      setSelectedRows(new Set());
+      showToast("info", `ล้างรายการที่เลือกไว้ก่อนหน้า เนื่องจากเปลี่ยนตัวกรองเป็น "บิล${newBill}"`);
+    }
+    updateFilter("bill", newBill);
+  }
+
+  // Safe row toggle enforcing same bill type rule
+  function toggleRowSelection(sheetRowId: number) {
+    const targetRow = rows.find(r => Number(r.id ?? r["ลำดับ"] ?? r._sheetRow) === sheetRowId);
+    if (!targetRow) return;
+
+    const newSet = new Set(selectedRows);
+    if (newSet.has(sheetRowId)) {
+      newSet.delete(sheetRowId);
+      setSelectedRows(newSet);
+      setActionError("");
+      return;
+    }
+
+    // Guard: Enforce same bill type
+    if (selectedRows.size > 0 && currentSelectedBillType) {
+      const targetType = getRowBillType(targetRow);
+      if (targetType !== currentSelectedBillType) {
+        const warningMsg = `⚠️ การแจ้งตั้งเบิกต้องเป็นประเภทบิลเดียวกันเท่านั้น (รายการที่เลือกอยู่คือ "บิล${currentSelectedBillType}" ไม่สามารถเลือก "บิล${targetType}" ปนกันได้)`;
+        setActionError(warningMsg);
+        showToast("warning", warningMsg);
+        return;
+      }
+    }
+
+    newSet.add(sheetRowId);
+    setSelectedRows(newSet);
+    setActionError("");
+  }
+
+  // Safe select all enforcing same bill type rule
+  function handleSelectAll(eligibleCandidateRows: SheetRow[]) {
+    if (eligibleCandidateRows.length === 0) {
+      setSelectedRows(new Set());
+      return;
+    }
+
+    // Determine target bill type:
+    // 1. If rows already selected, preserve that type.
+    // 2. Else if filters.bill is active ("หลัก" or "ย่อย"), use that type.
+    // 3. Otherwise, use the type of the first eligible candidate row.
+    const targetType = currentSelectedBillType || (filters.bill ? filters.bill : getRowBillType(eligibleCandidateRows[0]));
+
+    const matchingCandidates = eligibleCandidateRows.filter(r => getRowBillType(r) === targetType);
+    const matchingIds = matchingCandidates.map(r => Number(r.id ?? r["ลำดับ"] ?? r._sheetRow));
+
+    const isAllMatchingSelected = matchingIds.length > 0 && matchingIds.every(id => selectedRows.has(id));
+
+    if (isAllMatchingSelected) {
+      // Unselect only the matching ones
+      const newSet = new Set(selectedRows);
+      matchingIds.forEach(id => newSet.delete(id));
+      setSelectedRows(newSet);
+      setActionError("");
+    } else {
+      // Select matching ones
+      const newSet = new Set([...selectedRows, ...matchingIds]);
+      setSelectedRows(newSet);
+
+      if (matchingCandidates.length < eligibleCandidateRows.length) {
+        const msg = `เลือกเฉพาะ "บิล${targetType}" ทั้งหมด ${matchingCandidates.length} รายการ (เนื่องจากการแจ้งตั้งเบิกต้องเป็นประเภทบิลเดียวกัน)`;
+        setActionError(`💡 ${msg} — กดปุ่ม "หลัก" หรือ "ย่อย" ด้านบนเพื่อแยกดูแต่ละประเภท`);
+        showToast("info", msg);
+      } else {
+        setActionError("");
+      }
+    }
+  }
+
   async function approveRow(row: SheetRow) {
     const sheetRow = Number(row.id ?? row["ลำดับ"] ?? row._sheetRow);
     if (!Number.isInteger(sheetRow) || sheetRow < 1) return;
@@ -176,11 +271,11 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
 
       const updatedRow = { ...row, "สถานะ": nextStatus };
 
-      // Automatically send LINE Flex message to the Requester in background
+      // Automatically send LINE Flex message to the Requester and Creator in background
       fetch("/api/line/notify-withdraw-request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ row: updatedRow, targetRole: "requester" })
+        body: JSON.stringify({ row: updatedRow, targetRole: "requester", actor: getCurrentActor() })
       }).catch(err => console.warn("Failed sending LINE withdraw notification:", err));
 
       router.refresh();
@@ -201,6 +296,17 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
     if (selectedRows.size === 0) return;
     setIsBatchApproving(true);
     setActionError("");
+
+    // Guard: Enforce same bill type
+    const selectedList = rows.filter(r => selectedRows.has(Number(r.id ?? r["ลำดับ"] ?? r._sheetRow)));
+    const billTypes = new Set(selectedList.map(r => getRowBillType(r)).filter(Boolean));
+    if (billTypes.size > 1) {
+      const msg = "⚠️ การแจ้งตั้งเบิกจะต้องเป็นประเภทบิลเดียวกันเท่านั้น (กรุณาเลือกเฉพาะบิลหลัก หรือบิลย่อย เพื่อความสะดวกในการตรวจสอบ)";
+      setActionError(msg);
+      showToast("error", msg);
+      setIsBatchApproving(false);
+      return;
+    }
 
     // Filter out rows that are already in target or finished status
     const validSheetRows = Array.from(selectedRows).filter(sheetRow => {
@@ -254,7 +360,7 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
         fetch("/api/line/notify-withdraw-request", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rows: updatedRowsList, targetRole })
+          body: JSON.stringify({ rows: updatedRowsList, targetRole, actor: getCurrentActor() })
         }).catch(err => console.warn("Failed sending LINE withdraw notification:", err));
       }
 
@@ -288,10 +394,20 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
         return;
       }
 
+      // Guard: Enforce same bill type
+      const billTypes = new Set(selectedList.map(r => getRowBillType(r)).filter(Boolean));
+      if (billTypes.size > 1) {
+        const msg = "⚠️ การส่งแจ้งเตือนจะต้องเป็นประเภทบิลเดียวกันเท่านั้น (กรุณาเลือกเฉพาะบิลหลัก หรือบิลย่อย)";
+        setActionError(msg);
+        showToast("error", msg);
+        setIsResending(false);
+        return;
+      }
+
       const res = await fetch("/api/line/notify-withdraw-request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: selectedList, targetRole: "requester" })
+        body: JSON.stringify({ rows: selectedList, targetRole: "requester", actor: getCurrentActor() })
       });
 
       if (!res.ok) {
@@ -375,16 +491,16 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
         </div>
       </div>
 
-      {/* 2. FILTER TOOLBAR & SEARCH */}
-      <div className="border border-slate-200 rounded-xl md:rounded-md p-2.5 bg-white flex flex-col gap-2 text-xs shadow-2xs">
-        {/* Search Bar & Controls Header */}
-        <div className="flex items-center gap-2 w-full">
-          {/* Universal Search Bar */}
-          <div className="relative flex items-center flex-1">
+      {/* 2. FILTER TOOLBAR & SEARCH (UNIFIED SINGLE ROW) */}
+      <div className="border border-slate-200 rounded-xl md:rounded-md p-2 bg-white flex flex-col md:flex-row md:items-center justify-between gap-2 text-xs shadow-2xs">
+        {/* Left Section: Search Input + Filters in the same row */}
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
+          {/* Universal Search Bar (Compact width) */}
+          <div className="relative flex items-center w-full md:w-44 lg:w-56 shrink-0">
             <Search size={14} className="absolute left-2.5 text-slate-400 pointer-events-none" />
             <input
               type="text"
-              placeholder="ค้นหา Project, ร้านค้า, รายการ..."
+              placeholder="ค้นหา..."
               value={searchInput}
               onChange={event => updateFilter("search", event.target.value)}
               className="w-full bg-slate-50 md:bg-white text-slate-800 text-xs pl-8 pr-7 py-1.5 rounded-lg md:rounded-md border border-slate-200 md:border-slate-300 focus:outline-none focus:bg-white focus:border-slate-400 placeholder:text-slate-400"
@@ -393,6 +509,113 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
               <X size={14} className="absolute right-2 text-slate-400 cursor-pointer hover:text-slate-600" onClick={() => updateFilter("search", "")} />
             )}
           </div>
+
+          <div className="hidden lg:block h-4 w-px bg-slate-200 shrink-0" />
+
+          {/* Filters (Desktop all in one row, Mobile expandable) */}
+          <div className={`flex-wrap items-center gap-2 ${showMobileFilters ? "flex w-full md:w-auto" : "hidden md:flex"}`}>
+            {/* Requester dropdown */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-slate-700 whitespace-nowrap">ผู้เบิก:</span>
+              <select
+                value={filters.requester}
+                onChange={event => updateFilter("requester", event.target.value)}
+                className="bg-white border border-slate-300 text-xs text-slate-800 px-2 py-1 rounded-md focus:outline-none cursor-pointer max-w-[130px] truncate"
+              >
+                <option value="">ทั้งหมด</option>
+                {peopleRows.map(row => {
+                  const key = String(row["รหัสพนักงาน"] || row["ชื่อเล่น"] || row._sheetRow || "");
+                  const label = row["ชื่อเล่น"] ? `${key} - ${row["ชื่อเล่น"]}` : key;
+                  return key ? <option key={key} value={key}>{label}</option> : null;
+                })}
+              </select>
+            </div>
+
+            {/* Date Picker */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-slate-700 whitespace-nowrap">วันที่:</span>
+              <input
+                type="date"
+                value={filters.date}
+                onChange={event => updateFilter("date", event.target.value)}
+                className="bg-white border border-slate-300 text-xs text-slate-800 px-2 py-1 rounded-md focus:outline-none cursor-pointer"
+              />
+              {filters.date ? (
+                <button
+                  type="button"
+                  onClick={() => updateFilter("date", "")}
+                  className="text-xs text-slate-500 hover:text-slate-800 px-1.5 py-0.5 rounded border border-slate-200 bg-slate-50 hover:bg-slate-100 transition cursor-pointer"
+                  title="ดูทุกวัน (ไม่จำกัดวันที่)"
+                >
+                  ทั้งหมด
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => updateFilter("date", getLocalTodayString())}
+                  className="text-xs text-slate-500 hover:text-slate-800 px-1.5 py-0.5 rounded border border-slate-200 bg-slate-50 hover:bg-slate-100 transition cursor-pointer"
+                  title="กรองเฉพาะวันนี้"
+                >
+                  วันนี้
+                </button>
+              )}
+            </div>
+
+            {/* Bill Type */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-slate-700 whitespace-nowrap">ประเภท:</span>
+              <select
+                value={filters.bill}
+                onChange={event => handleBillFilterChange(event.target.value)}
+                className="bg-white border border-slate-300 text-xs text-slate-800 px-2 py-1 rounded-md focus:outline-none cursor-pointer"
+              >
+                <option value="">ทั้งหมด</option>
+                <option value="หลัก">หลัก</option>
+                <option value="ย่อย">ย่อย</option>
+              </select>
+
+              {/* Quick Select Buttons: หลัก / ย่อย */}
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => handleBillFilterChange(filters.bill === "หลัก" ? "" : "หลัก")}
+                  className={`px-2 py-1 rounded-md text-xs font-medium border transition cursor-pointer active:scale-95 ${
+                    filters.bill === "หลัก"
+                      ? "bg-[#0b3531] text-white border-[#0b3531] shadow-2xs font-semibold"
+                      : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                  }`}
+                  title="กรองเฉพาะบิลหลัก (กดซ้ำเพื่อแสดงทั้งหมด)"
+                >
+                  หลัก
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleBillFilterChange(filters.bill === "ย่อย" ? "" : "ย่อย")}
+                  className={`px-2 py-1 rounded-md text-xs font-medium border transition cursor-pointer active:scale-95 ${
+                    filters.bill === "ย่อย"
+                      ? "bg-[#0b3531] text-white border-[#0b3531] shadow-2xs font-semibold"
+                      : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                  }`}
+                  title="กรองเฉพาะบิลย่อย (กดซ้ำเพื่อแสดงทั้งหมด)"
+                >
+                  ย่อย
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Section: Action buttons (Resend, Export, Mobile Toggle) */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Mobile Filter Toggle Button */}
+          <button
+            type="button"
+            onClick={() => setShowMobileFilters(!showMobileFilters)}
+            className="md:hidden px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg border border-slate-200 flex items-center gap-1 shrink-0 cursor-pointer active:bg-slate-200"
+          >
+            <Filter size={13} />
+            <span>{showMobileFilters ? "ซ่อน" : "ตัวกรอง"}</span>
+          </button>
 
           {/* Resend Checklist Mode Button */}
           <button
@@ -426,63 +649,6 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
               <span className="hidden sm:inline">ส่งออก</span> Excel
             </button>
           )}
-
-          {/* Mobile Filter Toggle Button */}
-          <button
-            type="button"
-            onClick={() => setShowMobileFilters(!showMobileFilters)}
-            className="md:hidden px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg border border-slate-200 flex items-center gap-1 shrink-0 cursor-pointer active:bg-slate-200"
-          >
-            <Filter size={13} />
-            <span>{showMobileFilters ? "ซ่อน" : "ตัวกรอง"}</span>
-          </button>
-        </div>
-
-        {/* Expandable Filter Controls */}
-        <div className={`flex-wrap items-center justify-between gap-2.5 pt-1 border-t border-slate-100 md:border-t-0 md:pt-0 ${showMobileFilters ? "flex" : "hidden md:flex"}`}>
-          <div className="flex flex-wrap items-center gap-2.5">
-            {/* Requester dropdown */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-700 whitespace-nowrap">ผู้เบิก:</span>
-              <select
-                value={filters.requester}
-                onChange={event => updateFilter("requester", event.target.value)}
-                className="bg-white border border-slate-300 text-xs text-slate-800 px-2 py-1 rounded-md focus:outline-none cursor-pointer"
-              >
-                <option value="">ทั้งหมด</option>
-                {peopleRows.map(row => {
-                  const key = String(row["รหัสพนักงาน"] || row["ชื่อเล่น"] || row._sheetRow || "");
-                  const label = row["ชื่อเล่น"] ? `${key} - ${row["ชื่อเล่น"]}` : key;
-                  return key ? <option key={key} value={key}>{label}</option> : null;
-                })}
-              </select>
-            </div>
-
-            {/* Date Picker */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-700 whitespace-nowrap">วันที่:</span>
-              <input
-                type="date"
-                value={filters.date}
-                onChange={event => updateFilter("date", event.target.value)}
-                className="bg-white border border-slate-300 text-xs text-slate-800 px-2 py-1 rounded-md focus:outline-none cursor-pointer"
-              />
-            </div>
-
-            {/* Bill Type */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-700 whitespace-nowrap">ประเภท:</span>
-              <select
-                value={filters.bill}
-                onChange={event => updateFilter("bill", event.target.value)}
-                className="bg-white border border-slate-300 text-xs text-slate-800 px-2 py-1 rounded-md focus:outline-none cursor-pointer"
-              >
-                <option value="">ทั้งหมด</option>
-                <option value="หลัก">หลัก</option>
-                <option value="ย่อย">ย่อย</option>
-              </select>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -495,8 +661,14 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
                 <RotateCw size={12} />
                 <span>โหมดส่งซ้ำ</span>
               </span>
-              <span className="text-xs text-amber-900 ">
-                เลือก <strong className="text-amber-950 ">{selectedRows.size}</strong> รายการ <span className="hidden md:inline text-amber-700 font-normal">(สถานะในระบบจะไม่ถูกเปลี่ยนแปลง)</span>
+              <span className="text-xs text-amber-900 flex items-center gap-1">
+                เลือก <strong className="text-amber-950 ">{selectedRows.size}</strong> รายการ
+                {currentSelectedBillType && (
+                  <span className="bg-amber-600 text-white text-[11px] px-1.5 py-0.2 rounded font-semibold ml-1">
+                    บิล{currentSelectedBillType}
+                  </span>
+                )}
+                <span className="hidden md:inline text-amber-700 font-normal ml-1">(สถานะในระบบจะไม่ถูกเปลี่ยนแปลง)</span>
               </span>
             </div>
             <button
@@ -538,8 +710,17 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
         <div className="fixed sm:static bottom-3 inset-x-3 sm:inset-x-auto z-40 sm:z-auto flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 p-3 bg-white text-slate-900 rounded-xl shadow-xl sm:shadow-2xs border border-slate-300 sm:border-slate-200 animate-in slide-in-from-bottom-2 fade-in duration-150">
           <div className="flex items-center justify-between sm:justify-start gap-2.5">
             <div className="flex items-center gap-2">
-              <span className="text-xs bg-slate-900 text-white px-2 py-0.5 rounded-md font-medium">
-                เลือก {selectedRows.size} รายการ
+              <span className="text-xs bg-slate-900 text-white px-2 py-0.5 rounded-md font-medium flex items-center gap-1.5 shadow-2xs">
+                <span>เลือก <strong>{selectedRows.size}</strong> รายการ</span>
+                {currentSelectedBillType && (
+                  <span className={`text-[11px] px-1.5 py-0.2 rounded font-semibold ${
+                    currentSelectedBillType === "หลัก"
+                      ? "bg-emerald-600 text-white"
+                      : "bg-amber-600 text-white"
+                  }`}>
+                    บิล{currentSelectedBillType}
+                  </span>
+                )}
               </span>
               <span className="text-xs text-slate-700">
                 รวม <strong className="text-slate-900">{money(displayRows.filter(r => selectedRows.has(Number(r.id ?? r["ลำดับ"] ?? r._sheetRow))).reduce((sum, r) => sum + toNumber(r["ยอดเงิน"]), 0))}</strong> ฿
@@ -593,38 +774,37 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
       {/* 3. WORK TABLE / MOBILE SELECTABLE FEED */}
       <div className="border border-slate-200 rounded-xl md:rounded-md bg-white overflow-hidden shadow-2xs">
         {/* Mobile Select All Header Bar */}
-        {visibleRows.length > 0 && (
-          <div className="flex md:hidden items-center justify-between px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs text-slate-700">
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={
-                  visibleRows.length > 0 &&
-                  (resendMode
-                    ? visibleRows.every(r => selectedRows.has(Number(r.id ?? r["ลำดับ"] ?? r._sheetRow)))
-                    : visibleRows.filter(r => normalizedStatus(r["สถานะ"]) === "รอตั้งเบิก" || normalizedStatus(r["สถานะ"]) === "รออนุมัติ").length > 0 &&
-                      visibleRows.filter(r => normalizedStatus(r["สถานะ"]) === "รอตั้งเบิก" || normalizedStatus(r["สถานะ"]) === "รออนุมัติ").every(r => selectedRows.has(Number(r.id ?? r["ลำดับ"] ?? r._sheetRow))))
-                }
-                onChange={e => {
-                  const eligibleIds = visibleRows
-                    .filter(r => resendMode ? true : (normalizedStatus(r["สถานะ"]) === "รอตั้งเบิก" || normalizedStatus(r["สถานะ"]) === "รออนุมัติ"))
-                    .map(r => Number(r.id ?? r["ลำดับ"] ?? r._sheetRow));
-                  if (e.target.checked) setSelectedRows(new Set([...selectedRows, ...eligibleIds]));
-                  else {
-                    const newSet = new Set(selectedRows);
-                    eligibleIds.forEach(id => newSet.delete(id));
-                    setSelectedRows(newSet);
-                  }
-                }}
-                className="w-4 h-4 rounded border-slate-300 text-slate-900 accent-slate-900 cursor-pointer"
-              />
-              <span>{resendMode ? "เลือกทั้งหมดในหน้านี้ (ส่งซ้ำ)" : "เลือกทั้งหมดที่รอตั้งเบิก"}</span>
-            </label>
-            <span className="text-xs text-slate-500 font-normal">
-              {visibleRows.length} รายการ
-            </span>
-          </div>
-        )}
+        {visibleRows.length > 0 && (() => {
+          const eligibleMobileRows = visibleRows.filter(r => resendMode ? true : (normalizedStatus(r["สถานะ"]) === "รอตั้งเบิก" || normalizedStatus(r["สถานะ"]) === "รออนุมัติ"));
+          const relevantMobileEligibleRows = currentSelectedBillType
+            ? eligibleMobileRows.filter(r => getRowBillType(r) === currentSelectedBillType)
+            : eligibleMobileRows;
+          const allMobileSelected = relevantMobileEligibleRows.length > 0 && relevantMobileEligibleRows.every(r => selectedRows.has(Number(r.id ?? r["ลำดับ"] ?? r._sheetRow)));
+
+          return (
+            <div className="flex md:hidden items-center justify-between px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs text-slate-700">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={allMobileSelected}
+                  disabled={eligibleMobileRows.length === 0}
+                  onChange={() => handleSelectAll(eligibleMobileRows)}
+                  className="w-4 h-4 rounded border-slate-300 text-slate-900 accent-slate-900 cursor-pointer disabled:opacity-30"
+                />
+                <span>
+                  {resendMode
+                    ? "เลือกทั้งหมดในหน้านี้ (ส่งซ้ำ)"
+                    : currentSelectedBillType
+                    ? `เลือกทั้งหมดที่รอตั้งเบิก (บิล${currentSelectedBillType})`
+                    : "เลือกทั้งหมดที่รอตั้งเบิก"}
+                </span>
+              </label>
+              <span className="text-xs text-slate-500 font-normal">
+                {visibleRows.length} รายการ
+              </span>
+            </div>
+          );
+        })()}
 
         {/* MOBILE SELECTABLE CARD FEED */}
         <div className="block md:hidden divide-y divide-slate-200 border-t border-slate-200">
@@ -636,6 +816,8 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
               const isSelected = selectedRows.has(sheetRowId);
               const status = normalizedStatus(row["สถานะ"]);
               const isSelectable = resendMode ? true : (status === "รอตั้งเบิก" || status === "รออนุมัติ");
+              const rowBillType = getRowBillType(row);
+              const isTypeMismatch = Boolean(currentSelectedBillType && rowBillType !== currentSelectedBillType && !isSelected);
               const seq = String(row.id || row["ลำดับ"] || row._sheetRow || index + 1);
               const requesterKey = String(row["ผู้เบิก"] || "").trim();
               const requesterName = requesterNames[requesterKey] || requesterKey || "-";
@@ -644,11 +826,14 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
                 <div
                   key={`withdraw-mob-${sheetRowId}-${index}`}
                   onClick={() => {
+                    if (isTypeMismatch) {
+                      const msg = `⚠️ การแจ้งตั้งเบิกต้องเป็นประเภทบิลเดียวกันเท่านั้น (ไม่สามารถเลือก "บิล${rowBillType}" ปนกับ "บิล${currentSelectedBillType}" ได้)`;
+                      showToast("warning", msg);
+                      setActionError(msg);
+                      return;
+                    }
                     if (isSelectable) {
-                      const newSet = new Set(selectedRows);
-                      if (newSet.has(sheetRowId)) newSet.delete(sheetRowId);
-                      else newSet.add(sheetRowId);
-                      setSelectedRows(newSet);
+                      toggleRowSelection(sheetRowId);
                     }
                   }}
                   className={`p-3 transition flex items-center gap-3 cursor-pointer ${
@@ -656,6 +841,8 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
                       ? resendMode
                         ? "bg-amber-50/70 border-l-4 border-l-amber-500"
                         : "bg-sky-50/50 border-l-4 border-l-sky-500"
+                      : isTypeMismatch
+                      ? "opacity-60 bg-slate-50/40"
                       : "hover:bg-slate-50 active:bg-slate-100"
                   }`}
                 >
@@ -664,17 +851,14 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
                     <input
                       type="checkbox"
                       checked={isSelected}
-                      disabled={!isSelectable}
+                      disabled={!isSelectable || isTypeMismatch}
                       onChange={() => {
-                        if (isSelectable) {
-                          const newSet = new Set(selectedRows);
-                          if (newSet.has(sheetRowId)) newSet.delete(sheetRowId);
-                          else newSet.add(sheetRowId);
-                          setSelectedRows(newSet);
+                        if (isSelectable && !isTypeMismatch) {
+                          toggleRowSelection(sheetRowId);
                         }
                       }}
                       className={`w-5 h-5 rounded border-slate-300 ${resendMode ? "text-amber-600 accent-amber-600" : "text-sky-600 accent-sky-600"} cursor-pointer ${
-                        !isSelectable ? "opacity-30 cursor-not-allowed" : ""
+                        !isSelectable || isTypeMismatch ? "opacity-30 cursor-not-allowed" : ""
                       }`}
                     />
                   </div>
@@ -753,16 +937,9 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
             rows={visibleRows}
             selectedRows={selectedRows}
             resendMode={resendMode}
-            onSelectRow={rowId => {
-              const newSet = new Set(selectedRows);
-              if (newSet.has(rowId)) newSet.delete(rowId);
-              else newSet.add(rowId);
-              setSelectedRows(newSet);
-            }}
-            onSelectAll={rowIds => {
-              if (rowIds.length === 0) setSelectedRows(new Set());
-              else setSelectedRows(new Set([...selectedRows, ...rowIds]));
-            }}
+            selectedBillType={currentSelectedBillType}
+            onSelectRow={toggleRowSelection}
+            onSelectAll={handleSelectAll}
           />
         </div>
 
@@ -782,6 +959,21 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
   );
 }
 
+export function getRowBillType(row?: SheetRow | Record<string, any> | null): string {
+  if (!row) return "หลัก";
+  const raw = String(row["บิล"] || row.bill || row.bill_type || "").trim();
+  if (raw === "ย่อย" || raw.includes("ย่อย")) return "ย่อย";
+  if (raw === "หลัก" || raw.includes("หลัก")) return "หลัก";
+  return raw || "หลัก";
+}
+
+function getCurrentActor(): string {
+  if (typeof document === "undefined") return "";
+  const nameMatch = document.cookie.match(/auth_name=([^;]+)/);
+  const empMatch = document.cookie.match(/auth_employee_id=([^;]+)/);
+  return (nameMatch && decodeURIComponent(nameMatch[1])) || (empMatch && decodeURIComponent(empMatch[1])) || "";
+}
+
 function getLocalTodayString() {
   const today = new Date();
   const year = today.getFullYear();
@@ -793,7 +985,7 @@ function getLocalTodayString() {
 function normalizeFilters(filters: WithdrawFilters) {
   return {
     requester: String(filters.requester || ""),
-    date: String(filters.date || ""),
+    date: filters.date !== undefined ? String(filters.date) : getLocalTodayString(),
     bill: String(filters.bill || ""),
     search: String(filters.search || "")
   };
@@ -833,6 +1025,7 @@ function WithdrawTable({
   onApprove,
   selectedRows,
   resendMode = false,
+  selectedBillType = "",
   onSelectRow,
   onSelectAll
 }: {
@@ -843,8 +1036,9 @@ function WithdrawTable({
   onApprove: (row: SheetRow) => void;
   selectedRows: Set<number>;
   resendMode?: boolean;
+  selectedBillType?: string;
   onSelectRow: (rowId: number) => void;
-  onSelectAll: (rowIds: number[]) => void;
+  onSelectAll: (candidateRows: SheetRow[]) => void;
 }) {
   if (!rows.length) return <div className="p-8 text-center text-slate-400 text-xs font-medium">ไม่พบรายการตั้งเบิก</div>;
 
@@ -855,7 +1049,11 @@ function WithdrawTable({
     return st === "รอตั้งเบิก" || st === "รออนุมัติ";
   });
 
-  const allEligibleSelected = eligibleRows.length > 0 && eligibleRows.every(r => selectedRows.has(Number(r.id ?? r["ลำดับ"] ?? r._sheetRow)));
+  const relevantEligibleRows = selectedBillType
+    ? eligibleRows.filter(r => getRowBillType(r) === selectedBillType)
+    : eligibleRows;
+
+  const allEligibleSelected = relevantEligibleRows.length > 0 && relevantEligibleRows.every(r => selectedRows.has(Number(r.id ?? r["ลำดับ"] ?? r._sheetRow)));
 
   return (
     <div className="overflow-x-auto">
@@ -867,14 +1065,13 @@ function WithdrawTable({
                 type="checkbox" 
                 checked={allEligibleSelected}
                 disabled={eligibleRows.length === 0}
-                onChange={e => {
-                  if (e.target.checked) onSelectAll(eligibleRows.map(r => Number(r.id ?? r["ลำดับ"] ?? r._sheetRow)));
-                  else onSelectAll([]);
-                }}
+                onChange={() => onSelectAll(eligibleRows)}
                 className="rounded border-slate-300 text-slate-900 focus:ring-slate-500 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
                 title={
                   eligibleRows.length === 0
                     ? "ไม่มีรายการที่สามารถเลือกได้"
+                    : selectedBillType
+                    ? `เลือกทั้งหมดที่รอตั้งเบิก (เฉพาะบิล${selectedBillType})`
                     : resendMode
                     ? "เลือกทั้งหมดในหน้านี้เพื่อส่งแจ้งเตือนซ้ำ"
                     : "เลือกทั้งหมดที่รอตั้งเบิก"
@@ -894,22 +1091,26 @@ function WithdrawTable({
             const isSelected = selectedRows.has(sheetRowId);
             const status = normalizedStatus(row["สถานะ"]);
             const isSelectable = resendMode ? true : (status === "รอตั้งเบิก" || status === "รออนุมัติ");
+            const rowBillType = getRowBillType(row);
+            const isTypeMismatch = Boolean(selectedBillType && rowBillType !== selectedBillType && !isSelected);
 
             return (
-              <tr key={`${sheetRowId}-${index}`} className={`transition-colors ${isSelected && resendMode ? "bg-amber-50/50" : "hover:bg-slate-50"}`}>
+              <tr key={`${sheetRowId}-${index}`} className={`transition-colors ${isSelected && resendMode ? "bg-amber-50/50" : isSelected ? "bg-sky-50/40" : isTypeMismatch ? "opacity-60 bg-slate-50/50" : "hover:bg-slate-50"}`}>
                 <td className="py-2 px-3 text-center border-r border-slate-100">
                   <input 
                     type="checkbox" 
                     checked={isSelected}
-                    disabled={!isSelectable}
+                    disabled={!isSelectable || isTypeMismatch}
                     onChange={() => {
-                      if (isSelectable) onSelectRow(sheetRowId);
+                      if (isSelectable && !isTypeMismatch) onSelectRow(sheetRowId);
                     }}
                     className={`rounded border-slate-300 ${resendMode ? "text-amber-600 accent-amber-600 focus:ring-amber-500" : "text-slate-900 focus:ring-slate-500"} ${
-                      isSelectable ? "cursor-pointer" : "cursor-not-allowed opacity-30 bg-slate-100"
+                      !isSelectable || isTypeMismatch ? "cursor-not-allowed opacity-30 bg-slate-100" : "cursor-pointer"
                     }`}
                     title={
-                      !isSelectable
+                      isTypeMismatch
+                        ? `ไม่สามารถเลือกได้ เนื่องจากเลือกรายการ "บิล${selectedBillType}" อยู่ (การแจ้งตั้งเบิกต้องเป็นประเภทบิลเดียวกันเท่านั้น)`
+                        : !isSelectable
                         ? `รายการสถานะ "${row["สถานะ"] || status}" ตั้งเบิกเรียบร้อยแล้ว (เปิดโหมดส่งซ้ำเพื่อเลือกส่งใหม่)`
                         : resendMode
                         ? "เลือกรายการนี้เพื่อส่งข้อความแจ้งเตือนซ้ำ"

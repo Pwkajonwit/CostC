@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import { money, toNumber } from "@/lib/utils/numbers";
 import { parseDeductPercent, isVatActive } from "@/lib/project-summary";
-import { formatDateDisplay } from "@/lib/utils/dates";
+import { formatDateDisplay, normalizeDateToIso } from "@/lib/utils/dates";
 import type { SheetRow } from "@/lib/types";
 import { BillDocumentModal } from "@/components/documents/BillDocumentModal";
 import { DocumentIndexModal } from "@/components/documents/DocumentIndexModal";
@@ -36,20 +36,32 @@ import type { BillDocumentModel } from "@/lib/bills/bill-document";
 
 function getBillWhtInfo(b: SheetRow) {
   const percent = parseDeductPercent(b["หัก"] ?? b.deduct ?? b.withholding_tax);
-  let amount = toNumber(b["3เปอร์เซ็น"] || b["3เปอร์"] || b["หัก 3%"] || b["จำนวนหัก"] || b.deduct_amount);
+  const wage = toNumber(
+    b["ค่าแรง+พนักงาน+อื่นๆ"] ||
+      b["ค่าแรง+พนักงาน+อื่น"] ||
+      b["ค่าแรง"] ||
+      b["ค่าจ้าง"] ||
+      b["ยอดเงิน"]
+  );
+  let amount = toNumber(b["3เปอร์เซ็น"] || b["3เปอร์"] || b["จำนวนหัก"] || b.deduct_amount);
+
+  // In the CSV, column "หัก 3%" often contains the net payable (e.g. 5,820 when wage is 6,000).
+  // If raw "หัก 3%" is greater than half the wage, it is the net paid amount, so the tax amount is wage - net.
+  const rawWhtCol = toNumber(b["หัก 3%"]);
+  if (amount <= 0 && rawWhtCol > 0) {
+    if (wage > 0 && rawWhtCol > wage * 0.5) {
+      amount = Math.max(0, Math.round((wage - rawWhtCol) * 100) / 100);
+    } else {
+      amount = rawWhtCol;
+    }
+  }
+
   if (amount <= 0 && percent > 0) {
-    const base = toNumber(
-      b["ค่าแรง+พนักงาน+อื่นๆ"] ||
-        b["ค่าแรง+พนักงาน+อื่น"] ||
-        b["ค่าแรง"] ||
-        b["ค่าจ้าง"] ||
-        b["ยอดเงิน"]
-    );
     const hasVat = isVatActive(b.vat ?? b["vat"] ?? b.VAT);
     if (hasVat) {
-      amount = Math.round(((base / 1.07) * (percent / 100)) * 100) / 100;
+      amount = Math.round(((wage / 1.07) * (percent / 100)) * 100) / 100;
     } else {
-      amount = Math.round((base * (percent / 100)) * 100) / 100;
+      amount = Math.round((wage * (percent / 100)) * 100) / 100;
     }
   }
   return { percent, amount, hasWht: percent > 0 || amount > 0 };
@@ -135,6 +147,8 @@ export function DocumentsManagerClient({
   }, [people]);
 
   const [searchTerm, setSearchTerm] = useState("");
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
   const [selectedMonth, setSelectedMonth] = useState<string>("all");
   const [selectedProject, setSelectedProject] = useState<string>("all");
   const [selectedContractor, setSelectedContractor] = useState<string>("all");
@@ -232,6 +246,62 @@ export function DocumentsManagerClient({
 
   // Current Month Summary for display ribbon
   const currentMonthSummary = useMemo(() => {
+    if (startDate || endDate) {
+      const rangeBills = activeBills.filter((b) => {
+        const rowIso = normalizeDateToIso(b["วันที่"] || b["ว/ด/ป"] || b["วันได้บิล"]);
+        if (!rowIso) return false;
+        if (startDate && rowIso < startDate) return false;
+        if (endDate && rowIso > endDate) return false;
+        return true;
+      });
+      const totalLabor = rangeBills.reduce(
+        (s, b) =>
+          s +
+          toNumber(
+            b["ค่าแรง+พนักงาน+อื่นๆ"] || b["ค่าแรง"] || b["ค่าจ้าง"] || b["ยอดเงิน"]
+          ),
+        0
+      );
+      const totalWht = rangeBills.reduce((s, b) => s + getBillWhtInfo(b).amount, 0);
+      const totalNet = rangeBills.reduce(
+        (s, b) =>
+          s +
+          (toNumber(b["จ่าย"] || b["ยอดโอน"] || b["คงเหลือ"] || b["ยอดเงิน"]) ||
+            Math.max(
+              0,
+              toNumber(
+                b["ค่าแรง+พนักงาน+อื่นๆ"] || b["ค่าแรง"] || b["ค่าจ้าง"] || b["ยอดเงิน"]
+              ) - getBillWhtInfo(b).amount
+            )),
+        0
+      );
+      const pnd3Count = rangeBills.filter(
+        (b) =>
+          !String(b["Statusค่าแรง"] || b["statusค่าแรง"] || "").includes("บริษัท") &&
+          String(b["ร้านค้า/ผู้รับเหมา"] || "") !== "ร้านค้า"
+      ).length;
+      const pnd53Count = rangeBills.length - pnd3Count;
+
+      let rangeLabel = "ช่วงวันที่กำหนดเอง";
+      if (startDate && endDate) {
+        rangeLabel = `${formatDateDisplay(startDate)} - ${formatDateDisplay(endDate)}`;
+      } else if (startDate) {
+        rangeLabel = `ตั้งแต่ ${formatDateDisplay(startDate)}`;
+      } else if (endDate) {
+        rangeLabel = `ถึง ${formatDateDisplay(endDate)}`;
+      }
+
+      return {
+        label: rangeLabel,
+        count: rangeBills.length,
+        totalLabor,
+        totalWht,
+        totalNet,
+        pnd3Count,
+        pnd53Count,
+      };
+    }
+
     if (selectedMonth === "all") {
       const totalLabor = activeBills.reduce(
         (s, b) =>
@@ -284,7 +354,7 @@ export function DocumentsManagerClient({
         pnd53Count: 0,
       }
     );
-  }, [selectedMonth, activeBills, availableMonths]);
+  }, [activeBills, selectedMonth, availableMonths, startDate, endDate]);
 
   // Filter bills based on search, month, project, contractor, and filter tab
   const filteredBills = useMemo(() => {
@@ -308,9 +378,20 @@ export function DocumentsManagerClient({
       const status = String(b["สถานะ"] || "");
 
       // Month filter
-      if (selectedMonth !== "all") {
+      if (selectedMonth !== "all" && !startDate && !endDate) {
         const mInfo = parseBillMonthKey(String(b["ว/ด/ป"] || b["วันที่"] || ""));
         if (!mInfo || mInfo.key !== selectedMonth) return false;
+      }
+
+      // Date range filter (จากวันที่ - ถึงวันที่)
+      if (startDate || endDate) {
+        const rowIso = normalizeDateToIso(b["วันที่"] || b["ว/ด/ป"] || b["วันได้บิล"]);
+        if (rowIso) {
+          if (startDate && rowIso < startDate) return false;
+          if (endDate && rowIso > endDate) return false;
+        } else {
+          return false;
+        }
       }
 
       // Tab filter
@@ -356,7 +437,16 @@ export function DocumentsManagerClient({
 
       return true;
     });
-  }, [activeBills, searchTerm, selectedMonth, selectedProject, selectedContractor, filterTab]);
+  }, [
+    activeBills,
+    searchTerm,
+    startDate,
+    endDate,
+    selectedMonth,
+    filterTab,
+    selectedProject,
+    selectedContractor,
+  ]);
 
   // Key metrics
   const totalBillsCount = activeBills.length;
@@ -438,7 +528,7 @@ export function DocumentsManagerClient({
       const res = await fetch("/api/documents/batch-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ billIds: [seq] }),
+        body: JSON.stringify({ billIds: [seq], bills: [bill] }),
       });
       const json = await res.json();
       if (json.success && json.documents && json.documents[0]) {
@@ -458,17 +548,22 @@ export function DocumentsManagerClient({
     if (ids.length === 0) return;
     setLoadingPreview(true);
     try {
+      const targetRows = activeBills.filter((b) =>
+        ids.includes(String(b.id || b["ลำดับ"] || b["ลำดับtest"] || b._sheetRow || ""))
+      );
       const res = await fetch("/api/documents/batch-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ billIds: ids }),
+        body: JSON.stringify({ billIds: ids, bills: targetRows }),
       });
       const json = await res.json();
       if (json.success && json.documents) {
         setIndexModalDocs(json.documents);
         const derivedLabel =
           labelOverride ||
-          (selectedMonth !== "all"
+          (startDate || endDate
+            ? currentMonthSummary.label
+            : selectedMonth !== "all"
             ? availableMonths.find((m) => m.key === selectedMonth)?.label || selectedMonth
             : "สรุปรายการที่เลือก");
         setIndexModalMonthLabel(derivedLabel);
@@ -590,9 +685,13 @@ export function DocumentsManagerClient({
           <div className="flex items-center gap-1.5 flex-wrap">
             <button
               type="button"
-              onClick={() => setSelectedMonth("all")}
+              onClick={() => {
+                setSelectedMonth("all");
+                setStartDate("");
+                setEndDate("");
+              }}
               className={`px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition ${
-                selectedMonth === "all"
+                selectedMonth === "all" && !startDate && !endDate
                   ? "bg-slate-900 text-white shadow-2xs font-semibold"
                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"
               }`}
@@ -604,9 +703,13 @@ export function DocumentsManagerClient({
               <button
                 key={`month-btn-${m.key}`}
                 type="button"
-                onClick={() => setSelectedMonth(m.key)}
+                onClick={() => {
+                  setSelectedMonth(m.key);
+                  setStartDate("");
+                  setEndDate("");
+                }}
                 className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-medium cursor-pointer transition ${
-                  selectedMonth === m.key
+                  selectedMonth === m.key && !startDate && !endDate
                     ? "bg-indigo-600 text-white shadow-2xs font-semibold"
                     : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                 }`}
@@ -614,13 +717,37 @@ export function DocumentsManagerClient({
                 <span>{m.label}</span>
                 <span
                   className={`text-[11px] px-1.5 py-0.2 rounded-full ${
-                    selectedMonth === m.key ? "bg-indigo-700 text-white" : "bg-slate-200 text-slate-700"
+                    selectedMonth === m.key && !startDate && !endDate ? "bg-indigo-700 text-white" : "bg-slate-200 text-slate-700"
                   }`}
                 >
                   {m.count}
                 </span>
               </button>
             ))}
+
+            {(startDate || endDate) && (
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold bg-emerald-700 text-white shadow-2xs animate-in fade-in">
+                <Calendar size={13} />
+                <span>
+                  {startDate && endDate
+                    ? `${formatDateDisplay(startDate)} - ${formatDateDisplay(endDate)}`
+                    : startDate
+                    ? `ตั้งแต่ ${formatDateDisplay(startDate)}`
+                    : `ถึง ${formatDateDisplay(endDate)}`}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStartDate("");
+                    setEndDate("");
+                  }}
+                  className="p-0.5 hover:bg-emerald-800 rounded transition cursor-pointer"
+                  title="ล้างช่วงวันที่"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -784,9 +911,9 @@ export function DocumentsManagerClient({
         </div>
 
         {/* Search & Select dropdowns */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
           {/* Search Box */}
-          <div className="sm:col-span-1 lg:col-span-2 relative">
+          <div className="relative">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
@@ -795,6 +922,44 @@ export function DocumentsManagerClient({
               placeholder="ค้นหาเลขบิล, ชื่อผู้รับเหมา, รายละเอียดงาน, ผู้จ่าย..."
               className="w-full pl-9 pr-3 py-2 bg-slate-50 focus:bg-white border border-slate-200 focus:border-slate-800 rounded-lg text-xs transition outline-hidden"
             />
+          </div>
+
+          {/* Date Range: วันที่ถึงวันที่ */}
+          <div className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200 focus-within:border-slate-800 focus-within:bg-white transition min-w-0">
+            <Calendar size={14} className="text-slate-500 shrink-0" />
+            <span className="text-[11px] font-medium text-slate-500 shrink-0">จาก:</span>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => {
+                setStartDate(e.target.value);
+                if (selectedMonth !== "all") setSelectedMonth("all");
+              }}
+              className="bg-transparent text-slate-800 text-xs outline-hidden cursor-pointer flex-1 min-w-[105px]"
+            />
+            <span className="text-[11px] font-medium text-slate-500 shrink-0">ถึง:</span>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => {
+                setEndDate(e.target.value);
+                if (selectedMonth !== "all") setSelectedMonth("all");
+              }}
+              className="bg-transparent text-slate-800 text-xs outline-hidden cursor-pointer flex-1 min-w-[105px]"
+            />
+            {(startDate || endDate) && (
+              <button
+                type="button"
+                title="ล้างช่วงวันที่"
+                onClick={() => {
+                  setStartDate("");
+                  setEndDate("");
+                }}
+                className="p-1 text-slate-400 hover:text-rose-600 hover:bg-slate-200/70 rounded transition cursor-pointer shrink-0"
+              >
+                <X size={12} />
+              </button>
+            )}
           </div>
 
           {/* Project Filter */}
@@ -851,8 +1016,8 @@ export function DocumentsManagerClient({
                 <th className="py-2.5 px-3 w-28 text-center">เลขประจำตัวประชาชน</th>
                 <th className="py-2.5 px-3 min-w-[150px]">ที่อยู่</th>
                 <th className="py-2.5 px-3 text-right w-24">ค่าจ้าง</th>
-                <th className="py-2.5 px-3 text-right w-24">0.03</th>
                 <th className="py-2.5 px-3 text-right w-24">หัก 3%</th>
+                <th className="py-2.5 px-3 text-right w-24">จ่าย</th>
                 <th className="py-2.5 px-3 text-center w-16">ผู้ออก</th>
                 <th className="py-2.5 px-3 min-w-[150px]">ชื่องาน หรือ หมายเหตุ</th>
                 <th className="py-2.5 px-3 text-center w-24">Statusค่าแรง</th>
@@ -892,13 +1057,29 @@ export function DocumentsManagerClient({
                       row["ค่าจ้าง"] ||
                       row["ยอดเงิน"]
                   );
-                  const base003 = toNumber(row["0.03"]) || wageAmt;
+                  const rawNetPayable = toNumber(row["จ่าย"] || row["ยอดโอน"] || row["คงเหลือ"]);
                   const rawWht3 = toNumber(row["หัก 3%"]);
                   const whtInfo = getBillWhtInfo(row);
-                  // In the CSV, column "หัก 3%" contains the net payable after 3% deduction
-                  const netAmt = rawWht3 > (wageAmt * 0.5) 
-                    ? rawWht3 
-                    : (toNumber(row["ยอดโอน"] || row["คงเหลือ"]) || Math.max(0, wageAmt - whtInfo.amount));
+
+                  // In accounting sheets / CSV, column "หัก 3%" often contains the net payable after 3% deduction
+                  const netAmt =
+                    rawNetPayable > 0
+                      ? rawNetPayable
+                      : rawWht3 > wageAmt * 0.5
+                      ? rawWht3
+                      : wageAmt > 0
+                      ? Math.max(0, wageAmt - (whtInfo.amount || 0))
+                      : 0;
+
+                  // 3% withholding deduction amount
+                  const wht3Amt =
+                    whtInfo.amount > 0 && whtInfo.amount < wageAmt
+                      ? whtInfo.amount
+                      : wageAmt > netAmt && netAmt > 0
+                      ? Math.round((wageAmt - netAmt) * 100) / 100
+                      : rawWht3 > 0 && rawWht3 < wageAmt * 0.5
+                      ? rawWht3
+                      : 0;
 
                   // ผู้ออก คือ ผู้สร้างบิลตั้งเบิก
                   const rawIssuer = String(
@@ -971,8 +1152,8 @@ export function DocumentsManagerClient({
                         {money(wageAmt)}
                       </td>
 
-                      <td className="py-2.5 px-3 text-right font-medium text-slate-700 text-[11px]">
-                        {money(base003)}
+                      <td className="py-2.5 px-3 text-right font-medium text-amber-700 text-[11px]">
+                        {money(wht3Amt)}
                       </td>
 
                       <td className="py-2.5 px-3 text-right font-bold text-emerald-700 text-[11px]">
@@ -1040,19 +1221,19 @@ export function DocumentsManagerClient({
       {/* 5. FLOATING BOTTOM BATCH ACTION BAR (Active when items selected) */}
       {selectedIds.length > 0 && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 w-full max-w-4xl px-4 animate-in slide-in-from-bottom-5 duration-200">
-          <div className="bg-slate-950/95 backdrop-blur-md text-white rounded-2xl shadow-2xl border border-slate-800 p-3 sm:p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="bg-white/95 backdrop-blur-md text-slate-800 rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.12)] border border-slate-200/90 p-3 sm:p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
             {/* Left: Summary Count */}
             <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-sm">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center justify-center font-bold text-sm shadow-xs shrink-0">
                   {selectedIds.length}
                 </div>
                 <div>
-                  <div className="text-xs font-semibold text-slate-100">
+                  <div className="text-xs font-bold text-slate-900">
                     เลือกแล้ว {selectedIds.length} รายการ
                   </div>
-                  <div className="text-[11px] text-slate-400">
-                    ยอดรวม {money(selectedTotalAmount)} {selectedTotalWht > 0 && `(หัก 3%: ${money(selectedTotalWht)})`}
+                  <div className="text-[11px] text-slate-500">
+                    ยอดรวม <span className="font-semibold text-slate-800">{money(selectedTotalAmount)}</span> {selectedTotalWht > 0 && <span className="text-amber-700 font-medium">(หัก 3%: {money(selectedTotalWht)})</span>}
                   </div>
                 </div>
               </div>
@@ -1060,7 +1241,7 @@ export function DocumentsManagerClient({
               <button
                 type="button"
                 onClick={() => setSelectedIds([])}
-                className="text-xs text-slate-400 hover:text-rose-400 underline transition cursor-pointer sm:ml-2"
+                className="text-xs text-slate-400 hover:text-rose-600 underline transition cursor-pointer sm:ml-2"
               >
                 ยกเลิกทั้งหมด
               </button>
@@ -1072,7 +1253,7 @@ export function DocumentsManagerClient({
                 type="button"
                 onClick={() => handleOpenIndexModal()}
                 disabled={loadingPreview}
-                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-500 transition cursor-pointer shadow-xs active:scale-95 disabled:opacity-50"
+                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white border border-indigo-600 transition cursor-pointer shadow-xs active:scale-95 disabled:opacity-50"
               >
                 <FileSpreadsheet size={14} />
                 <span>ดูสารบัญ ({selectedIds.length} ฉบับ)</span>
@@ -1081,7 +1262,7 @@ export function DocumentsManagerClient({
               <button
                 type="button"
                 onClick={() => handleBatchPrint("tax50twi")}
-                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 transition cursor-pointer shadow-xs active:scale-95"
+                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 transition cursor-pointer shadow-xs active:scale-95"
               >
                 <FileCheck2 size={14} />
                 <span>พิมพ์ 50 ทวิ</span>
@@ -1090,7 +1271,7 @@ export function DocumentsManagerClient({
               <button
                 type="button"
                 onClick={() => handleBatchPrint("all")}
-                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-400 hover:bg-emerald-300 text-slate-950 transition cursor-pointer shadow-md active:scale-95"
+                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-600 transition cursor-pointer shadow-xs active:scale-95"
               >
                 <Printer size={14} />
                 <span>พิมพ์ชุด 3 หน้า</span>
@@ -1099,7 +1280,7 @@ export function DocumentsManagerClient({
               <button
                 type="button"
                 onClick={() => handleBatchPrint("all_with_index")}
-                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-400 hover:bg-amber-300 text-slate-950 transition cursor-pointer shadow-md active:scale-95"
+                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white border border-amber-500 transition cursor-pointer shadow-xs active:scale-95"
                 title="พิมพ์ทั้งชุดเอกสารพร้อมหน้าสารบัญปะหน้า"
               >
                 <Layers size={14} />
