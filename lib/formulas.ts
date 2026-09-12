@@ -1,9 +1,10 @@
-﻿import { TABLES } from "@/lib/config";
+import { TABLES } from "@/lib/config";
 import { isCommittedBill } from "@/lib/bills/bill-status";
 import { computeBillAmount, computeBillDeductMultiplier, computeBillTransferAmount, isVatActive, parseDeductPercent } from "@/lib/project-summary";
 import { getRows } from "@/lib/db";
 import type { SheetRow } from "@/lib/types";
 import { getTodayDateIso } from "@/lib/utils/dates";
+import { hydrateContractorsWithYearlySpend } from "@/lib/contractors/contractor-limits";
 
 export async function applyBillFormulas(row: SheetRow) {
   const context = await getBillFormulaContext();
@@ -139,12 +140,18 @@ export async function hydrateContractRows(
     if (k2) projectMap.set(k2, p);
   }
 
+  // Pre-calculate contractor annual quota for current calendar year
+  const hydratedContractors = hydrateContractorsWithYearlySpend(context.contractors, context.dataRows);
   const contractorMap = new Map<string, SheetRow>();
-  for (const c of context.contractors) {
-    const k1 = String(c["id_Contractor"] || "").trim();
+  for (const c of hydratedContractors) {
+    const k1 = String(c["id_Contractor"] || c.id || "").trim();
     const k2 = String(c.id || "").trim();
+    const k3 = String(c["ชื่อเล่น"] || "").trim();
+    const k4 = String(c["ชื่อ-นามสกุล"] || "").trim();
     if (k1) contractorMap.set(k1, c);
     if (k2) contractorMap.set(k2, c);
+    if (k3 && !contractorMap.has(k3)) contractorMap.set(k3, c);
+    if (k4 && !contractorMap.has(k4)) contractorMap.set(k4, c);
   }
 
   return rows.map(row => applyContractFormulasWithFastContext(row, { projectMap, contractorMap, dataRows: context.dataRows }));
@@ -175,6 +182,12 @@ function applyContractFormulasWithFastContext(
     row["ผู้รับเหมา"] = cName;
     row["ช่าง"] = cName;
     row["เบอร์โทรศัพท์"] = contractor["เบอร์โทรศัพท์"] || contractor["เบอร์โทร"] || row["เบอร์โทรศัพท์"] || row["เบอร์โทร"] || "";
+    row["_contractorAnnualLimit"] = contractor["จำกัดยอด/ปี"] || contractor.annual_limit;
+    row["_contractorType"] = contractor["ประเภท"] || contractor.contractor_type;
+    row["_contractorYearlySpent"] = contractor["ยอดเบิกจ่ายปีนี้"];
+    row["_contractorRemainingQuota"] = contractor["คงเหลือ"];
+    row["_contractorLimitStatus"] = contractor._limitStatus || contractor["สถานะ"];
+    row["_contractorSpentPercent"] = contractor._spentPercent;
   } else {
     row["ช่าง"] = row["ชื่อเล่น"] || row["ผู้รับเหมา"] || row["ชื่อ-นามสกุล"] || "";
     row["เบอร์โทรศัพท์"] = row["เบอร์โทรศัพท์"] || row["เบอร์โทร"] || "";
@@ -190,6 +203,7 @@ function applyContractFormulasWithFastContext(
   row["ค่าแรงคงเหลือ"] = hireAmount - paid;
   return row;
 }
+
 
 function computePaidForContract(contractRow: SheetRow, dataRows: SheetRow[]): number {
   const cConworkId = String(contractRow["id_Conwork"] || contractRow.id || "").trim();

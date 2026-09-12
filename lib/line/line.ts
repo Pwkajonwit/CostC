@@ -672,31 +672,86 @@ export function createDailySummaryFlex(summary: {
   totalAmount: number;
   pendingCount: number;
   approvedCount: number;
+  paidCount?: number;
+  title?: string;
 }): Record<string, any> {
+  const title = summary.title || "📊 สรุปรายงานการเงินประจำวัน";
   const formattedAmount = Number(summary.totalAmount || 0).toLocaleString("th-TH", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
 
+  const bodyContents: any[] = [
+    {
+      type: "box",
+      layout: "horizontal",
+      contents: [
+        { type: "text", text: "บิลทั้งหมด", color: "#64748B", size: "sm" },
+        { type: "text", text: `${summary.totalBills} รายการ`, weight: "bold", color: "#0F172A", size: "sm", align: "end" },
+      ],
+    },
+    {
+      type: "box",
+      layout: "horizontal",
+      contents: [
+        { type: "text", text: "⏳ รออนุมัติ", color: "#64748B", size: "sm" },
+        { type: "text", text: `${summary.pendingCount} รายการ`, weight: "bold", color: "#D97706", size: "sm", align: "end" },
+      ],
+    },
+    {
+      type: "box",
+      layout: "horizontal",
+      contents: [
+        { type: "text", text: "✅ อนุมัติแล้ว", color: "#64748B", size: "sm" },
+        { type: "text", text: `${summary.approvedCount} รายการ`, weight: "bold", color: "#16A34A", size: "sm", align: "end" },
+      ],
+    },
+  ];
+
+  if (typeof summary.paidCount === "number") {
+    bodyContents.push({
+      type: "box",
+      layout: "horizontal",
+      contents: [
+        { type: "text", text: "💸 ปิดงาน/จ่ายแล้ว", color: "#64748B", size: "sm" },
+        { type: "text", text: `${summary.paidCount} รายการ`, weight: "bold", color: "#0284C7", size: "sm", align: "end" },
+      ],
+    });
+  }
+
+  bodyContents.push(
+    { type: "separator", margin: "md" },
+    {
+      type: "box",
+      layout: "horizontal",
+      margin: "md",
+      contents: [
+        { type: "text", text: "รวมยอดเงินทั้งสิ้น", weight: "bold", color: "#0F172A", size: "sm" },
+        { type: "text", text: `฿${formattedAmount}`, weight: "bold", color: "#2563EB", size: "lg", align: "end" },
+      ],
+    }
+  );
+
   return {
     type: "bubble",
+    size: "mega",
     header: {
       type: "box",
       layout: "vertical",
-      backgroundColor: "#1E293B",
-      paddingAll: "15px",
+      backgroundColor: "#0F172A",
+      paddingAll: "16px",
       contents: [
         {
           type: "text",
-          text: "📊 สรุปรายงานประจำวัน",
+          text: title,
           weight: "bold",
           color: "#FFFFFF",
-          size: "lg",
+          size: "md",
         },
         {
           type: "text",
           text: `ประจำวันที่ ${summary.dateStr}`,
-          color: "#94A3B8",
+          color: "#38BDF8",
           size: "xs",
           margin: "xs",
         },
@@ -707,39 +762,35 @@ export function createDailySummaryFlex(summary: {
       layout: "vertical",
       paddingAll: "16px",
       spacing: "md",
+      contents: bodyContents,
+    },
+    footer: {
+      type: "box",
+      layout: "horizontal",
+      spacing: "sm",
+      paddingAll: "12px",
       contents: [
         {
-          type: "box",
-          layout: "horizontal",
-          contents: [
-            { type: "text", text: "รายการบิลทั้งหมด", color: "#64748B", size: "sm" },
-            { type: "text", text: `${summary.totalBills} รายการ`, weight: "bold", color: "#0F172A", size: "sm", align: "end" },
-          ],
+          type: "button",
+          style: "secondary",
+          height: "sm",
+          color: "#F1F5F9",
+          action: {
+            type: "message",
+            label: "⏳ บิลรออนุมัติ",
+            text: "รออนุมัติ",
+          },
         },
         {
-          type: "box",
-          layout: "horizontal",
-          contents: [
-            { type: "text", text: "รออนุมัติ", color: "#64748B", size: "sm" },
-            { type: "text", text: `${summary.pendingCount} รายการ`, weight: "bold", color: "#D97706", size: "sm", align: "end" },
-          ],
-        },
-        {
-          type: "box",
-          layout: "horizontal",
-          contents: [
-            { type: "text", text: "อนุมัติแล้ว", color: "#64748B", size: "sm" },
-            { type: "text", text: `${summary.approvedCount} รายการ`, weight: "bold", color: "#16A34A", size: "sm", align: "end" },
-          ],
-        },
-        { type: "separator" },
-        {
-          type: "box",
-          layout: "horizontal",
-          contents: [
-            { type: "text", text: "รวมยอดเงินทั้งสิ้น", weight: "bold", color: "#0F172A", size: "sm" },
-            { type: "text", text: `฿${formattedAmount}`, weight: "bold", color: "#2563EB", size: "lg", align: "end" },
-          ],
+          type: "button",
+          style: "primary",
+          height: "sm",
+          color: "#059669",
+          action: {
+            type: "message",
+            label: "💸 ยอดโอนวันนี้",
+            text: "ยอดโอนวันนี้",
+          },
         },
       ],
     },
@@ -2850,7 +2901,7 @@ export async function getProjectBudgetMap(forceRefresh = false): Promise<Map<str
         const st = String(b.status || d.status || d["สถานะ"] || innerData["สถานะ"] || "").trim().toLowerCase();
         if (st === "ยกเลิก" || st === "ไม่อนุมัติ") continue;
 
-        const isPaid = st.includes("เบิกแล้ว") || st.includes("อนุมัติ") || st === "paid" || st === "withdrawn" || st === "approved";
+        const isPaid = st.includes("เบิกแล้ว") || st.includes("ปิดงาน") || st.includes("จ่ายแล้ว") || st === "paid" || st === "withdrawn";
 
         const pId = String(b.project_id || d.project_id || d["ID Project"] || innerData["ID Project"] || "").trim();
         const pName = String(b.project_name || d.project_name || d["ชื่อ Project"] || innerData["ชื่อ Project"] || "").trim();
@@ -3570,7 +3621,7 @@ export function createMultiBillFlex(
       }
 
       const bStatus = String(b["สถานะ"] || b.status || b.data?.["สถานะ"] || b.data?.status || "").trim().toLowerCase();
-      const isBillPaid = mode === "completed" || mode === "approver" || bStatus.includes("เบิกแล้ว") || bStatus.includes("อนุมัติ") || bStatus === "paid" || bStatus === "withdrawn" || bStatus === "approved";
+      const isBillPaid = mode === "completed" || bStatus.includes("เบิกแล้ว") || bStatus.includes("ปิดงาน") || bStatus.includes("จ่ายแล้ว") || bStatus === "paid" || bStatus === "withdrawn";
       const billKey = String(b.id || b._sheetRow || b["ลำดับ"] || b.data?.id || b.data?.["ลำดับ"] || "").trim();
       const alreadyCountedInPaid = Boolean(billKey && projInfo?.paidBillIds && projInfo.paidBillIds.has(billKey));
 
@@ -3839,9 +3890,12 @@ export function createMultiBillFlex(
             let singleIsOver = false;
             if (singleCap > 0 && actualField) {
               const singlePaid = Number(projInfo?.productPaidSpent?.[actualField] || 0);
+              // หากยังไม่ได้ปิดงาน (เช่น ตั้งเบิก, ดำเนินการ, รออนุมัติ) อย่าเพิ่งลบยอดบิลนี้ออกจากงบคงเหลือ
               const singleRemaining = (isBillPaid && alreadyCountedInPaid)
                 ? (singleCap - singlePaid)
-                : (singleCap - (singlePaid + grossAmt));
+                : isBillPaid
+                  ? (singleCap - (singlePaid + grossAmt))
+                  : (singleCap - singlePaid);
               singleIsOver = singleRemaining < 0;
               const singleRemTag = singleRemaining < 0
                 ? `⚠️เกิน ${Math.abs(singleRemaining).toLocaleString("th-TH")}`
@@ -3921,11 +3975,15 @@ export function createMultiBillFlex(
                   if (budgetCap > 0 && actualField) {
                     const paidSpent = Number(projInfo?.productPaidSpent?.[actualField] || 0);
                     const priorInThisBill = billRunningProductSpent[actualField] || 0;
-                    const totalSpent = paidSpent + priorInThisBill + itemAmtNum;
+                    // หากยังไม่ได้ปิดงาน (เช่น ตั้งเบิก, ดำเนินการ, รออนุมัติ) อย่าเพิ่งลบยอดบิลนี้ออกจากงบคงเหลือ
                     const remaining = (isBillPaid && alreadyCountedInPaid)
                       ? (budgetCap - (paidSpent + priorInThisBill))
-                      : (budgetCap - totalSpent);
-                    billRunningProductSpent[actualField] = priorInThisBill + itemAmtNum;
+                      : isBillPaid
+                        ? (budgetCap - (paidSpent + priorInThisBill + itemAmtNum))
+                        : (budgetCap - (paidSpent + priorInThisBill));
+                    if (isBillPaid) {
+                      billRunningProductSpent[actualField] = priorInThisBill + itemAmtNum;
+                    }
 
                     isOver = remaining < 0;
                     const remTag = remaining < 0

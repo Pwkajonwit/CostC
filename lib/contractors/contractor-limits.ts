@@ -166,3 +166,207 @@ export function hydrateContractorsWithYearlySpend(
     };
   });
 }
+
+/**
+ * Extract 4-digit Christian calendar year from contract date.
+ */
+export function extractContractYear(contract: SheetRow): number {
+  const rawDate = String(
+    contract["วันที่"] ||
+    contract.date ||
+    contract.contract_date ||
+    contract["ว/ด/ป"] ||
+    contract.created_at ||
+    ""
+  ).trim();
+
+  if (!rawDate) return new Date().getFullYear();
+
+  const match = rawDate.match(/(\d{4})/);
+  if (match) {
+    let yr = parseInt(match[1], 10);
+    if (yr > 2400) {
+      yr -= 543;
+    }
+    return yr;
+  }
+
+  const parsed = new Date(rawDate);
+  if (!isNaN(parsed.getTime())) {
+    let yr = parsed.getFullYear();
+    if (yr > 2400) yr -= 543;
+    return yr;
+  }
+
+  return new Date().getFullYear();
+}
+
+export type ContractorQuotaDetail = {
+  contractorId: string;
+  contractorName: string;
+  contractorNickname: string;
+  contractorFullName: string;
+  contractorType: ContractorType;
+  annualLimit: number;
+  paidBillsThisYear: number;
+  pendingContractsThisYear: number;
+  totalUsedSoFar: number;
+  remainingBefore: number;
+  targetYear: number;
+  contractCount: number;
+  contractsSummary: Array<{
+    id: string;
+    projectId: string;
+    projectName: string;
+    hireAmount: number;
+    paidAmount: number;
+    remainingAmount: number;
+    details: string;
+    date: string;
+  }>;
+};
+
+/**
+ * Calculate committed annual quota details for a given contractor.
+ */
+export function calculateContractorQuotaDetail(
+  contractor: SheetRow,
+  contractRows: SheetRow[],
+  billRows: SheetRow[],
+  options?: {
+    excludeConworkId?: string;
+    targetYear?: number;
+  }
+): ContractorQuotaDetail {
+  const targetYear = options?.targetYear || new Date().getFullYear();
+  const excludeConworkId = String(options?.excludeConworkId || "").trim();
+
+  const cId = String(contractor["id_Contractor"] || contractor.id || "").trim();
+  const cNick = String(contractor["ชื่อเล่น"] || contractor.nickname || "").trim();
+  const cFull = String(contractor["ชื่อ-นามสกุล"] || contractor.full_name || "").trim();
+  const cName = cNick || cFull || cId;
+
+  // 1. Resolve contractor type
+  const explicitType = String(
+    contractor["ประเภท"] ||
+    contractor.contractor_type ||
+    contractor.data?.["ประเภท"] ||
+    contractor.data?.contractor_type ||
+    ""
+  ).trim() as ContractorType;
+
+  const type: ContractorType = (explicitType === "บุคคลธรรมดา" || explicitType === "นิติบุคคล")
+    ? explicitType
+    : detectContractorType(cFull, cNick);
+
+  // 2. Resolve annual limit
+  let limit = toNumber(contractor["จำกัดยอด/ปี"] ?? contractor.annual_limit ?? contractor.data?.["จำกัดยอด/ปี"]);
+  if (limit <= 0) {
+    limit = getDefaultAnnualLimit(type);
+  }
+
+  // 3. Paid bills this calendar year for this contractor
+  const paidBillsThisYear = billRows.filter(b => {
+    if (!isCommittedBill(b)) return false;
+    if (!isPaidBillStrict(b)) return false;
+    const yr = extractBillYear(b);
+    if (yr !== targetYear) return false;
+
+    const bVendor = String(b["ร้าน/บุคคล"] || b.vendor_or_person || "").trim();
+    const bContractor = String(b["ผู้รับเหมา"] || b.contractor_id || "").trim();
+    const bConwork = String(b.conwork_id || "").trim();
+
+    return (
+      (cId && (bVendor === cId || bContractor === cId || bConwork.startsWith(cId))) ||
+      (cNick && (bVendor === cNick || bContractor === cNick)) ||
+      (cFull && (bVendor === cFull || bContractor === cFull))
+    );
+  });
+
+  let paidBillsTotal = 0;
+  for (const b of paidBillsThisYear) {
+    const amt = toNumber(b["ยอดโอน"] || b.transfer_amount || b["ยอดเงิน"] || b.amount || b["ค่าแรง"] || b.labor_cost);
+    paidBillsTotal += amt;
+  }
+
+  // 4. Find active contracts of this contractor in target year
+  const activeContractsThisYear = contractRows.filter(c => {
+    const cConwork = String(c["id_Conwork"] || c.id || c._sheetRow || "").trim();
+    if (excludeConworkId && cConwork === excludeConworkId) return false;
+
+    const cContractorId = String(c["id_Contractor"] || c.contractor_id || "").trim();
+    const cContractorNick = String(c["ชื่อเล่น"] || c["ผู้รับเหมา"] || "").trim();
+    const cContractorFull = String(c["ชื่อ-นามสกุล"] || "").trim();
+
+    const isMatch =
+      (cId && cContractorId === cId) ||
+      (cNick && (cContractorNick === cNick || cContractorId === cNick)) ||
+      (cFull && (cContractorFull === cFull || cContractorId === cFull));
+
+    if (!isMatch) return false;
+
+    const yr = extractContractYear(c);
+    return yr === targetYear;
+  });
+
+  let pendingContractsTotal = 0;
+  const contractsSummary = activeContractsThisYear.map(c => {
+    const conworkId = String(c["id_Conwork"] || c.id || c._sheetRow || "").trim();
+    const hireAmt = toNumber(c["ยอดเงินจ้าง"] || c.total_contract_amount || c.amount || 0);
+
+    // Compute paid on this specific contract from all paid bills
+    let contractPaid = 0;
+    for (const b of billRows) {
+      if (!isCommittedBill(b)) continue;
+      if (!isPaidBillStrict(b)) continue;
+      const bConwork = String(b.conwork_id || "").trim();
+      const bContractor = String(b["ผู้รับเหมา"] || "").trim();
+      const bVendor = String(b["ร้าน/บุคคล"] || "").trim();
+      const bProj = String(b["ID Project"] || "").trim();
+      const cProj = String(c["ID Project"] || "").trim();
+
+      const matchesThisContract =
+        (conworkId && bConwork === conworkId) ||
+        (conworkId && bConwork.startsWith(conworkId)) ||
+        (bProj && cProj && bProj === cProj && (bContractor === cNick || bVendor === cNick || bContractor === cFull || bVendor === cFull));
+
+      if (matchesThisContract) {
+        contractPaid += toNumber(b["ยอดโอน"] || b.transfer_amount || b["ยอดเงิน"] || b.amount || b["ค่าแรง"] || b.labor_cost);
+      }
+    }
+
+    const remainingOnContract = Math.max(0, hireAmt - contractPaid);
+    pendingContractsTotal += remainingOnContract;
+
+    return {
+      id: conworkId,
+      projectId: String(c["ID Project"] || c.project_id || ""),
+      projectName: String(c["ชื่อ Project"] || c.project_name || ""),
+      hireAmount: hireAmt,
+      paidAmount: contractPaid,
+      remainingAmount: remainingOnContract,
+      details: String(c["รายละเอียดงาน"] || c.work_details || ""),
+      date: String(c["วันที่"] || c.date || c.created_at || "")
+    };
+  });
+
+  const totalUsedSoFar = paidBillsTotal + pendingContractsTotal;
+  const remainingBefore = limit - totalUsedSoFar;
+
+  return {
+    contractorId: cId,
+    contractorName: cName,
+    contractorNickname: cNick,
+    contractorFullName: cFull,
+    contractorType: type,
+    annualLimit: limit,
+    paidBillsThisYear: paidBillsTotal,
+    pendingContractsThisYear: pendingContractsTotal,
+    totalUsedSoFar,
+    remainingBefore,
+    targetYear,
+    contractCount: activeContractsThisYear.length,
+    contractsSummary
+  };
+}
+

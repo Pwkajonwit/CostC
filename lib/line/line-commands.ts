@@ -19,11 +19,15 @@ import {
   getBankInfoMap,
   getContractWorkMap,
   getProjectBudgetMap,
-  createDailyTransferSummaryFlex
+  createDailyTransferSummaryFlex,
+  createDailySummaryFlex
 } from "@/lib/line/line";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 import { insertRowToSupabase } from "@/lib/supabase/supabase-db";
 import { normalizeDateToIso, getTodayDateIso } from "@/lib/utils/dates";
+import { TABLES } from "@/lib/config";
+import { isPaidBill } from "@/lib/bills/bill-status";
+import { getRows } from "@/lib/db";
 
 /**
   * Central command processor for all 63 AppscriptBot keywords migrated to Next.js + Supabase
@@ -34,8 +38,17 @@ export async function handleLineCommand(
   targetId: string,
   userId: string
 ): Promise<boolean> {
-  const rawText = text.trim();
+  // 1. Strip zero-width characters, zero-width joiners, BOM, non-breaking spaces, and surrounding whitespace
+  const rawText = String(text || "")
+    .replace(/[\u200B-\u200D\uFEFF\u00A0\u200E\u200F]/g, "")
+    .trim();
   const lowerText = rawText.toLowerCase();
+
+  // 2. Normalized command string: remove polite particles (ครับ, ค่ะ, นะครับ, นะคะ, จ้า, จ๊ะ) and extra spaces
+  const cleanCmd = lowerText
+    .replace(/(ครับ|ค่ะ|นะครับ|นะคะ|จ้า|จ๊ะ|\s)+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 
   try {
     // 1. System Health Check & Test Commands
@@ -58,9 +71,188 @@ export async function handleLineCommand(
     }
 
     // 2. Menu & Help Commands
-    if (lowerText === "ช่วยด้วย" || lowerText === "ช่วยเหลือ" || lowerText === "ช่วย" || lowerText === "เมนู" || lowerText === "คำสั่ง" || lowerText === "help") {
+    if (
+      cleanCmd === "ช่วยด้วย" ||
+      cleanCmd === "ช่วยเหลือ" ||
+      cleanCmd === "ช่วย" ||
+      cleanCmd === "เมนู" ||
+      cleanCmd === "คำสั่ง" ||
+      cleanCmd === "help"
+    ) {
       const menuText = `🤖 ระบบ LINE Bot ประจำ CostCode Supabase\n\n📌 คำสั่งที่รองรับทั้งหมด:\n\n1. 📊 หมวดสรุปการเงิน/เบิกเงิน:\n   - พิมพ์ "ยอดโอนวันนี้" / "โอนวันนี้" (สรุปยอดโอนที่ปิดงานแล้ว รวมบัญชีเดียวกัน)\n   - พิมพ์ "สรุป" / "สรุปบิล" / "สรุปวันนี้"\n   - พิมพ์ "รออนุมัติ" (ดูบิลที่รอพิจารณาอนุมัติ)\n   - พิมพ์ "รอปิดงาน" / "รอจ่าย" / "อนุมัติแล้ว" (ดูบิลที่อนุมัติแล้ว รอการเงินปิดงาน)\n   - พิมพ์ "บิลหลัก: [ชื่อ]" หรือ "บิลย่อย: [ชื่อ]"\n   - พิมพ์ "ส่งไปเพื่ออนุมัติ" (ส่งแจ้งเตือนหาผู้อนุมัติ)\n   - พิมพ์ "อนุมัติบิลหลักของ:" / "อนุมัติเงินสดบิลย่อยของ:"\n   - พิมพ์ "ปิดงานบิลหลักลำดับที่:" / "ปิดงานเงินสดบิลย่อยลำดับที่:"\n\n2. 🎯 หมวดงาน & PW มอบหมาย:\n   - พิมพ์ "งาน2: [ชื่อพนักงาน]" (ดูตารางงานแผนงาน)\n   - พิมพ์ "งาน: [รายละเอียดงาน]" (สร้างงานใหม่)\n   - พิมพ์ "งานด่วน:" / "ปิดงาน:" / "ยืนยันปิดงาน:" / "s:" (ค้นหา)\n   - พิมพ์ "มอบหมาย:" / "กิจกรรม:" / "PW:" / "PW1:work" / "PWALL:work"\n\n3. ⚡ หมวดคำสั่งลัด (Shortcuts):\n   - พิมพ์ "copy" / "add1" / "add3" / "addp" / "doo"\n\n4. ⚙️ หมวดตรวจสอบระบบ:\n   - พิมพ์ "testbot" / "check" / "getid"`;
       await replyTextMessage(replyToken, menuText);
+      return true;
+    }
+
+    // 2.1 Daily Transfer Summary Commands (Flex ยอดโอนวันนี้ - รวมบิลตามผู้รับ/บัญชีเดียวกัน)
+    const isDailyTransferCmd =
+      cleanCmd === "โอนวันนี้" ||
+      cleanCmd === "ยอดโอนวันนี้" ||
+      cleanCmd === "โอน วันนี้" ||
+      cleanCmd === "ยอด โอน วันนี้" ||
+      cleanCmd === "ยอดโอน" ||
+      cleanCmd === "โอนเงินวันนี้" ||
+      cleanCmd === "ยอดโอนเงินวันนี้" ||
+      cleanCmd === "สรุปยอดโอน" ||
+      cleanCmd === "สรุปโอน" ||
+      cleanCmd === "สรุปยอดโอนวันนี้" ||
+      cleanCmd === "บิลปิดงานวันนี้" ||
+      cleanCmd === "ปิดงานวันนี้" ||
+      cleanCmd === "บิลปิดงาน" ||
+      cleanCmd === "ยอดโอนทั้งหมด" ||
+      cleanCmd === "โอนทั้งหมด" ||
+      cleanCmd === "โอนเงินทั้งหมด" ||
+      cleanCmd === "ยอดโอนเงิน" ||
+      cleanCmd.startsWith("ยอดโอน:") ||
+      cleanCmd.startsWith("ยอดโอน ") ||
+      cleanCmd.startsWith("โอน:") ||
+      cleanCmd.startsWith("โอน ") ||
+      cleanCmd.includes("ยอดโอนวันนี้") ||
+      cleanCmd.includes("โอนวันนี้");
+
+    if (isDailyTransferCmd) {
+      const isColonCommand = rawText.startsWith("ยอดโอน:") || rawText.startsWith("โอน:");
+      const isSpaceCommand = rawText.startsWith("ยอดโอน ") || rawText.startsWith("โอน ");
+      const isAll =
+        cleanCmd === "ยอดโอนทั้งหมด" ||
+        cleanCmd === "โอนทั้งหมด" ||
+        cleanCmd === "โอนเงินทั้งหมด" ||
+        cleanCmd === "ยอดโอน all" ||
+        cleanCmd.endsWith(":ทั้งหมด") ||
+        cleanCmd.endsWith(" ทั้งหมด");
+
+      let customFilter = "";
+      if (isColonCommand) {
+        customFilter = rawText.replace(/^ยอดโอน:|^โอน:/, "").trim();
+      } else if (isSpaceCommand) {
+        customFilter = rawText.replace(/^ยอดโอน\s+|^โอน\s+/, "").trim();
+      }
+
+      if (
+        customFilter === "วันนี้" ||
+        customFilter === "ทั้งหมด" ||
+        customFilter === "all" ||
+        customFilter === "ยอดโอน" ||
+        customFilter === "เงินวันนี้"
+      ) {
+        customFilter = "";
+      }
+
+      const [rawBills, peopleMap, bankInfoMap] = await Promise.all([
+        getRows(TABLES.DATA, 0, 5000),
+        getPeopleMap(),
+        getBankInfoMap()
+      ]);
+
+      // Filter only closed/paid bills
+      const closedBills = rawBills.filter(b => {
+        const rawSt = String(b["สถานะ"] || b.status || "").trim().toLowerCase();
+        return isPaidBill(b) || rawSt.includes("ปิดงาน") || rawSt.includes("จ่ายแล้ว") || rawSt === "paid" || rawSt === "withdrawn";
+      });
+
+      // Today in Bangkok timezone (YYYY-MM-DD and DD/MM/YYYY)
+      const nowBangkok = new Date();
+      let todayYmd = "";
+      let todayDmy = "";
+      let todayDisplay = "";
+      try {
+        todayYmd = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Asia/Bangkok",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit"
+        }).format(nowBangkok);
+
+        todayDmy = nowBangkok.toLocaleDateString("th-TH", { timeZone: "Asia/Bangkok" });
+        todayDisplay = nowBangkok.toLocaleDateString("th-TH", {
+          timeZone: "Asia/Bangkok",
+          day: "numeric",
+          month: "short",
+          year: "numeric"
+        });
+      } catch {
+        todayYmd = nowBangkok.toISOString().split("T")[0];
+        todayDisplay = nowBangkok.toLocaleDateString("th-TH");
+      }
+
+      let targetBills = closedBills;
+
+      if (customFilter) {
+        const q = customFilter.toLowerCase();
+        targetBills = targetBills.filter(b => {
+          const pDate = String(b.paid_date || b["วันจ่าย"] || b.paid_at || b["ว/ด/ป"] || "").toLowerCase();
+          const req = String(b["ผู้เบิก"] || b.requester || "").toLowerCase();
+          const reqName = (peopleMap.get(String(b["ผู้เบิก"] || b.requester || "").trim()) || "").toLowerCase();
+          const vendor = String(b["ร้าน/บุคคล"] || b["ผู้รับเหมา"] || b["ร้านค้า"] || b.vendor_or_person || "").toLowerCase();
+          const pName = String(b["ชื่อ Project"] || b.project_name || "").toLowerCase();
+          const bId = String(b.id || b["ลำดับ"] || b._sheetRow || "");
+
+          return pDate.includes(q) || req.includes(q) || reqName.includes(q) || vendor.includes(q) || pName.includes(q) || bId === q;
+        });
+      } else if (!isAll) {
+        // Strictly filter by actual closed/paid date today in Bangkok timezone (excluding updated_at)
+        const todayBills = targetBills.filter(b => {
+          const d = (b.data && typeof b.data === "object") ? b.data : {};
+          const pDateRaw = String(b.paid_date || b["วันจ่าย"] || d.paid_date || d["วันจ่าย"] || "").trim();
+          if (pDateRaw) {
+            if (pDateRaw.startsWith(todayYmd) || pDateRaw.includes(todayYmd) || (todayDmy && pDateRaw.includes(todayDmy))) {
+              return true;
+            }
+          }
+          const rawPaidAt = b.paid_at || d.paid_at;
+          if (rawPaidAt) {
+            try {
+              const paidBangkokYmd = new Intl.DateTimeFormat("en-CA", {
+                timeZone: "Asia/Bangkok",
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit"
+              }).format(new Date(rawPaidAt));
+              if (paidBangkokYmd === todayYmd) return true;
+            } catch {
+              // ignore
+            }
+          }
+          return false;
+        });
+
+        if (todayBills.length === 0) {
+          await replyTextMessage(
+            replyToken,
+            `ℹ️ วันนี้ (${todayDisplay}) ยังไม่มีรายการบิลที่ปิดงาน/โอนเงินในระบบครับ`
+          );
+          return true;
+        }
+
+        targetBills = todayBills;
+      }
+
+      if (targetBills.length === 0) {
+        await replyTextMessage(
+          replyToken,
+          `ℹ️ ไม่พบรายการบิลที่ปิดงาน/โอนเงิน${customFilter ? ` สำหรับ "${customFilter}"` : ` ในวันนี้ (${todayDisplay})`} ครับ`
+        );
+        return true;
+      }
+
+      const transferFlex = createDailyTransferSummaryFlex(
+        targetBills,
+        {
+          title: isAll ? "💸 ยอดโอนทั้งหมด (ปิดงานแล้ว)" : "💸 ยอดโอนวันนี้ (ปิดงานแล้ว)",
+          dateStr: isAll ? `ทั้งหมด (${targetBills.length} บิล)` : todayDisplay
+        },
+        peopleMap,
+        bankInfoMap
+      );
+
+      const altText = `💸 ยอดโอนประจำวัน (${targetBills.length} บิลปิดงานแล้ว)`;
+      const sent = await replyFlexMessage(replyToken, altText, transferFlex);
+      if (!sent && replyToken) {
+        let textFallback = `💸 สรุปยอดโอนประจำวัน (ปิดงานแล้วทั้งหมด ${targetBills.length} รายการ):\n\n`;
+        const total = targetBills.reduce((s, b) => s + Number(b["ยอดโอน"] || b["ยอดเงิน"] || b.amount || 0), 0);
+        textFallback += `💰 ยอดโอนรวมทั้งหมด: ฿${total.toLocaleString("th-TH")}\n`;
+        await replyTextMessage(replyToken, textFallback.trim());
+      }
       return true;
     }
 
@@ -926,151 +1118,6 @@ export async function handleLineCommand(
       return true;
     }
 
-    // 5.5 Daily Transfer Summary Commands (Flex ยอดโอนวันนี้ - รวมบิลตามผู้รับ/บัญชีเดียวกัน)
-    if (
-      lowerText === "ยอดโอนวันนี้" ||
-      lowerText === "โอนวันนี้" ||
-      lowerText === "สรุปยอดโอน" ||
-      lowerText === "สรุปโอน" ||
-      lowerText === "ยอดโอน" ||
-      lowerText === "โอนเงินวันนี้" ||
-      lowerText === "บิลปิดงานวันนี้" ||
-      lowerText === "ปิดงานวันนี้" ||
-      lowerText === "บิลปิดงาน" ||
-      lowerText === "ยอดโอนทั้งหมด" ||
-      lowerText === "โอนทั้งหมด" ||
-      rawText.startsWith("ยอดโอน:") ||
-      rawText.startsWith("โอน:")
-    ) {
-      const isAll = lowerText === "ยอดโอนทั้งหมด" || lowerText === "โอนทั้งหมด";
-      const customFilter = rawText.replace(/^ยอดโอน:|^โอน:/, "").trim();
-
-      const { getRows } = await import("@/lib/db");
-      const { normalizeBillStatus } = await import("@/lib/bills/bill-status");
-      const [rawBills, peopleRows, bankInfoMap] = await Promise.all([
-        getRows("Data", 0, 5000),
-        getRows("master_members", 60_000, 500).catch(() => []),
-        getBankInfoMap()
-      ]);
-
-      const peopleMap = new Map<string, string>();
-      for (const p of peopleRows) {
-        const empId = String(p["รหัสพนักงาน"] || p.id || "").trim();
-        const empName = String(p["ชื่อเล่น"] || p["ชื่อ-นามสกุล"] || p.name || "").trim();
-        if (empId && empName) {
-          peopleMap.set(empId, empName);
-        }
-      }
-
-      // Filter only closed/paid bills
-      const closedBills = rawBills.filter(b => {
-        const st = normalizeBillStatus(b["สถานะ"] || b.status);
-        const rawSt = String(b["สถานะ"] || b.status || "").trim().toLowerCase();
-        return st === "เบิกแล้ว" || rawSt.includes("ปิดงาน") || rawSt.includes("จ่ายแล้ว") || rawSt === "paid" || rawSt === "withdrawn";
-      });
-
-      // Today in Bangkok timezone (YYYY-MM-DD and DD/MM/YYYY)
-      const nowBangkok = new Date();
-      let todayYmd = "";
-      let todayDmy = "";
-      let todayDisplay = "";
-      try {
-        todayYmd = new Intl.DateTimeFormat("en-CA", {
-          timeZone: "Asia/Bangkok",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit"
-        }).format(nowBangkok);
-
-        todayDmy = nowBangkok.toLocaleDateString("th-TH", { timeZone: "Asia/Bangkok" });
-        todayDisplay = nowBangkok.toLocaleDateString("th-TH", {
-          timeZone: "Asia/Bangkok",
-          day: "numeric",
-          month: "short",
-          year: "numeric"
-        });
-      } catch {
-        todayYmd = nowBangkok.toISOString().split("T")[0];
-        todayDisplay = nowBangkok.toLocaleDateString("th-TH");
-      }
-
-      let targetBills = closedBills;
-
-      if (customFilter && customFilter !== "ทั้งหมด" && customFilter !== "วันนี้") {
-        const q = customFilter.toLowerCase();
-        targetBills = targetBills.filter(b => {
-          const pDate = String(b.paid_date || b["วันจ่าย"] || b.paid_at || b.updated_at || b["ว/ด/ป"] || "").toLowerCase();
-          const req = String(b["ผู้เบิก"] || b.requester || "").toLowerCase();
-          const reqName = (peopleMap.get(String(b["ผู้เบิก"] || b.requester || "").trim()) || "").toLowerCase();
-          const vendor = String(b["ร้าน/บุคคล"] || b["ผู้รับเหมา"] || b["ร้านค้า"] || b.vendor_or_person || "").toLowerCase();
-          const pName = String(b["ชื่อ Project"] || b.project_name || "").toLowerCase();
-          const bId = String(b.id || b["ลำดับ"] || b._sheetRow || "");
-
-          return pDate.includes(q) || req.includes(q) || reqName.includes(q) || vendor.includes(q) || pName.includes(q) || bId === q;
-        });
-      } else if (!isAll) {
-        // Today filter
-        const todayBills = targetBills.filter(b => {
-          const pDateRaw = String(b.paid_date || b["วันจ่าย"] || b.paid_at || b.updated_at || "").trim();
-          if (!pDateRaw) return false;
-          return pDateRaw.startsWith(todayYmd) || pDateRaw.includes(todayYmd) || (todayDmy && pDateRaw.includes(todayDmy));
-        });
-
-        if (todayBills.length > 0) {
-          targetBills = todayBills;
-        } else {
-          // If no bills were closed today, inform user and show recent closed bills
-          if (closedBills.length === 0) {
-            await replyTextMessage(replyToken, `ℹ️ วันนี้ (${todayDisplay}) ยังไม่มีรายการบิลที่ปิดงาน/โอนเงินเรียบร้อยในระบบครับ`);
-            return true;
-          }
-          if (lowerText === "ยอดโอนวันนี้" || lowerText === "โอนวันนี้") {
-            const flexRecent = createDailyTransferSummaryFlex(
-              closedBills.slice(0, 30),
-              { title: "💸 ยอดโอนล่าสุด (ปิดงานแล้ว)", dateStr: `ล่าสุด (${closedBills.length} บิล)` },
-              peopleMap,
-              bankInfoMap
-            );
-            await replyFlexMessage(
-              replyToken,
-              `💸 ยอดโอนล่าสุด (${closedBills.length} บิลที่ปิดงานแล้ว)`,
-              flexRecent
-            );
-            return true;
-          }
-          targetBills = closedBills.slice(0, 40);
-        }
-      }
-
-      if (targetBills.length === 0) {
-        await replyTextMessage(
-          replyToken,
-          `ℹ️ ไม่พบรายการบิลที่ปิดงาน/โอนเงิน${customFilter ? ` สำหรับ "${customFilter}"` : ` ในวันนี้ (${todayDisplay})`} ครับ`
-        );
-        return true;
-      }
-
-      const transferFlex = createDailyTransferSummaryFlex(
-        targetBills,
-        {
-          title: isAll ? "💸 ยอดโอนทั้งหมด (ปิดงานแล้ว)" : "💸 ยอดโอนวันนี้ (ปิดงานแล้ว)",
-          dateStr: isAll ? `ทั้งหมด (${targetBills.length} บิล)` : todayDisplay
-        },
-        peopleMap,
-        bankInfoMap
-      );
-
-      const altText = `💸 ยอดโอนประจำวัน (${targetBills.length} บิลปิดงานแล้ว)`;
-      const sent = await replyFlexMessage(replyToken, altText, transferFlex);
-      if (!sent && replyToken) {
-        let textFallback = `💸 สรุปยอดโอนประจำวัน (ปิดงานแล้วทั้งหมด ${targetBills.length} รายการ):\n\n`;
-        const total = targetBills.reduce((s, b) => s + Number(b["ยอดโอน"] || b["ยอดเงิน"] || b.amount || 0), 0);
-        textFallback += `💰 ยอดโอนรวมทั้งหมด: ฿${total.toLocaleString("th-TH")}\n`;
-        await replyTextMessage(replyToken, textFallback.trim());
-      }
-      return true;
-    }
-
     // 6. Query Bills Specific Commands
     // "หลัก", "ย่อย", "บิลหลัก", "บิลย่อย", "หลัก:", "บิลหลัก:", "ย่อย:", "บิลย่อย:", "ทั้งหมด:", "รออนุมัติ", "ตั้งเบิก", "รอปิดงาน", "รอจ่าย", "อนุมัติแล้ว"
     // "บิล:", "bill:" — ค้นหาทั่วไป (ทั้งบิลหลักและย่อย)
@@ -1280,35 +1327,123 @@ export async function handleLineCommand(
     }
 
     // 7. Summary Commands (Controller_AllWorks.gs & Summary)
-    if (lowerText.includes("สรุป") || lowerText.includes("สรุปบิล") || lowerText.includes("สรุปวันนี้") || lowerText === ":รวม") {
-      const { getRowsFromSupabase } = await import("@/lib/supabase/supabase-db");
-      const bills = await getRowsFromSupabase("Data", 5000);
+    // "สรุป", "สรุปบิล", "สรุปวันนี้", "สรุปทั้งหมด", ":รวม"
+    if (
+      cleanCmd === "สรุป" ||
+      cleanCmd === "สรุปบิล" ||
+      cleanCmd === "สรุปวันนี้" ||
+      cleanCmd === "สรุป บิล" ||
+      cleanCmd === "สรุป วันนี้" ||
+      cleanCmd === "สรุปทั้งหมด" ||
+      cleanCmd === ":รวม" ||
+      (cleanCmd.startsWith("สรุป") && !cleanCmd.includes("โอน"))
+    ) {
+      const isAll = cleanCmd === "สรุปทั้งหมด" || cleanCmd === ":รวม" || cleanCmd.includes("ทั้งหมด");
+      const { getRows } = await import("@/lib/db");
+      const { normalizeBillStatus } = await import("@/lib/bills/bill-status");
+      const bills = await getRows("Data", 0, 5000);
 
-      const totalBills = bills.length;
-      let totalAmount = 0;
-      let pendingCount = 0;
+      // Today in Bangkok timezone
+      const nowBangkok = new Date();
+      let todayYmd = "";
+      let todayDmy = "";
+      let todayDisplay = "";
+      try {
+        todayYmd = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Asia/Bangkok",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit"
+        }).format(nowBangkok);
+        todayDmy = nowBangkok.toLocaleDateString("th-TH", { timeZone: "Asia/Bangkok" });
+        todayDisplay = nowBangkok.toLocaleDateString("th-TH", {
+          timeZone: "Asia/Bangkok",
+          day: "numeric",
+          month: "short",
+          year: "numeric"
+        });
+      } catch {
+        todayYmd = nowBangkok.toISOString().split("T")[0];
+        todayDisplay = nowBangkok.toLocaleDateString("th-TH");
+      }
+
+      let targetBills = bills;
+      if (!isAll) {
+        // Strictly filter bills of today: transaction date today, created today, approved today, or closed today
+        targetBills = bills.filter(b => {
+          const d = (b.data && typeof b.data === "object") ? b.data : {};
+          const dateField = String(b["ว/ด/ป"] || d["ว/ด/ป"] || b.paid_date || d.paid_date || b["วันจ่าย"] || d["วันจ่าย"] || "").trim();
+          if (dateField && (dateField.startsWith(todayYmd) || dateField.includes(todayYmd) || (todayDmy && dateField.includes(todayDmy)))) {
+            return true;
+          }
+          for (const isoField of [b.created_at, b.paid_at, b.approved_at]) {
+            if (isoField) {
+              try {
+                const bkk = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(isoField));
+                if (bkk === todayYmd) return true;
+              } catch {
+                // ignore
+              }
+            }
+          }
+          return false;
+        });
+      }
+
+      // Count global pending bills (current queue waiting for approval across entire system)
+      const globalPendingCount = bills.filter(b => {
+        const normSt = normalizeBillStatus(b["สถานะ"] || b.status);
+        return normSt === "รออนุมัติ" || normSt === "รอตั้งเบิก" || normSt === "ตั้งเบิก";
+      }).length;
+
       let approvedCount = 0;
+      let paidCount = 0;
+      let totalAmount = 0;
 
-      bills.forEach(b => {
+      targetBills.forEach(b => {
         const amt = Number(b["ยอดเงิน"] || b.amount || 0);
         totalAmount += amt;
 
-        const st = String(b["สถานะ"] || b.status || "").trim();
-        if (st === "รอตรวจสอบ" || st === "รออนุมัติ" || st === "รอดำเนินการ") {
-          pendingCount++;
-        } else if (st === "อนุมัติแล้ว" || st === "เบิกแล้ว" || st === "จ่ายแล้ว" || st === "อนุมัติ") {
+        const normSt = normalizeBillStatus(b["สถานะ"] || b.status);
+        if (normSt === "อนุมัติ") {
           approvedCount++;
+        } else if (normSt === "เบิกแล้ว") {
+          paidCount++;
         }
       });
 
-      const textSummary = `📊 สรุปรายงานการเงินประจำวัน (CostCode Supabase)\n\n` +
-        `- บิลทั้งหมด: ${totalBills} รายการ\n` +
-        `- ⏳ รออนุมัติ: ${pendingCount} รายการ\n` +
-        `- ✅ อนุมัติแล้ว: ${approvedCount} รายการ\n` +
-        `- 💰 ยอดเงินรวมทั้งสิ้น: ฿${totalAmount.toLocaleString("th-TH")}\n\n` +
-        `ดูข้อมูลรายละเอียดฉบับเต็มได้บนหน้าเว็บแอปพลิเคชัน`;
+      if (!isAll && targetBills.length === 0) {
+        await replyTextMessage(
+          replyToken,
+          `ℹ️ วันนี้ (${todayDisplay}) ยังไม่มีรายการบิลใหม่หรือรายการเบิกจ่ายในระบบครับ\n\n(ปัจจุบันมีบิลรออนุมัติค้างในระบบทั้งหมด ${globalPendingCount} รายการ พิมพ์ "รออนุมัติ" เพื่อดูรายการ หรือพิมพ์ "สรุปทั้งหมด" เพื่อดูยอดสะสมได้ครับ)`
+        );
+        return true;
+      }
 
-      await replyTextMessage(replyToken, textSummary);
+      const summaryFlex = createDailySummaryFlex({
+        title: isAll ? "📊 สรุปรายงานการเงินทั้งหมด (สะสม)" : "📊 สรุปรายงานการเงินประจำวัน",
+        dateStr: isAll ? `ข้อมูลทั้งหมด (${targetBills.length} บิล)` : todayDisplay,
+        totalBills: targetBills.length,
+        totalAmount,
+        pendingCount: globalPendingCount,
+        approvedCount,
+        paidCount
+      });
+
+      const altText = isAll
+        ? `📊 สรุปภาพรวมการเงินสะสม (${targetBills.length} บิล)`
+        : `📊 สรุปการเงินประจำวัน (${todayDisplay} - ${targetBills.length} บิล)`;
+
+      const sent = await replyFlexMessage(replyToken, altText, summaryFlex);
+      if (!sent && replyToken) {
+        let textFallback = `${isAll ? "📊 สรุปรายงานการเงินทั้งหมด (สะสม)" : `📊 สรุปรายงานการเงินประจำวัน (${todayDisplay})`}\n\n`;
+        textFallback += `- บิล${isAll ? "ทั้งหมด" : "วันนี้"}: ${targetBills.length} รายการ\n`;
+        textFallback += `- ⏳ รออนุมัติ (ค้างระบบ): ${globalPendingCount} รายการ\n`;
+        textFallback += `- ✅ อนุมัติแล้ว: ${approvedCount} รายการ\n`;
+        textFallback += `- 💸 ปิดงาน/จ่ายแล้ว: ${paidCount} รายการ\n`;
+        textFallback += `- 💰 ยอดรวม: ฿${totalAmount.toLocaleString("th-TH")}`;
+        await replyTextMessage(replyToken, textFallback);
+      }
       return true;
     }
 

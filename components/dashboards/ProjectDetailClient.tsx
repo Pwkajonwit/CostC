@@ -78,7 +78,7 @@ export function ProjectDetailClient({
   expenseCategories,
 }: ProjectDetailClientProps) {
   const [activeTab, setActiveTab] = useState<"bills" | "budget-control" | "expenses" | "edit">("bills");
-  const [budgetViewMode, setBudgetViewMode] = useState<"grouped" | "table">("grouped");
+  const [budgetViewMode, setBudgetViewMode] = useState<"grouped" | "table">("table");
   const [hideEmptyBudgets, setHideEmptyBudgets] = useState(false);
   const [billFilterTerm, setBillFilterTerm] = useState<string>("");
   const [autoEditMode, setAutoEditMode] = useState(false);
@@ -554,21 +554,21 @@ export function ProjectDetailClient({
               <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs">
                 <button
                   type="button"
-                  onClick={() => setBudgetViewMode("grouped")}
-                  className={`px-3 py-1 rounded-md font-medium transition cursor-pointer ${
-                    budgetViewMode === "grouped" ? "bg-white text-slate-900 shadow-2xs" : "text-slate-500 hover:text-slate-800"
-                  }`}
-                >
-                  จัดกลุ่ม 6 หมวดงาน
-                </button>
-                <button
-                  type="button"
                   onClick={() => setBudgetViewMode("table")}
                   className={`px-3 py-1 rounded-md font-medium transition cursor-pointer ${
                     budgetViewMode === "table" ? "bg-white text-slate-900 shadow-2xs" : "text-slate-500 hover:text-slate-800"
                   }`}
                 >
                   ตาราง 24 รายการ
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBudgetViewMode("grouped")}
+                  className={`px-3 py-1 rounded-md font-medium transition cursor-pointer ${
+                    budgetViewMode === "grouped" ? "bg-white text-slate-900 shadow-2xs" : "text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  จัดกลุ่ม 6 หมวดงาน
                 </button>
               </div>
 

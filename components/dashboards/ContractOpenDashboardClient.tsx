@@ -99,12 +99,17 @@ export function ContractOpenDashboardClient({
 
         <div className="bg-white rounded-md p-3 border border-slate-200 shadow-2xs">
           <span className="text-xs text-slate-500 block truncate">ยอดจ่ายแล้วรวม</span>
-          <div className="text-lg text-emerald-700 mt-0.5">{money(totalPaid)}</div>
+          <div className="text-lg text-slate-900 mt-0.5">{money(totalPaid)}</div>
         </div>
 
         <div className="bg-white rounded-md p-3 border border-slate-200 shadow-2xs">
           <span className="text-xs text-slate-500 block truncate">ค่าแรงคงเหลือรวม</span>
-          <div className="text-lg text-amber-700 mt-0.5">{money(totalRemaining)}</div>
+          <div
+            className={`text-lg mt-0.5 ${totalRemaining < 0 ? "text-rose-600 font-bold" : "text-slate-900"}`}
+            style={totalRemaining < 0 ? { color: "#dc2626" } : undefined}
+          >
+            {money(totalRemaining)}
+          </div>
         </div>
       </div>
 
@@ -233,17 +238,34 @@ export function ContractOpenDashboardClient({
                   </div>
                 )}
 
-                {/* id_Contractor (ช่าง) & เบอร์โทรศัพท์ & วันที่ */}
-                <div className="flex items-center justify-between text-xs text-slate-500 gap-2 pt-0.5">
-                  <div className="flex items-center gap-1.5 truncate">
-                    <span className="text-slate-500">ช่าง:</span>
-                    <span className="truncate text-slate-800">{contractorName}</span>
-                    {phone && phone !== "-" && (
-                      <span className="text-slate-400 text-xs shrink-0">({phone})</span>
+                {/* id_Contractor (ช่าง) & เบอร์โทรศัพท์ & วันที่ & โควตาคงเหลือ */}
+                <div className="flex flex-col gap-1 text-xs text-slate-500 pt-0.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0 truncate">
+                      <span className="text-slate-500 shrink-0">ช่าง:</span>
+                      <span className="truncate text-slate-800 font-medium">{contractorName}</span>
+                      {phone && phone !== "-" && (
+                        <span className="text-slate-400 text-xs shrink-0">({phone})</span>
+                      )}
+                    </div>
+                    {contractDate !== "-" && (
+                      <span className="text-slate-400 text-xs shrink-0">{contractDate}</span>
                     )}
                   </div>
-                  {contractDate !== "-" && (
-                    <span className="text-slate-400 text-xs shrink-0">{contractDate}</span>
+                  {row._contractorRemainingQuota !== undefined && (
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-medium ${
+                        row._contractorLimitStatus === "เกินโควตา" || Number(row._contractorRemainingQuota) < 0
+                          ? "bg-rose-50 text-rose-700 border border-rose-200"
+                          : row._contractorLimitStatus === "ใกล้เต็ม"
+                          ? "bg-amber-50 text-amber-800 border border-amber-200"
+                          : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                      }`}>
+                        {Number(row._contractorRemainingQuota) < 0
+                          ? `เกินโควตาปี -${money(Math.abs(Number(row._contractorRemainingQuota)))} ฿`
+                          : `โควตาปีนี้เหลือ ${money(Number(row._contractorRemainingQuota))} ฿`}
+                      </span>
+                    </div>
                   )}
                 </div>
 
@@ -259,10 +281,16 @@ export function ContractOpenDashboardClient({
                   </div>
                   <div className="flex items-center justify-between text-xs pt-0.5">
                     <span className="text-slate-500">
-                      จ่ายแล้ว: <strong className="text-emerald-700">{money(paidAmount)} ฿</strong> <span className="text-slate-400 text-xs">({payPercent}%)</span>
+                      จ่ายแล้ว: <strong className="text-slate-700">{money(paidAmount)} ฿</strong> <span className="text-slate-400 text-xs">({payPercent}%)</span>
                     </span>
                     <span className="text-slate-500">
-                      คงเหลือ: <strong className={`${remaining > 0 ? "text-amber-700" : "text-slate-400"}`}>{money(remaining)} ฿</strong>
+                      คงเหลือ: {remaining < 0 ? (
+                        <strong className="text-rose-600 font-bold" style={{ color: "#dc2626" }}>
+                          {money(remaining)} ฿
+                        </strong>
+                      ) : (
+                        <strong className="text-slate-700">{money(remaining)} ฿</strong>
+                      )}
                     </span>
                   </div>
                 </div>
@@ -323,10 +351,10 @@ export function ContractOpenDashboardClient({
                     <th className="py-2.5 px-3 border-r border-slate-200">ผู้รับเหมา</th>
                     <th className="py-2.5 px-3 border-r border-slate-200 text-center">รหัสโครงการ</th>
                     <th className="py-2.5 px-3 border-r border-slate-200">ชื่อโครงการ</th>
-                    <th className="py-2.5 px-3 border-r border-slate-200 text-right">ยอดเงินจ้าง</th>
                     <th className="py-2.5 px-3 border-r border-slate-200">รายละเอียดงาน</th>
                     <th className="py-2.5 px-3 border-r border-slate-200 text-center whitespace-nowrap">วันที่</th>
                     <th className="py-2.5 px-3 border-r border-slate-200 text-center whitespace-nowrap">เบอร์โทรศัพท์</th>
+                    <th className="py-2.5 px-3 border-r border-slate-200 text-right">ยอดเงินจ้าง</th>
                     <th className="py-2.5 px-3 border-r border-slate-200 text-right">ยอดเงินจ่าย</th>
                     <th className="py-2.5 px-3 text-right">ค่าแรงคงเหลือ</th>
                   </tr>
@@ -351,24 +379,50 @@ export function ContractOpenDashboardClient({
                         className="hover:bg-slate-50 transition-colors cursor-pointer"
                       >
                         <td className="py-2 px-3 text-center text-slate-900 border-r border-slate-100">{contractId}</td>
-                        <td className="py-2 px-3 text-slate-800 max-w-[160px] truncate border-r border-slate-100" title={contractorName}>
-                          {contractorName}
+                        <td className="py-2 px-3 text-slate-800 max-w-[200px] border-r border-slate-100" title={contractorName}>
+                          <div className="flex flex-col min-w-0">
+                            <span className="truncate font-medium">{contractorName}</span>
+                            {row._contractorRemainingQuota !== undefined && (
+                              <div className="flex items-center gap-1 mt-0.5">
+                                <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono font-medium ${
+                                  row._contractorLimitStatus === "เกินโควตา" || Number(row._contractorRemainingQuota) < 0
+                                    ? "bg-rose-50 text-rose-700 border border-rose-200"
+                                    : row._contractorLimitStatus === "ใกล้เต็ม"
+                                    ? "bg-amber-50 text-amber-800 border border-amber-200"
+                                    : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                }`}>
+                                  {Number(row._contractorRemainingQuota) < 0
+                                    ? `เกิน -${money(Math.abs(Number(row._contractorRemainingQuota)))} ฿`
+                                    : `เหลือ ${money(Number(row._contractorRemainingQuota))} ฿`}
+                                </span>
+                              </div>
+                            )}
+                          </div>
                         </td>
                         <td className="py-2 px-3 text-center text-slate-600 border-r border-slate-100">{projectId}</td>
                         <td className="py-2 px-3 text-slate-900 max-w-[200px] truncate border-r border-slate-100" title={projectName}>
                           {projectName}
                         </td>
-                        <td className="py-2 px-3 text-right text-slate-900 border-r border-slate-100">{money(hireAmount)}</td>
                         <td className="py-2 px-3 text-slate-700 max-w-[200px] truncate border-r border-slate-100" title={workDetails}>{workDetails}</td>
                         <td className="py-2 px-3 text-center text-slate-600 border-r border-slate-100 whitespace-nowrap">{contractDate}</td>
                         <td className="py-2 px-3 text-center text-slate-600 border-r border-slate-100 whitespace-nowrap">{phone}</td>
-                        <td className="py-2 px-3 text-right text-emerald-700 border-r border-slate-100">{money(paidAmount)}</td>
-                        <td className={`py-2 px-3 text-right ${remaining > 0 ? "text-amber-700" : "text-slate-400"}`}>
-                          {money(remaining)}
+                        <td className="py-2 px-3 text-right text-slate-900 border-r border-slate-100">{money(hireAmount)}</td>
+                        <td className="py-2 px-3 text-right border-r border-slate-100">
+                          {money(paidAmount)}
+                        </td>
+                        <td className="py-2 px-3 text-right">
+                          {remaining < 0 ? (
+                            <span className="text-rose-600 font-bold text-xs" style={{ color: "#dc2626" }}>
+                              {money(remaining)}
+                            </span>
+                          ) : (
+                            money(remaining)
+                          )}
                         </td>
                       </tr>
                     );
                   })}
+
                 </tbody>
               </table>
             </div>

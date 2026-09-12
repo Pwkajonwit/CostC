@@ -52,6 +52,7 @@ type BillDetailClientProps = {
   requesterLink?: string;
   createdByDisplay?: string;
   vendorDisplay?: string;
+  vendorSubText?: string;
   vendorLink?: string;
   form?: any;
   documentData?: BillDocumentModel | null;
@@ -69,6 +70,7 @@ export function BillDetailClient({
   requesterLink,
   createdByDisplay,
   vendorDisplay,
+  vendorSubText,
   vendorLink,
   form,
   documentData,
@@ -104,7 +106,7 @@ export function BillDetailClient({
   const creditDays = parseCreditDays(bill["เครดิต"]);
   const creditDisplay = text(bill["เครดิต"]) || (creditDays > 0 ? `${creditDays} วัน` : "เงินสด");
 
-  const vendor = vendorDisplay || firstText(bill, ["ร้านค้า", "ผู้รับเหมา", "ร้านค้า/ผู้รับเหมา", "ร้าน/บุคคล"]);
+  const vendor = vendorDisplay || firstText(bill, ["ชื่อร้านค้า", "ชื่อผู้รับเหมา", "ร้านค้า", "ผู้รับเหมา", "ร้าน/บุคคล"]);
   const requester = requesterDisplay || text(bill["ผู้เบิก"]) || "-";
   const createdBy = text(bill["ผู้สร้างบิล"] || bill["created_by"] || bill["ผู้บันทึก"]) || "-";
   const billNo = text(bill["บิล"] || bill.bill_no) || "-";
@@ -368,17 +370,24 @@ export function BillDetailClient({
 
               <div className="grid grid-cols-1 sm:grid-cols-3 px-3.5 py-2 gap-1">
                 <span className="text-slate-700 font-semibold">ร้านค้า / ผู้รับเหมา:</span>
-                <span className="sm:col-span-2 text-slate-950 font-medium">
-                  {vendorLink ? (
-                    <Link href={vendorLink} className="text-indigo-700 hover:text-indigo-950 hover:underline inline-flex items-center gap-1 font-bold">
-                      <span>{vendor}</span>
-                      <span className="text-slate-600 font-normal">({vendorType})</span>
-                      <ArrowUpRight size={12} />
-                    </Link>
-                  ) : (
-                    <span>{vendor} <span className="text-slate-600 font-normal">({vendorType})</span></span>
+                <div className="sm:col-span-2 flex flex-col gap-0.5">
+                  <div className="text-slate-950 font-medium flex items-center gap-1.5 flex-wrap">
+                    {vendorLink ? (
+                      <Link href={vendorLink} className="text-indigo-700 hover:text-indigo-950 hover:underline inline-flex items-center gap-1 font-bold">
+                        <span>{vendor}</span>
+                        <span className="text-slate-600 font-normal">({vendorType})</span>
+                        <ArrowUpRight size={12} />
+                      </Link>
+                    ) : (
+                      <span>{vendor} <span className="text-slate-600 font-normal">({vendorType})</span></span>
+                    )}
+                  </div>
+                  {vendorSubText && (
+                    <span className="text-[11px] text-slate-500 font-normal">
+                      {vendorSubText}
+                    </span>
                   )}
-                </span>
+                </div>
               </div>
 
               {contractLink && (

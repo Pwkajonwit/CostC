@@ -57,6 +57,11 @@ const ContractLaborBudgetGuardrail = dynamic(
   { ssr: false }
 );
 
+const ContractorQuotaGuardrail = dynamic(
+  () => import("@/components/forms/ContractorQuotaGuardrail").then(mod => mod.ContractorQuotaGuardrail),
+  { ssr: false }
+);
+
 import { checkCategoryBudgetCap } from "@/lib/bills/bill-validation";
 
 type FormPayload = {
@@ -1284,17 +1289,29 @@ export function FormModal({
                                 </div>
 
                                 {isHireAmountField && (
-                                  <div className="col-span-1 sm:col-span-2 lg:col-span-2 flex flex-col justify-end">
-                                    <ContractLaborBudgetGuardrail
-                                      projectId={values["ID Project"]}
-                                      currentHireAmount={values["ยอดเงินจ้าง"]}
-                                      excludeConworkId={isEditing ? String(editSheetRow || values["id_Conwork"] || "") : undefined}
-                                      projectRow={
-                                        activeForm.refOptions["ID Project"]?.find(
-                                          opt => String(opt.value) === String(values["ID Project"]) || String(opt.label) === String(values["ID Project"])
-                                        )?.row
-                                      }
-                                    />
+                                  <div className="col-span-1 sm:col-span-2 lg:col-span-3 flex flex-col gap-2.5">
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
+                                      <ContractLaborBudgetGuardrail
+                                        projectId={values["ID Project"]}
+                                        currentHireAmount={values["ยอดเงินจ้าง"]}
+                                        excludeConworkId={isEditing ? String(editSheetRow || values["id_Conwork"] || "") : undefined}
+                                        projectRow={
+                                          activeForm.refOptions["ID Project"]?.find(
+                                            opt => String(opt.value) === String(values["ID Project"]) || String(opt.label) === String(values["ID Project"])
+                                          )?.row
+                                        }
+                                      />
+                                      <ContractorQuotaGuardrail
+                                        contractorId={values["id_Contractor"]}
+                                        currentHireAmount={values["ยอดเงินจ้าง"]}
+                                        excludeConworkId={isEditing ? String(editSheetRow || values["id_Conwork"] || "") : undefined}
+                                        contractorRow={
+                                          activeForm.refOptions["id_Contractor"]?.find(
+                                            opt => String(opt.value) === String(values["id_Contractor"]) || String(opt.label) === String(values["id_Contractor"])
+                                          )?.row
+                                        }
+                                      />
+                                    </div>
                                   </div>
                                 )}
                               </Fragment>
