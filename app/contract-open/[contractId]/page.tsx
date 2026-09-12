@@ -1,4 +1,4 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { ContractDetailEditButton } from "@/components/forms/ContractDetailEditButton";
 import { DataTable } from "@/components/tables/DataTable";
@@ -11,6 +11,7 @@ import { money } from "@/lib/utils/numbers";
 import { formatDateDisplay } from "@/lib/utils/dates";
 import type { SheetRow } from "@/lib/types";
 import { notFound } from "next/navigation";
+import { calculateContractorQuotaDetail } from "@/lib/contractors/contractor-limits";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -78,6 +79,9 @@ export default async function ContractDetailPage({ params }: ContractDetailPageP
 
   // Merge contractor details if available
   const contractor = contractorRows.find(c => String(c.id_Contractor || "").trim() === String(rawContract.id_Contractor || "").trim());
+  const contractorQuota = contractor
+    ? calculateContractorQuotaDetail(contractor, contractRows, rawDataRows)
+    : null;
   const contract: SheetRow = {
     ...rawContract,
     "ชื่อเล่น": rawContract["ชื่อเล่น"] || contractor?.["ชื่อเล่น"] || "",
@@ -171,6 +175,75 @@ export default async function ContractDetailPage({ params }: ContractDetailPageP
           </div>
         </div>
       </div>
+
+      {/* CONTRACTOR ANNUAL QUOTA BANNER */}
+      {contractorQuota && (
+        <div className="border border-slate-200 rounded-xl md:rounded-md p-3 sm:p-4 bg-white shadow-2xs space-y-2.5">
+          <div className="flex items-center justify-between text-xs pb-2 border-b border-slate-100">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="font-semibold text-slate-800 truncate">
+                โควตารายปีผู้รับเหมา: {contractorQuota.contractorName}
+              </span>
+              <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                contractorQuota.contractorType === "นิติบุคคล" ? "bg-purple-100 text-purple-700" : "bg-sky-100 text-sky-700"
+              }`}>
+                {contractorQuota.contractorType}
+              </span>
+            </div>
+            <Link
+              href="/views/contractors"
+              className="text-[11px] text-sky-600 hover:text-sky-800 hover:underline shrink-0"
+            >
+              ดูตารางผู้รับเหมาทั้งหมด →
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            <div>
+              <span className="text-[10px] text-slate-400 block">จำกัดยอด/ปี</span>
+              <span className="font-semibold text-slate-800 text-sm sm:text-base">
+                {money(contractorQuota.annualLimit)} ฿
+              </span>
+            </div>
+            <div>
+              <span className="text-[10px] text-slate-400 block">จ้างสะสมปีนี้ ({contractorQuota.contractCount} สัญญา)</span>
+              <span className="font-semibold text-slate-700 text-sm sm:text-base">
+                {money(contractorQuota.totalUsedSoFar)} ฿
+              </span>
+            </div>
+            <div className="text-right">
+              <span className={`text-[10px] block font-medium ${
+                contractorQuota.remainingBefore < 0 ? "text-rose-600" : "text-emerald-700"
+              }`}>
+                {contractorQuota.remainingBefore < 0 ? "เกินโควตา" : "คงเหลือโควตาปีนี้"}
+              </span>
+              <span className={`font-bold text-sm sm:text-base ${
+                contractorQuota.remainingBefore < 0 ? "text-rose-600" : "text-emerald-700"
+              }`}>
+                {contractorQuota.remainingBefore < 0
+                  ? `-${money(Math.abs(contractorQuota.remainingBefore))} ฿`
+                  : `${money(contractorQuota.remainingBefore)} ฿`}
+              </span>
+            </div>
+          </div>
+
+          {/* Progress bar */}
+          <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-300 ${
+                contractorQuota.remainingBefore < 0
+                  ? "bg-rose-500"
+                  : (contractorQuota.totalUsedSoFar / contractorQuota.annualLimit) >= 0.7
+                  ? "bg-amber-500"
+                  : "bg-emerald-600"
+              }`}
+              style={{
+                width: `${Math.min(100, Math.round((contractorQuota.totalUsedSoFar / contractorQuota.annualLimit) * 100))}%`
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* DETAIL + RELATED BILLS */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">

@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { sendFlexMessageDetailed, sendTextMessageDetailed, createEveningSummaryCarouselFlex, getLineTargetIds } from "@/lib/line/line";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
 
     // 3. Fetch summary statistics from Supabase PostgreSQL (Bills, Tasks & Works)
     const [billsRes, tasksRes, worksRes] = await Promise.all([
-      supabaseAdmin.from("bills").select("amount, status"),
+      supabaseAdmin.from("bills").select("id, amount, status, data, created_at, paid_at, paid_date, approved_at"),
       supabaseAdmin.from("tasks").select("*"),
       supabaseAdmin.from("works").select("*")
     ]);
@@ -62,10 +62,39 @@ export async function GET(req: NextRequest) {
     const tasks = tasksRes.data || [];
     const works = worksRes.data || [];
 
-    const totalBills = bills.length;
-    const totalAmount = bills.reduce((acc, b) => acc + (Number(b.amount) || 0), 0);
-    const pendingCount = bills.filter((b) => b.status === "รอตรวจสอบ" || b.status === "รออนุมัติ").length;
-    const approvedCount = bills.filter((b) => b.status === "อนุมัติแล้ว" || b.status === "จ่ายแล้ว").length;
+    // Bangkok timezone dates for today
+    const nowBangkok = new Date();
+    const todayYmd = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Bangkok",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).format(nowBangkok);
+    const todayDmy = nowBangkok.toLocaleDateString("th-TH", { timeZone: "Asia/Bangkok" });
+
+    // Filter today's bills (created, approved, or paid today)
+    const todayBills = bills.filter(rawB => {
+      const b = rawB as any;
+      const d = (b.data && typeof b.data === "object") ? b.data : {};
+      const dateField = String(b["ว/ด/ป"] || d["ว/ด/ป"] || b.paid_date || d.paid_date || b["วันจ่าย"] || d["วันจ่าย"] || "").trim();
+      if (dateField && (dateField.startsWith(todayYmd) || dateField.includes(todayYmd) || (todayDmy && dateField.includes(todayDmy)))) {
+        return true;
+      }
+      for (const isoField of [b.created_at, b.paid_at, b.approved_at]) {
+        if (isoField) {
+          try {
+            const bkk = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(isoField));
+            if (bkk === todayYmd) return true;
+          } catch {}
+        }
+      }
+      return false;
+    });
+
+    const totalBills = todayBills.length;
+    const totalAmount = todayBills.reduce((acc, b) => acc + (Number(b.amount) || 0), 0);
+    const pendingCount = bills.filter((b) => b.status === "รอตรวจสอบ" || b.status === "รออนุมัติ" || b.status === "รอตั้งเบิก" || b.status === "ตั้งเบิก").length;
+    const approvedCount = todayBills.filter((b) => b.status === "อนุมัติแล้ว" || b.status === "จ่ายแล้ว" || b.status === "เบิกแล้ว" || b.status === "อนุมัติ").length;
 
     const activeTasks = tasks.filter(t => t.status !== "สำเร็จ");
     const activeWorksCount = activeTasks.length;

@@ -1,4 +1,4 @@
-﻿import { notFound } from "next/navigation";
+import { notFound } from "next/navigation";
 import { BillDetailClient } from "@/components/dashboards/BillDetailClient";
 import { TABLES } from "@/lib/config";
 import { hydrateBillRows, hydrateContractRows, hydrateProjectRows } from "@/lib/formulas";
@@ -76,36 +76,113 @@ export default async function BillDetailPage({ params }: BillDetailPageProps) {
   const requesterLink = rawRequester ? `/views/people/${encodeURIComponent(requesterKey)}` : "";
 
   // Resolve Vendor / Store / Contractor Name & Link
-  const rawVendor = text(bill["ร้านค้า"] || bill["ผู้รับเหมา"] || bill["ร้านค้า/ผู้รับเหมา"] || bill["ร้าน/บุคคล"]);
-  const matchedContractor = rawVendor
+  const storeIdFromBill = text(bill["ร้านค้า"] || bill["id_store"] || bill.store_id);
+  const storeNameFromBill = text(bill["ชื่อร้านค้า"] || bill.store_name);
+  const contractorIdFromBill = text(bill["ผู้รับเหมา"] || bill["id_Contractor"] || bill.contractor_id);
+  const contractorNameFromBill = text(bill["ชื่อผู้รับเหมา"] || bill.contractor_name);
+  const vendorOrPerson = text(bill["ร้าน/บุคคล"] || bill.vendor_or_person);
+  const rawCat = text(bill["ประเภท"] || bill.category);
+  const rawVendorType = text(bill["ร้านค้า/ผู้รับเหมา"]);
+
+  const isContractorBill =
+    rawVendorType === "ผู้รับเหมา" ||
+    Boolean(contractorIdFromBill) ||
+    Boolean(contractorNameFromBill) ||
+    rawCat.startsWith("2.") ||
+    rawCat.includes("ค่าแรง") ||
+    Number(bill["ค่าแรง"] || 0) > 0 ||
+    Boolean(text(bill["statusค่าแรง"]));
+
+  const rawVendor = isContractorBill
+    ? (contractorIdFromBill || contractorNameFromBill || vendorOrPerson || "")
+    : (storeIdFromBill || storeNameFromBill || vendorOrPerson || "");
+
+  const matchedContractor = isContractorBill && rawVendor
     ? contractorRows.find((c) => {
         const code = text(c["id_Contractor"] || c.id).toLowerCase();
         const nickname = text(c["ชื่อเล่น"]).toLowerCase();
         const fullName = text(c["ชื่อ-นามสกุล"]).toLowerCase();
-        const vLower = rawVendor.toLowerCase();
-        return code === vLower || nickname === vLower || fullName === vLower || vLower.includes(nickname);
+        const cand1 = (contractorIdFromBill || rawVendor).toLowerCase();
+        const cand2 = contractorNameFromBill.toLowerCase();
+        const cand3 = vendorOrPerson.toLowerCase();
+        return (
+          (code && (code === cand1 || code === cand3)) ||
+          (nickname && (nickname === cand1 || nickname === cand2 || nickname === cand3 || cand3.includes(nickname))) ||
+          (fullName && (fullName === cand1 || fullName === cand2 || fullName === cand3 || cand3.includes(fullName)))
+        );
       })
     : null;
 
-  const matchedStore = !matchedContractor && rawVendor
+  const matchedStore = !isContractorBill && rawVendor
     ? storeRows.find((s) => {
         const code = text(s["id_store"] || s.id).toLowerCase();
-        const name = text(s["ชื่อร้านค้า"] || s["ชื่อเต็ม"]).toLowerCase();
-        const vLower = rawVendor.toLowerCase();
-        return code === vLower || name === vLower || vLower.includes(name);
+        const shortName = text(s["ชื่อร้านค้า"]).toLowerCase();
+        const fullName = text(s["ชื่อเต็ม"]).toLowerCase();
+        const cand1 = (storeIdFromBill || rawVendor).toLowerCase();
+        const cand2 = storeNameFromBill.toLowerCase();
+        const cand3 = vendorOrPerson.toLowerCase();
+        return (
+          (code && (code === cand1 || code === cand3)) ||
+          (shortName && (shortName === cand1 || shortName === cand2 || shortName === cand3 || cand3.includes(shortName))) ||
+          (fullName && (fullName === cand1 || fullName === cand2 || fullName === cand3 || cand3.includes(fullName)))
+        );
       })
     : null;
 
-  const vendorDisplay = rawVendor || "-";
+  let vendorDisplay = rawVendor || "-";
+  let vendorSubText = "";
+
+  if (matchedStore) {
+    const code = text(matchedStore["id_store"] || matchedStore.id || storeIdFromBill);
+    const sName = text(matchedStore["ชื่อร้านค้า"] || storeNameFromBill || matchedStore.name);
+    const fullName = text(matchedStore["ชื่อเต็ม"]);
+
+    if (code && sName && code.toLowerCase() !== sName.toLowerCase()) {
+      vendorDisplay = `${code} - ${sName}`;
+    } else {
+      vendorDisplay = sName || code || rawVendor;
+    }
+
+    if (fullName && fullName !== sName && fullName !== vendorDisplay) {
+      vendorSubText = fullName;
+    }
+  } else if (!isContractorBill && storeNameFromBill) {
+    if (storeIdFromBill && storeIdFromBill.toLowerCase() !== storeNameFromBill.toLowerCase()) {
+      vendorDisplay = `${storeIdFromBill} - ${storeNameFromBill}`;
+    } else {
+      vendorDisplay = storeNameFromBill;
+    }
+  } else if (matchedContractor) {
+    const code = text(matchedContractor["id_Contractor"] || matchedContractor.id || contractorIdFromBill);
+    const nickname = text(matchedContractor["ชื่อเล่น"] || contractorNameFromBill || matchedContractor.name);
+    const fullName = text(matchedContractor["ชื่อ-นามสกุล"]);
+
+    if (code && nickname && code.toLowerCase() !== nickname.toLowerCase()) {
+      vendorDisplay = `${code} - ${nickname}`;
+    } else {
+      vendorDisplay = nickname || code || rawVendor;
+    }
+
+    if (fullName && fullName !== nickname && fullName !== vendorDisplay) {
+      vendorSubText = fullName;
+    }
+  } else if (isContractorBill && contractorNameFromBill) {
+    if (contractorIdFromBill && contractorIdFromBill.toLowerCase() !== contractorNameFromBill.toLowerCase()) {
+      vendorDisplay = `${contractorIdFromBill} - ${contractorNameFromBill}`;
+    } else {
+      vendorDisplay = contractorNameFromBill;
+    }
+  }
+
   const contractorKey = matchedContractor
-    ? text(matchedContractor["id_Contractor"] || matchedContractor["ชื่อเล่น"] || rawVendor)
+    ? text(matchedContractor["id_Contractor"] || matchedContractor.id || matchedContractor["ชื่อเล่น"] || rawVendor)
     : rawVendor;
   const storeKey = matchedStore
-    ? text(matchedStore["id_store"] || matchedStore["ชื่อร้านค้า"] || rawVendor)
+    ? text(matchedStore["id_store"] || matchedStore.id || matchedStore["ชื่อร้านค้า"] || rawVendor)
     : rawVendor;
 
   const vendorLink = rawVendor
-    ? matchedContractor
+    ? (matchedContractor || isContractorBill)
       ? `/views/contractors/${encodeURIComponent(contractorKey)}`
       : `/views/stores/${encodeURIComponent(storeKey)}`
     : "";
@@ -142,6 +219,7 @@ export default async function BillDetailPage({ params }: BillDetailPageProps) {
       requesterLink={requesterLink}
       createdByDisplay={createdByDisplay}
       vendorDisplay={vendorDisplay}
+      vendorSubText={vendorSubText}
       vendorLink={vendorLink}
       documentData={documentData}
     />

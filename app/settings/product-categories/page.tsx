@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useState } from "react";
 import {
@@ -19,8 +19,7 @@ import {
   Truck,
   FolderKanban,
   Settings2,
-  X,
-  Fuel
+  X
 } from "lucide-react";
 import { showConfirm, showToast } from "@/components/shared/ToastProvider";
 
@@ -83,46 +82,6 @@ function getGroupIcon(groupName: string) {
   return <Package size={13} className="text-slate-600 shrink-0" />;
 }
 
-function getCostControlPillarBadge(code: string, name: string) {
-  if (code === "101" || name.includes("น้ำมัน")) {
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
-        <Fuel size={11} className="text-amber-600" />
-        <span>น้ำมัน (Site Ops)</span>
-      </span>
-    );
-  }
-  if (code === "102" || name.includes("ขนส่ง")) {
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-cyan-50 text-cyan-800 border border-cyan-200">
-        <Truck size={11} className="text-cyan-600" />
-        <span>โลจิสติกส์ & ขนส่ง</span>
-      </span>
-    );
-  }
-  if (code === "103" || name.includes("เครื่องจักร")) {
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-indigo-50 text-indigo-800 border border-indigo-200">
-        <Building2 size={11} className="text-indigo-600" />
-        <span>เครื่องจักร (Equipment)</span>
-      </span>
-    );
-  }
-  if (code === "200" || name.includes("ดำเนินการ")) {
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
-        <FolderKanban size={11} className="text-slate-600" />
-        <span>ดำเนินการ & โสหุ้ย</span>
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
-      <Package size={11} className="text-emerald-600" />
-      <span>ค่าของ (Materials)</span>
-    </span>
-  );
-}
 
 export default function ProductCategoryMasterPage() {
   const [groups, setGroups] = useState<string[]>(DEFAULT_GROUPS);
@@ -437,7 +396,6 @@ export default function ProductCategoryMasterPage() {
               <tr className="bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">
                 <th className="py-2.5 px-3 w-20 text-center border-r border-slate-200">รหัส (Code)</th>
                 <th className="py-2.5 px-3 border-r border-slate-200">ชื่อหมวดสินค้า (Name)</th>
-                <th className="py-2.5 px-3 border-r border-slate-200">ประเภทควบคุมต้นทุน (Pillar)</th>
                 <th className="py-2.5 px-3 border-r border-slate-200">กลุ่มประเภทงาน (Group)</th>
                 <th className="py-2.5 px-3 border-r border-slate-200">คำอธิบายขอบเขตงาน</th>
                 <th className="py-2.5 px-3 w-24 text-center">จัดการ</th>
@@ -446,14 +404,14 @@ export default function ProductCategoryMasterPage() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="py-6 text-center text-slate-400 text-xs">
+                  <td colSpan={5} className="py-6 text-center text-slate-400 text-xs">
                     <RefreshCw size={16} className="animate-spin mx-auto mb-1 text-slate-500" />
                     <span>กำลังโหลดข้อมูลหมวดสินค้า...</span>
                   </td>
                 </tr>
               ) : filteredCategories.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-6 text-center text-slate-400 text-xs">
+                  <td colSpan={5} className="py-6 text-center text-slate-400 text-xs">
                     ไม่พบหมวดสินค้าที่ตรงกับคำค้นหา
                   </td>
                 </tr>
@@ -465,9 +423,6 @@ export default function ProductCategoryMasterPage() {
                     </td>
                     <td className="py-2 px-3 font-medium text-slate-900 border-r border-slate-100">
                       {cat.name}
-                    </td>
-                    <td className="py-2 px-3 border-r border-slate-100">
-                      {getCostControlPillarBadge(cat.code, cat.name)}
                     </td>
                     <td className="py-2 px-3 border-r border-slate-100">
                       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700 border border-slate-200">

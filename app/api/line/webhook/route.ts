@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { replyTextMessage, recordDiscoveredLineGroup, recordSystemErrorLog } from "@/lib/line/line";
 import { handleLineCommand } from "@/lib/line/line-commands";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
@@ -52,7 +52,9 @@ export async function POST(req: NextRequest) {
 
         // Handle Text Message Commands
         if (event.type === "message" && event.message?.type === "text") {
-          const text = String(event.message.text || "").trim();
+          const text = String(event.message.text || "")
+            .replace(/[\u200B-\u200D\uFEFF\u00A0\u200E\u200F]/g, "")
+            .trim();
 
           // Delegate to centralized line-commands processor
           const handled = await handleLineCommand(text, replyToken, targetId, userId);
