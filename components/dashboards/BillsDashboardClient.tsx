@@ -355,7 +355,7 @@ export function BillsDashboardClient({
               placeholder="ค้นหาบิล, ร้านค้า, โครงการ..."
               value={searchInput}
               onChange={event => setSearchInput(event.target.value)}
-              className="w-full bg-slate-50 text-slate-800 text-xs pl-8 pr-7 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-400 placeholder:text-slate-400"
+              className="w-full h-8 bg-slate-50 text-slate-800 text-xs pl-8 pr-7 rounded-lg border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-400 placeholder:text-slate-400"
             />
             {searchInput && (
               <X size={14} className="absolute right-2 text-slate-400 cursor-pointer" onClick={() => setSearchInput("")} />
@@ -364,7 +364,7 @@ export function BillsDashboardClient({
           <button
             type="button"
             onClick={() => setShowMobileFilters(cur => !cur)}
-            className={`p-1.5 rounded-lg border flex items-center gap-1 text-xs shrink-0 cursor-pointer transition-all ${
+            className={`h-8 px-2.5 rounded-lg border flex items-center gap-1 text-xs shrink-0 cursor-pointer transition-all ${
               showMobileFilters || activeFilterCount > 0
                 ? "bg-emerald-800 text-white border-emerald-800 shadow-xs"
                 : "bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-200"
@@ -381,7 +381,7 @@ export function BillsDashboardClient({
           <button
             type="button"
             onClick={() => setSortDesc(cur => !cur)}
-            className="p-1.5 bg-slate-100 text-slate-700 rounded-lg border border-slate-200 flex items-center gap-1 text-xs shrink-0 cursor-pointer active:bg-slate-200"
+            className="h-8 w-8 bg-slate-100 text-slate-700 rounded-lg border border-slate-200 flex items-center justify-center text-xs shrink-0 cursor-pointer active:bg-slate-200"
             title="สลับการเรียงลำดับ"
           >
             {sortDesc ? <ArrowDownWideNarrow size={14} /> : <ArrowUpWideNarrow size={14} />}
@@ -389,7 +389,7 @@ export function BillsDashboardClient({
           <button
             type="button"
             onClick={() => window.dispatchEvent(new CustomEvent("open-bill-form"))}
-            className="px-2.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-lg flex items-center gap-1 shrink-0 shadow-xs ring-1 ring-emerald-400/50 active:scale-95 transition-all cursor-pointer"
+            className="h-8 px-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-lg flex items-center gap-1 shrink-0 shadow-xs ring-1 ring-emerald-400/50 active:scale-95 transition-all cursor-pointer"
             title="เพิ่มบิล"
           >
             <Plus size={15} className="stroke-[2.5]" />
@@ -523,7 +523,6 @@ export function BillsDashboardClient({
         </div>
       </div>
 
-      {/* 2. DESKTOP FILTER TOOLBAR */}
       {/* 2. DESKTOP UNIFIED COMMAND BAR RIBBON */}
       <div className="hidden md:flex border border-slate-200/90 rounded-xl p-2 bg-white items-center justify-between gap-2 text-xs shadow-2xs flex-wrap">
         {/* Left: Search & Filter Controls Ribbon */}
@@ -536,7 +535,7 @@ export function BillsDashboardClient({
               placeholder="ค้นหาบิล, ร้านค้า, โครงการ..."
               value={searchInput}
               onChange={event => setSearchInput(event.target.value)}
-              className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 text-xs pl-8 pr-7 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 placeholder:text-slate-400 transition-all"
+              className="w-full h-8 bg-slate-50 hover:bg-white focus:bg-white text-slate-800 text-xs pl-8 pr-7 rounded-lg border border-slate-200 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 placeholder:text-slate-400 transition-all flex items-center"
             />
             {searchInput && (
               <X size={13} className="absolute right-2 text-slate-400 cursor-pointer hover:text-slate-600" onClick={() => setSearchInput("")} />
@@ -550,7 +549,7 @@ export function BillsDashboardClient({
             <select
               value={filters.requester}
               onChange={event => updateFilter("requester", event.target.value)}
-              className={`text-xs pl-2.5 pr-6 py-1.5 rounded-lg border appearance-none cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500/20 ${
+              className={`h-8 text-xs pl-2.5 pr-6 rounded-lg border appearance-none cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500/20 flex items-center ${
                 filters.requester
                   ? "bg-emerald-50/90 border-emerald-300 text-emerald-900 font-semibold shadow-2xs"
                   : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700 hover:border-slate-300"
@@ -578,7 +577,7 @@ export function BillsDashboardClient({
                 type="date"
                 value={filters.date}
                 onChange={event => updateFilter("date", event.target.value)}
-                className={`text-xs pl-7 pr-6 py-1.5 rounded-lg border cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500/20 ${
+                className={`h-8 text-xs pl-7 pr-6 rounded-lg border cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500/20 flex items-center ${
                   filters.date
                     ? "bg-emerald-50/90 border-emerald-300 text-emerald-900 font-semibold shadow-2xs"
                     : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700 hover:border-slate-300"
@@ -600,7 +599,7 @@ export function BillsDashboardClient({
               <button
                 type="button"
                 onClick={() => updateFilter("date", todayIso)}
-                className="px-2 py-1 bg-slate-100 hover:bg-emerald-50 hover:text-emerald-700 text-slate-600 rounded-md text-[11px] font-medium border border-slate-200 transition cursor-pointer whitespace-nowrap"
+                className="h-8 px-2.5 bg-slate-100 hover:bg-emerald-50 hover:text-emerald-700 text-slate-600 rounded-lg text-xs font-medium border border-slate-200 transition cursor-pointer whitespace-nowrap flex items-center justify-center shadow-2xs"
                 title="กรองเฉพาะวันนี้"
               >
                 วันนี้
@@ -613,7 +612,7 @@ export function BillsDashboardClient({
             <select
               value={filters.bill}
               onChange={event => updateFilter("bill", event.target.value)}
-              className={`text-xs pl-2.5 pr-6 py-1.5 rounded-lg border appearance-none cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500/20 ${
+              className={`h-8 text-xs pl-2.5 pr-6 rounded-lg border appearance-none cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500/20 flex items-center ${
                 filters.bill
                   ? "bg-emerald-50/90 border-emerald-300 text-emerald-900 font-semibold shadow-2xs"
                   : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700 hover:border-slate-300"
@@ -632,7 +631,7 @@ export function BillsDashboardClient({
             <select
               value={filters.status}
               onChange={event => updateFilter("status", event.target.value)}
-              className={`text-xs pl-2.5 pr-6 py-1.5 rounded-lg border appearance-none cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500/20 ${
+              className={`h-8 text-xs pl-2.5 pr-6 rounded-lg border appearance-none cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500/20 flex items-center ${
                 filters.status
                   ? "bg-emerald-50/90 border-emerald-300 text-emerald-900 font-semibold shadow-2xs"
                   : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700 hover:border-slate-300"
@@ -656,10 +655,10 @@ export function BillsDashboardClient({
                 setSearchInput("");
                 setFilters({ requester: "", date: "", bill: "", status: "", search: "" });
               }}
-              className="px-2 py-1 text-[11px] text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200 rounded-md flex items-center gap-1 transition cursor-pointer whitespace-nowrap font-medium"
+              className="h-8 px-2.5 text-xs text-rose-600 hover:text-rose-700 bg-rose-50/80 hover:bg-rose-100 border border-rose-200 rounded-lg flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap font-medium shadow-2xs"
               title="ล้างตัวกรองทั้งหมด"
             >
-              <RotateCcw size={11} />
+              <RotateCcw size={13} className="shrink-0" />
               <span>ล้างกรอง</span>
             </button>
           ) : null}
@@ -670,7 +669,7 @@ export function BillsDashboardClient({
           <button
             type="button"
             onClick={() => setSortDesc(cur => !cur)}
-            className="px-2.5 py-1.5 border border-slate-200 bg-slate-50 hover:bg-white hover:border-slate-300 text-slate-700 rounded-lg text-xs font-medium flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap shadow-2xs"
+            className="h-8 px-2.5 border border-slate-200 bg-slate-50 hover:bg-white hover:border-slate-300 text-slate-700 rounded-lg text-xs font-medium flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap shadow-2xs"
             title="สลับการเรียงลำดับ"
           >
             {sortDesc ? <ArrowDownWideNarrow size={14} className="text-slate-500" /> : <ArrowUpWideNarrow size={14} className="text-slate-500" />}
@@ -682,8 +681,8 @@ export function BillsDashboardClient({
             form={form}
             title="เพิ่มบิล"
             buttonLabel="เพิ่มบิล"
-            buttonClassName="px-4 py-1.5 bg-gradient-to-r from-emerald-600 via-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs sm:text-[13px] rounded-lg flex items-center gap-1.5 shadow-md shadow-emerald-950/20 hover:shadow-lg hover:shadow-emerald-900/30 ring-2 ring-emerald-400/60 hover:ring-emerald-300 active:scale-95 transition-all cursor-pointer whitespace-nowrap"
-            buttonIcon={<Plus size={16} className="text-white stroke-[2.8]" />}
+            buttonClassName="h-8 px-3.5 bg-gradient-to-r from-emerald-600 via-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 shadow-md shadow-emerald-950/20 hover:shadow-lg hover:shadow-emerald-900/30 ring-2 ring-emerald-400/60 hover:ring-emerald-300 active:scale-95 transition-all cursor-pointer whitespace-nowrap"
+            buttonIcon={<Plus size={15} className="text-white stroke-[2.8]" />}
             submitPath="/api/bills"
             openEventName="open-bill-form"
           />

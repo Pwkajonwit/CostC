@@ -27,9 +27,11 @@ const PRODUCT_BUDGET_MAP: Record<string, string> = {
   "101 น้ำมัน": "งบไม่เกินน้ำมัน",
   "102 ค่าขนส่ง": "งบไม่เกินค่าขนส่ง",
   "103 เครื่องจักร": "งบไม่เกินเครื่องจักร",
+  "104 ซ่อมรถ": "งบไม่เกินซ่อมรถ",
   "200 ดำเนินการ(อื่นๆ)": "งบไม่เกินดำเนินการ",
   "ค่าขนส่ง": "งบไม่เกินค่าขนส่ง",
   "ดำเนินการ(อื่นๆ)": "งบไม่เกินดำเนินการ",
+  "ซ่อมรถ": "งบไม่เกินซ่อมรถ",
 
   // Clean names without prefix numbers
   "ปูน/ทราย/หิน": "งบไม่เกินปูนทรายหิน",
@@ -170,8 +172,22 @@ export function checkCategoryBudgetCap(
 
   if (isNonMaterialCategory && CATEGORY_BUDGET_MAP[categoryVal]) {
     const fieldName = CATEGORY_BUDGET_MAP[categoryVal];
-    const limit = toNumber(project[fieldName]);
-    if (limit > 0) {
+    let limit = toNumber(project?.[fieldName]);
+    if (limit <= 0 && fieldName === "งบไม่เกินอื่นๆ") {
+      limit = toNumber(project?.["งบไม่เกินดำเนินการ"]);
+    } else if (limit <= 0 && fieldName === "งบไม่เกินดำเนินการ") {
+      limit = toNumber(project?.["งบไม่เกินอื่นๆ"]);
+    } else if (limit <= 0 && fieldName === "งบไม่เกินซ่อมรถ") {
+      // หากโครงการไม่ได้ตั้งงบซ่อมรถ ให้ถอยกลับมาคุมที่ "งบไม่เกินค่าของ (ภาพรวม)" เป็นอันดับแรก หรือน้ำมัน/ดำเนินการ
+      if (toNumber(project?.["งบไม่เกินค่าของ"]) > 0) {
+        targetBudgetField = "งบไม่เกินค่าของ";
+        categoryLabel = "ค่าของ (ภาพรวม)";
+        isProductLevel = false;
+      } else {
+        limit = toNumber(project?.["งบไม่เกินน้ำมัน"] || project?.["งบไม่เกินดำเนินการ"]);
+      }
+    }
+    if (!targetBudgetField && limit > 0) {
       targetBudgetField = fieldName;
       categoryLabel = categoryVal;
       isProductLevel = false;
@@ -235,7 +251,22 @@ export function checkCategoryBudgetCap(
 
   if (!targetBudgetField) return defaultResult;
 
-  const budgetLimit = toNumber(project[targetBudgetField]);
+  let budgetLimit = toNumber(project[targetBudgetField]);
+  if (budgetLimit <= 0) {
+    if (targetBudgetField === "งบไม่เกินอื่นๆ") {
+      budgetLimit = toNumber(project["งบไม่เกินดำเนินการ"]);
+    } else if (targetBudgetField === "งบไม่เกินดำเนินการ") {
+      budgetLimit = toNumber(project["งบไม่เกินอื่นๆ"]);
+    } else if (targetBudgetField === "งบไม่เกินซ่อมรถ") {
+      if (toNumber(project["งบไม่เกินค่าของ"]) > 0) {
+        budgetLimit = toNumber(project["งบไม่เกินค่าของ"]);
+        targetBudgetField = "งบไม่เกินค่าของ";
+        categoryLabel = "ค่าของ (ภาพรวม)";
+      } else {
+        budgetLimit = toNumber(project["งบไม่เกินน้ำมัน"] || project["งบไม่เกินดำเนินการ"]);
+      }
+    }
+  }
   if (budgetLimit <= 0) return defaultResult;
 
   const currentProjectId = String(project["ID Project"] || "").trim();
@@ -298,21 +329,36 @@ export function checkCategoryBudgetCap(
           )
         );
       } else if (targetBudgetField === "งบไม่เกินค่าของ") {
-        isMatch = Boolean(bCat === "1.ค่าของ" || bCat === "ค่าของ" || (!bCat && bProd) || toNumber(b["ค่าของ"]) > 0);
+        const hasSeparateRepairBudget = toNumber(project["งบไม่เกินซ่อมรถ"]) > 0;
+        const isExcludedFromMaterial = Boolean(
+          bCat === "4.น้ำมัน" || (hasSeparateRepairBudget && bCat === "5.ซ่อมรถ") || bCat === "6.เครื่องจักร" || bCat === "8.อื่นๆ" ||
+          toNumber(b["น้ำมัน"]) > 0 || (hasSeparateRepairBudget && toNumber(b["ซ่อมรถ"]) > 0) || toNumber(b["เครื่องจักร"]) > 0 || toNumber(b["อื่นๆ"]) > 0 ||
+          (bProd && (
+            bProd === "101 น้ำมัน" || bProd === "103 เครื่องจักร" || (hasSeparateRepairBudget && (bProd === "104 ซ่อมรถ" || bProd.startsWith("104") || bProd.includes("ซ่อมรถ"))) || bProd === "200 ดำเนินการ(อื่นๆ)" ||
+            bProd.startsWith("101") || bProd.startsWith("103") || bProd.startsWith("200")
+          ))
+        );
+        isMatch = !isExcludedFromMaterial && Boolean(
+          bCat === "1.ค่าของ" || bCat === "ค่าของ" || (!bCat && bProd) || toNumber(b["ค่าของ"]) > 0 ||
+          (!hasSeparateRepairBudget && (bCat === "5.ซ่อมรถ" || bCat === "ซ่อมรถ" || toNumber(b["ซ่อมรถ"]) > 0 || (bProd && (bProd === "104 ซ่อมรถ" || bProd.includes("ซ่อมรถ") || bProd.startsWith("104")))))
+        );
       } else if (targetBudgetField === "งบไม่เกินค่าแรง") {
         isMatch = Boolean(bCat === "2.ค่าแรง" || bCat === "ค่าแรง" || toNumber(b["ค่าแรง"]) > 0);
       } else if (targetBudgetField === "งบไม่เกินพนักงาน") {
         isMatch = Boolean(bCat === "3.พนักงาน" || bCat === "พนักงาน" || toNumber(b["พนักงาน"]) > 0);
       } else if (targetBudgetField === "งบไม่เกินน้ำมัน") {
-        isMatch = Boolean(bCat === "4.น้ำมัน" || bCat === "น้ำมัน" || toNumber(b["น้ำมัน"]) > 0);
+        isMatch = Boolean(bCat === "4.น้ำมัน" || bCat === "น้ำมัน" || toNumber(b["น้ำมัน"]) > 0 || (bProd && (bProd === "101 น้ำมัน" || bProd.includes("น้ำมัน") || bProd.startsWith("101"))));
       } else if (targetBudgetField === "งบไม่เกินซ่อมรถ") {
-        isMatch = Boolean(bCat === "5.ซ่อมรถ" || bCat === "ซ่อมรถ" || toNumber(b["ซ่อมรถ"]) > 0);
+        isMatch = Boolean(bCat === "5.ซ่อมรถ" || bCat === "ซ่อมรถ" || toNumber(b["ซ่อมรถ"]) > 0 || (bProd && (bProd === "104 ซ่อมรถ" || bProd.includes("ซ่อมรถ") || bProd.startsWith("104"))));
       } else if (targetBudgetField === "งบไม่เกินเครื่องจักร") {
-        isMatch = Boolean(bCat === "6.เครื่องจักร" || bCat === "เครื่องจักร" || toNumber(b["เครื่องจักร"]) > 0);
+        isMatch = Boolean(bCat === "6.เครื่องจักร" || bCat === "เครื่องจักร" || toNumber(b["เครื่องจักร"]) > 0 || (bProd && (bProd === "103 เครื่องจักร" || bProd.includes("เครื่องจักร") || bProd.startsWith("103"))));
       } else if (targetBudgetField === "งบไม่เกินเครื่องมือ") {
-        isMatch = Boolean(bCat === "7.เครื่องมือ" || bCat === "เครื่องมือ" || toNumber(b["เครื่องมือ"]) > 0);
-      } else if (targetBudgetField === "งบไม่เกินอื่นๆ") {
-        isMatch = Boolean(bCat === "8.อื่นๆ" || bCat === "อื่นๆ" || toNumber(b["อื่นๆ"]) > 0);
+        isMatch = Boolean(bCat === "7.เครื่องมือ" || bCat === "เครื่องมือ" || toNumber(b["เครื่องมือ"]) > 0 || (b["ชื่อเครื่องมือ"] && String(b["ชื่อเครื่องมือ"]).trim() !== ""));
+      } else if (targetBudgetField === "งบไม่เกินอื่นๆ" || targetBudgetField === "งบไม่เกินดำเนินการ") {
+        isMatch = Boolean(
+          bCat === "8.อื่นๆ" || bCat === "อื่นๆ" || toNumber(b["อื่นๆ"]) > 0 ||
+          (bProd && (bProd === "200 ดำเนินการ(อื่นๆ)" || bProd.includes("ดำเนินการ") || bProd.startsWith("200")))
+        );
       } else {
         isMatch = Boolean(categoryVal && (bCat === categoryVal || bCat.replace(/^\d+\.\s*/, "") === categoryVal.replace(/^\d+\.\s*/, "")));
       }

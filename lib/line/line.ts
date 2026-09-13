@@ -3198,9 +3198,11 @@ export const PRODUCT_BUDGET_FIELD_MAP: Record<string, string> = {
   "101 น้ำมัน": "งบไม่เกินน้ำมัน",
   "102 ค่าขนส่ง": "งบไม่เกินค่าขนส่ง",
   "103 เครื่องจักร": "งบไม่เกินเครื่องจักร",
+  "104 ซ่อมรถ": "งบไม่เกินซ่อมรถ",
   "200 ดำเนินการ(อื่นๆ)": "งบไม่เกินดำเนินการ",
   "ค่าขนส่ง": "งบไม่เกินค่าขนส่ง",
   "ดำเนินการ(อื่นๆ)": "งบไม่เกินดำเนินการ",
+  "ซ่อมรถ": "งบไม่เกินซ่อมรถ",
 
   // Clean names
   "ปูน/ทราย/หิน": "งบไม่เกินปูนทรายหิน",
@@ -3268,6 +3270,7 @@ export function resolveProductBudgetField(raw: string): string {
   if (trimmed.includes("ดิน")) return "งบไม่เกินดิน";
   if (trimmed.includes("เตรียมงาน")) return "งบไม่เกินเตรียมงาน";
   if (trimmed.includes("น้ำมัน")) return "งบไม่เกินน้ำมัน";
+  if (trimmed.includes("ซ่อมรถ")) return "งบไม่เกินซ่อมรถ";
   if (trimmed.includes("ขนส่ง")) return "งบไม่เกินค่าขนส่ง";
   if (trimmed.includes("เครื่องจักร")) return "งบไม่เกินเครื่องจักร";
   if (trimmed.includes("เครื่องมือ")) return "งบไม่เกินเครื่องมือ";

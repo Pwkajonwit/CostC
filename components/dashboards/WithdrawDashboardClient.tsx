@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Banknote, Check, ChevronLeft, ChevronRight, Download, Filter, List, LoaderCircle, RotateCw, Search, Send, X } from "lucide-react";
+import { Banknote, Check, ChevronLeft, ChevronRight, Download, Filter, List, LoaderCircle, RotateCcw, RotateCw, Search, Send, X } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { showToast } from "@/components/shared/ToastProvider";
 import { money, toNumber } from "@/lib/utils/numbers";
@@ -492,9 +492,9 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
       </div>
 
       {/* 2. FILTER TOOLBAR & SEARCH (UNIFIED SINGLE ROW) */}
-      <div className="border border-slate-200 rounded-xl md:rounded-md p-2 bg-white flex flex-col md:flex-row md:items-center justify-between gap-2 text-xs shadow-2xs">
+      <div className="border border-slate-200/90 rounded-xl p-2 bg-white flex flex-col md:flex-row md:items-center justify-between gap-2 text-xs shadow-2xs">
         {/* Left Section: Search Input + Filters in the same row */}
-        <div className="flex items-center gap-2 flex-wrap min-w-0">
+        <div className="flex items-center gap-2 flex-wrap min-w-0 flex-1">
           {/* Universal Search Bar (Compact width) */}
           <div className="relative flex items-center w-full md:w-44 lg:w-56 shrink-0">
             <Search size={14} className="absolute left-2.5 text-slate-400 pointer-events-none" />
@@ -503,10 +503,10 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
               placeholder="ค้นหา..."
               value={searchInput}
               onChange={event => updateFilter("search", event.target.value)}
-              className="w-full bg-slate-50 md:bg-white text-slate-800 text-xs pl-8 pr-7 py-1.5 rounded-lg md:rounded-md border border-slate-200 md:border-slate-300 focus:outline-none focus:bg-white focus:border-slate-400 placeholder:text-slate-400"
+              className="w-full h-8 bg-slate-50 md:bg-white text-slate-800 text-xs pl-8 pr-7 rounded-lg border border-slate-200 focus:outline-none focus:bg-white focus:border-slate-400 placeholder:text-slate-400 transition-all flex items-center"
             />
             {searchInput && (
-              <X size={14} className="absolute right-2 text-slate-400 cursor-pointer hover:text-slate-600" onClick={() => updateFilter("search", "")} />
+              <X size={13} className="absolute right-2 text-slate-400 cursor-pointer hover:text-slate-600" onClick={() => updateFilter("search", "")} />
             )}
           </div>
 
@@ -520,7 +520,11 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
               <select
                 value={filters.requester}
                 onChange={event => updateFilter("requester", event.target.value)}
-                className="bg-white border border-slate-300 text-xs text-slate-800 px-2 py-1 rounded-md focus:outline-none cursor-pointer max-w-[130px] truncate"
+                className={`h-8 text-xs px-2.5 rounded-lg border cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500/20 max-w-[150px] truncate flex items-center ${
+                  filters.requester
+                    ? "bg-emerald-50/90 border-emerald-300 text-emerald-900 font-semibold shadow-2xs"
+                    : "bg-white border-slate-200 text-slate-700 hover:border-slate-300"
+                }`}
               >
                 <option value="">ทั้งหมด</option>
                 {peopleRows.map(row => {
@@ -538,13 +542,17 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
                 type="date"
                 value={filters.date}
                 onChange={event => updateFilter("date", event.target.value)}
-                className="bg-white border border-slate-300 text-xs text-slate-800 px-2 py-1 rounded-md focus:outline-none cursor-pointer"
+                className={`h-8 text-xs px-2.5 rounded-lg border cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500/20 flex items-center ${
+                  filters.date
+                    ? "bg-emerald-50/90 border-emerald-300 text-emerald-900 font-semibold shadow-2xs"
+                    : "bg-white border-slate-200 text-slate-700 hover:border-slate-300"
+                }`}
               />
               {filters.date ? (
                 <button
                   type="button"
                   onClick={() => updateFilter("date", "")}
-                  className="text-xs text-slate-500 hover:text-slate-800 px-1.5 py-0.5 rounded border border-slate-200 bg-slate-50 hover:bg-slate-100 transition cursor-pointer"
+                  className="h-8 px-2.5 text-xs text-slate-600 hover:text-slate-800 rounded-lg border border-slate-200 bg-slate-100 hover:bg-slate-200 transition cursor-pointer flex items-center justify-center font-medium shadow-2xs"
                   title="ดูทุกวัน (ไม่จำกัดวันที่)"
                 >
                   ทั้งหมด
@@ -553,7 +561,7 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
                 <button
                   type="button"
                   onClick={() => updateFilter("date", getLocalTodayString())}
-                  className="text-xs text-slate-500 hover:text-slate-800 px-1.5 py-0.5 rounded border border-slate-200 bg-slate-50 hover:bg-slate-100 transition cursor-pointer"
+                  className="h-8 px-2.5 text-xs text-slate-600 hover:text-emerald-700 rounded-lg border border-slate-200 bg-slate-100 hover:bg-emerald-50 transition cursor-pointer flex items-center justify-center font-medium shadow-2xs"
                   title="กรองเฉพาะวันนี้"
                 >
                   วันนี้
@@ -567,7 +575,11 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
               <select
                 value={filters.bill}
                 onChange={event => handleBillFilterChange(event.target.value)}
-                className="bg-white border border-slate-300 text-xs text-slate-800 px-2 py-1 rounded-md focus:outline-none cursor-pointer"
+                className={`h-8 text-xs px-2.5 rounded-lg border cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500/20 flex items-center ${
+                  filters.bill
+                    ? "bg-emerald-50/90 border-emerald-300 text-emerald-900 font-semibold shadow-2xs"
+                    : "bg-white border-slate-200 text-slate-700 hover:border-slate-300"
+                }`}
               >
                 <option value="">ทั้งหมด</option>
                 <option value="หลัก">หลัก</option>
@@ -579,10 +591,10 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
                 <button
                   type="button"
                   onClick={() => handleBillFilterChange(filters.bill === "หลัก" ? "" : "หลัก")}
-                  className={`px-2 py-1 rounded-md text-xs font-medium border transition cursor-pointer active:scale-95 ${
+                  className={`h-8 px-2.5 rounded-lg text-xs font-medium border transition cursor-pointer active:scale-95 flex items-center justify-center shadow-2xs ${
                     filters.bill === "หลัก"
-                      ? "bg-[#0b3531] text-white border-[#0b3531] shadow-2xs font-semibold"
-                      : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                      ? "bg-[#0b3531] text-white border-[#0b3531] font-semibold"
+                      : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:text-slate-900"
                   }`}
                   title="กรองเฉพาะบิลหลัก (กดซ้ำเพื่อแสดงทั้งหมด)"
                 >
@@ -591,10 +603,10 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
                 <button
                   type="button"
                   onClick={() => handleBillFilterChange(filters.bill === "ย่อย" ? "" : "ย่อย")}
-                  className={`px-2 py-1 rounded-md text-xs font-medium border transition cursor-pointer active:scale-95 ${
+                  className={`h-8 px-2.5 rounded-lg text-xs font-medium border transition cursor-pointer active:scale-95 flex items-center justify-center shadow-2xs ${
                     filters.bill === "ย่อย"
-                      ? "bg-[#0b3531] text-white border-[#0b3531] shadow-2xs font-semibold"
-                      : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                      ? "bg-[#0b3531] text-white border-[#0b3531] font-semibold"
+                      : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:text-slate-900"
                   }`}
                   title="กรองเฉพาะบิลย่อย (กดซ้ำเพื่อแสดงทั้งหมด)"
                 >
@@ -602,16 +614,32 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
                 </button>
               </div>
             </div>
+
+            {/* Reset Filters */}
+            {(filters.requester || filters.date || filters.bill || searchInput) ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchInput("");
+                  setFilters({ requester: "", date: "", bill: "", search: "" });
+                }}
+                className="h-8 px-2.5 text-xs text-rose-600 hover:text-rose-700 bg-rose-50/80 hover:bg-rose-100 border border-rose-200 rounded-lg flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap font-medium shadow-2xs"
+                title="ล้างตัวกรองทั้งหมด"
+              >
+                <RotateCcw size={13} className="shrink-0" />
+                <span>ล้างกรอง</span>
+              </button>
+            ) : null}
           </div>
         </div>
 
         {/* Right Section: Action buttons (Resend, Export, Mobile Toggle) */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 justify-end ml-auto">
           {/* Mobile Filter Toggle Button */}
           <button
             type="button"
             onClick={() => setShowMobileFilters(!showMobileFilters)}
-            className="md:hidden px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg border border-slate-200 flex items-center gap-1 shrink-0 cursor-pointer active:bg-slate-200"
+            className="md:hidden h-8 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg border border-slate-200 flex items-center gap-1 text-xs shrink-0 cursor-pointer active:bg-slate-200 font-medium"
           >
             <Filter size={13} />
             <span>{showMobileFilters ? "ซ่อน" : "ตัวกรอง"}</span>
@@ -625,7 +653,7 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
               setSelectedRows(new Set());
               setActionError("");
             }}
-            className={`px-2.5 sm:px-3 py-1.5 rounded-lg border text-xs flex items-center gap-1.5 transition cursor-pointer shrink-0 shadow-2xs active:scale-95 ${
+            className={`h-8 px-3 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition cursor-pointer shrink-0 shadow-2xs active:scale-95 ${
               resendMode
                 ? "bg-amber-500 hover:bg-amber-600 text-white border-amber-600"
                 : "bg-white hover:bg-amber-50 text-amber-800 border-amber-300"
@@ -642,7 +670,7 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
             <button
               type="button"
               onClick={handleExportCsv}
-              className="px-2.5 sm:px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs flex items-center gap-1.5 transition cursor-pointer shrink-0 shadow-2xs active:scale-95"
+              className="h-8 px-3 rounded-lg border border-slate-200 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium flex items-center gap-1.5 transition cursor-pointer shrink-0 shadow-2xs active:scale-95"
               title="ส่งออกรายการขอเบิกเงินเป็นไฟล์ Excel (CSV)"
             >
               <Download size={13} className="text-slate-600" />
@@ -688,7 +716,7 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
               type="button"
               disabled={selectedRows.size === 0 || isResending}
               onClick={handleResendSelected}
-              className="flex-1 sm:flex-initial px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 shadow-xs disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
+              className="flex-1 sm:flex-initial h-8 px-3.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 shadow-xs disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
             >
               {isResending ? <LoaderCircle className="spin" size={14} /> : <Send size={14} />}
               <span>ส่งแจ้งเตือนซ้ำที่เลือก ({selectedRows.size})</span>
@@ -700,7 +728,7 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
                 setResendMode(false);
                 setSelectedRows(new Set());
               }}
-              className="hidden sm:flex px-3 py-2 text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg text-xs transition cursor-pointer"
+              className="hidden sm:flex h-8 px-3 items-center justify-center text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg text-xs font-medium transition cursor-pointer"
             >
               ยกเลิก
             </button>
@@ -740,7 +768,7 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
               type="button"
               onClick={() => approveSelected("ตั้งเบิก")}
               disabled={isBatchApproving}
-              className="flex-1 sm:flex-initial px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 shadow-2xs active:scale-95"
+              className="flex-1 sm:flex-initial h-8 px-3.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 shadow-2xs active:scale-95"
             >
               {isBatchApproving ? <LoaderCircle className="spin" size={14} /> : <Check size={14} />}
               <span>ตั้งเบิกที่เลือก ({selectedRows.size})</span>
@@ -751,7 +779,7 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
                 type="button"
                 onClick={() => approveSelected("อนุมัติ")}
                 disabled={isBatchApproving}
-                className="flex-1 sm:flex-initial px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 shadow-2xs active:scale-95"
+                className="flex-1 sm:flex-initial h-8 px-3.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 shadow-2xs active:scale-95"
               >
                 <Check size={14} />
                 <span>อนุมัติ ({selectedRows.size})</span>
@@ -761,7 +789,7 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
             <button
               type="button"
               onClick={() => setSelectedRows(new Set())}
-              className="hidden sm:flex px-3 py-2 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg text-xs font-medium transition cursor-pointer"
+              className="hidden sm:flex h-8 px-3 items-center justify-center text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg text-xs font-medium transition cursor-pointer"
             >
               ยกเลิก
             </button>
@@ -910,7 +938,7 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
                         type="button"
                         disabled={approvingRow === sheetRowId}
                         onClick={() => approveRow(row)}
-                        className="px-2 py-0.5 rounded text-xs flex items-center gap-1 transition cursor-pointer bg-sky-600 hover:bg-sky-700 text-white disabled:opacity-50 active:scale-95 shadow-2xs"
+                        className="h-7 px-2.5 rounded-lg text-xs font-medium flex items-center gap-1 transition cursor-pointer bg-sky-600 hover:bg-sky-700 text-white disabled:opacity-50 active:scale-95 shadow-2xs"
                       >
                         {approvingRow === sheetRowId ? (
                           <LoaderCircle className="spin" size={11} />
@@ -1139,7 +1167,7 @@ function WithdrawTable({
                           type="button"
                           disabled={approvingRow === sheetRowId}
                           onClick={() => onApprove(row)}
-                          className="px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1 transition cursor-pointer bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-50"
+                          className="h-7 px-2.5 rounded-lg text-xs font-medium flex items-center gap-1 transition cursor-pointer bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-50 shadow-2xs active:scale-95"
                         >
                           {approvingRow === sheetRowId ? (
                             <LoaderCircle className="spin" size={13} />

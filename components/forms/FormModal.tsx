@@ -2923,6 +2923,62 @@ function filterRefOptions(field: FieldSchema, options: RefOption[], values: Reco
   });
 }
 
+function isFuelProduct(prod: unknown): boolean {
+  const str = String(prod || "").trim();
+  return str === "101 น้ำมัน" || str.includes("น้ำมัน") || str.startsWith("101");
+}
+
+function isMachineProduct(prod: unknown): boolean {
+  const str = String(prod || "").trim();
+  return str === "103 เครื่องจักร" || str.includes("เครื่องจักร") || str.startsWith("103");
+}
+
+function isCarRepairProduct(prod: unknown): boolean {
+  const str = String(prod || "").trim();
+  return str === "104 ซ่อมรถ" || str.includes("ซ่อมรถ") || str.startsWith("104");
+}
+
+function isOtherExpenseProduct(prod: unknown): boolean {
+  const str = String(prod || "").trim();
+  return str === "200 ดำเนินการ(อื่นๆ)" || str.includes("ดำเนินการ") || str.startsWith("200");
+}
+
+const EXPENSE_CATEGORY_FIELD_MAP: Record<string, string> = {
+  "1.ค่าของ": "ค่าของ",
+  "ค่าของ": "ค่าของ",
+  "2.ค่าแรง": "ค่าแรง",
+  "ค่าแรง": "ค่าแรง",
+  "3.พนักงาน": "พนักงาน",
+  "พนักงาน": "พนักงาน",
+  "4.น้ำมัน": "น้ำมัน",
+  "น้ำมัน": "น้ำมัน",
+  "5.ซ่อมรถ": "ซ่อมรถ",
+  "ซ่อมรถ": "ซ่อมรถ",
+  "6.เครื่องจักร": "เครื่องจักร",
+  "เครื่องจักร": "เครื่องจักร",
+  "7.เครื่องมือ": "เครื่องมือ",
+  "เครื่องมือ": "เครื่องมือ",
+  "8.อื่นๆ": "อื่นๆ",
+  "อื่นๆ": "อื่นๆ",
+};
+
+const ALL_EXPENSE_FIELDS = ["ค่าของ", "ค่าแรง", "พนักงาน", "น้ำมัน", "ซ่อมรถ", "เครื่องจักร", "เครื่องมือ", "อื่นๆ"];
+
+function transferAmountToCategory(values: Record<string, string>, targetCategory: string) {
+  const targetField = EXPENSE_CATEGORY_FIELD_MAP[targetCategory];
+  if (!targetField) return;
+
+  // หากช่องปลายทางมียอดเงินอยู่แล้ว ไม่ต้องเขียนทับ
+  if (hasValue(values[targetField])) return;
+
+  // ค้นหายอดเงินเดิมจากช่องหมวดอื่นๆ เพื่อย้ายมาช่องใหม่
+  const sourceField = ALL_EXPENSE_FIELDS.find(f => f !== targetField && hasValue(values[f]));
+  if (sourceField) {
+    values[targetField] = values[sourceField];
+    values[sourceField] = "";
+  }
+}
+
 function getEnumValues(field: FieldSchema, values: Record<string, string>) {
   const defaultValues = field.values || [];
   if (field.dynamicValues !== "billTypeOptions" || !field.dynamicOptionSets) return defaultValues;
@@ -2930,6 +2986,12 @@ function getEnumValues(field: FieldSchema, values: Record<string, string>) {
   let dynamicList: string[] = [];
   if (values["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา") {
     dynamicList = field.dynamicOptionSets.contractor || [];
+  } else if (isFuelProduct(values["สินค้า"]) || isMachineProduct(values["สินค้า"]) || isCarRepairProduct(values["สินค้า"])) {
+    // เมื่อเลือก 101 น้ำมัน หรือ 103 เครื่องจักร หรือ 104 ซ่อมรถ ให้แสดงปุ่มหมวด storeDefault (4.น้ำมัน, 5.ซ่อมรถ, 6.เครื่องจักร)
+    dynamicList = field.dynamicOptionSets.storeDefault || [];
+  } else if (isOtherExpenseProduct(values["สินค้า"])) {
+    // เมื่อเลือก 200 ดำเนินการ(อื่นๆ) ให้แสดงปุ่มหมวด storeWithItem (1.ค่าของ, 7.เครื่องมือ, 8.อื่นๆ)
+    dynamicList = field.dynamicOptionSets.storeWithItem || ["1.ค่าของ", "7.เครื่องมือ", "8.อื่นๆ"];
   } else if (hasValue(values["สินค้า"])) {
     dynamicList = field.dynamicOptionSets.storeWithItem || [];
   } else {
@@ -2975,9 +3037,93 @@ function normalizeDependentValues(values: Record<string, string>, changedField: 
   }
 
   if (changedField === "สินค้า") {
+    const selectedProd = String(values["สินค้า"] || "").trim();
+    if (isFuelProduct(selectedProd)) {
+      // Auto-convert: ถ้าเลือก 101 น้ำมัน ให้สลับประเภทเป็น 4.น้ำมัน ทันที พร้อมย้ายยอดเงิน
+      values["ประเภท"] = "4.น้ำมัน";
+      transferAmountToCategory(values, "4.น้ำมัน");
+    } else if (isMachineProduct(selectedProd)) {
+      // Auto-convert: ถ้าเลือก 103 เครื่องจักร ให้สลับประเภทเป็น 6.เครื่องจักร ทันที พร้อมย้ายยอดเงิน
+      values["ประเภท"] = "6.เครื่องจักร";
+      transferAmountToCategory(values, "6.เครื่องจักร");
+    } else if (isCarRepairProduct(selectedProd)) {
+      // Auto-convert: ถ้าเลือก 104 ซ่อมรถ ให้สลับประเภทเป็น 5.ซ่อมรถ ทันที พร้อมย้ายยอดเงิน
+      values["ประเภท"] = "5.ซ่อมรถ";
+      transferAmountToCategory(values, "5.ซ่อมรถ");
+    } else if (isOtherExpenseProduct(selectedProd)) {
+      // Auto-convert: ถ้าเลือก 200 ดำเนินการ(อื่นๆ) ให้สลับประเภทเป็น 8.อื่นๆ ทันที พร้อมย้ายยอดเงิน
+      values["ประเภท"] = "8.อื่นๆ";
+      transferAmountToCategory(values, "8.อื่นๆ");
+    } else if (hasValue(selectedProd)) {
+      // เมื่อเป็นสินค้าวัสดุทั่วไป แต่ประเภทเดิมค้างอยู่ที่ 4.น้ำมัน, 5.ซ่อมรถ, 6.เครื่องจักร หรือ 8.อื่นๆ ให้สลับกลับมาที่ 1.ค่าของ
+      if (
+        values["ประเภท"] === "4.น้ำมัน" ||
+        values["ประเภท"] === "5.ซ่อมรถ" ||
+        values["ประเภท"] === "6.เครื่องจักร" ||
+        values["ประเภท"] === "8.อื่นๆ"
+      ) {
+        values["ประเภท"] = "1.ค่าของ";
+        transferAmountToCategory(values, "1.ค่าของ");
+      } else if (!values["ประเภท"]) {
+        values["ประเภท"] = "1.ค่าของ";
+      }
+    }
+
     const typeField = form.schema.find(field => field.name === "ประเภท");
     if (typeField && values["ประเภท"] && !getEnumValues(typeField, values).includes(values["ประเภท"])) {
       values["ประเภท"] = "";
+    }
+  }
+
+  if (changedField === "ประเภท") {
+    const selectedCat = String(values["ประเภท"] || "").trim();
+    if (selectedCat) {
+      transferAmountToCategory(values, selectedCat);
+    }
+
+    // ถ้าผู้ใช้กดเลือกหมวด แต่สินค้าเดิมไม่ตรง ให้เคลียร์สินค้าออก
+    if (selectedCat === "4.น้ำมัน" && hasValue(values["สินค้า"]) && !isFuelProduct(values["สินค้า"])) {
+      values["สินค้า"] = "";
+    } else if (selectedCat === "5.ซ่อมรถ" && hasValue(values["สินค้า"]) && !isCarRepairProduct(values["สินค้า"])) {
+      values["สินค้า"] = "";
+    } else if (selectedCat === "6.เครื่องจักร" && hasValue(values["สินค้า"]) && !isMachineProduct(values["สินค้า"])) {
+      values["สินค้า"] = "";
+    } else if (selectedCat === "8.อื่นๆ" && hasValue(values["สินค้า"]) && !isOtherExpenseProduct(values["สินค้า"])) {
+      if (isFuelProduct(values["สินค้า"]) || isMachineProduct(values["สินค้า"]) || isCarRepairProduct(values["สินค้า"])) {
+        values["สินค้า"] = "";
+      }
+    } else if (
+      (selectedCat === "1.ค่าของ" || selectedCat === "7.เครื่องมือ") &&
+      (isFuelProduct(values["สินค้า"]) || isMachineProduct(values["สินค้า"]) || isCarRepairProduct(values["สินค้า"]) || isOtherExpenseProduct(values["สินค้า"]))
+    ) {
+      values["สินค้า"] = "";
+    }
+  }
+
+  if (changedField === "ชื่อเครื่องมือ") {
+    if (hasValue(values["ชื่อเครื่องมือ"])) {
+      if (values["ประเภท"] !== "7.เครื่องมือ") {
+        values["ประเภท"] = "7.เครื่องมือ";
+        transferAmountToCategory(values, "7.เครื่องมือ");
+      }
+    }
+  }
+
+  if (changedField === "ผู้รับเหมา") {
+    if (hasValue(values["ผู้รับเหมา"])) {
+      if (!values["ประเภท"] || values["ประเภท"] === "1.ค่าของ") {
+        values["ประเภท"] = "2.ค่าแรง";
+        transferAmountToCategory(values, "2.ค่าแรง");
+      }
+      const conOption = (form.refOptions?.["ผู้รับเหมา"] || []).find(opt => opt.value === values["ผู้รับเหมา"]);
+      const conType = String(conOption?.row?.["ประเภท"] || conOption?.row?.["statusค่าแรง"] || "");
+      if (conType) {
+        if (conType.includes("นิติบุคคล") || conType.includes("บริษัท")) {
+          values["statusค่าแรง"] = "บริษัท";
+        } else if (conType.includes("บุคคล")) {
+          values["statusค่าแรง"] = "บุคคลธรรมดา";
+        }
+      }
     }
   }
 

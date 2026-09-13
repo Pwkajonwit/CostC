@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -168,7 +168,7 @@ export function BillDetailDrawer({
               <button
                 type="button"
                 onClick={() => onEdit(bill)}
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs transition font-medium shadow-2xs cursor-pointer"
+                className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs transition font-medium shadow-2xs cursor-pointer"
                 title="แก้ไข"
               >
                 <Edit size={14} />
@@ -180,7 +180,7 @@ export function BillDetailDrawer({
               <button
                 type="button"
                 onClick={() => onDelete(bill)}
-                className="w-7 h-7 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 flex items-center justify-center transition cursor-pointer"
+                className="w-8 h-8 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 flex items-center justify-center transition cursor-pointer"
                 title="ลบบิล"
               >
                 <Trash2 size={14} />
@@ -193,7 +193,7 @@ export function BillDetailDrawer({
               <button
                 type="button"
                 onClick={onPrev}
-                className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition cursor-pointer"
+                className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition cursor-pointer"
                 title="ก่อนหน้า"
               >
                 <ChevronLeft size={15} />
@@ -204,7 +204,7 @@ export function BillDetailDrawer({
               <button
                 type="button"
                 onClick={onNext}
-                className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition cursor-pointer"
+                className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition cursor-pointer"
                 title="ถัดไป"
               >
                 <ChevronRight size={15} />
@@ -214,7 +214,7 @@ export function BillDetailDrawer({
             <button
               type="button"
               onClick={onClose}
-              className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 flex items-center justify-center transition cursor-pointer ml-0.5"
+              className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 flex items-center justify-center transition cursor-pointer ml-0.5"
               title="ปิด"
             >
               <X size={15} />

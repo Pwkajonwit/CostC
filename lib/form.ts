@@ -1,4 +1,4 @@
-﻿import { TABLE_KEYS, TABLES } from "@/lib/config";
+import { TABLE_KEYS, TABLES } from "@/lib/config";
 import { hydrateContractRows } from "@/lib/formulas";
 import { getRows, getSystemOptions, listRefOptions } from "@/lib/db";
 import { getFormSchema, getRefRowColumns } from "@/lib/schemas";
@@ -117,7 +117,7 @@ async function getFormSchemaWithSheetOptions(tableName: string): Promise<FieldSc
       "1 เหล็กเส้น", "2 เหล็กรูปพรรณ", "3 คอนกรีต", "4 ไม้แบบ", "5 วัสดุมุง", "6 ฝ้าผนัง",
       "7 ปูพื้น", "8 กระจก", "9 ไฟฟ้า", "10 ประปา", "11 อื่นๆ(วัสดุ)", "12 สีเคมี",
       "13 สุขภัณฑ์", "14 บิวอิน", "15 แอร์", "16 ดิน", "17 หินทราย", "18 เตรียมงาน",
-      "101 น้ำมัน", "102 ค่าขนส่ง", "103 เครื่องจักร", "200 ดำเนินการ(อื่นๆ)", "non"
+      "101 น้ำมัน", "102 ค่าขนส่ง", "103 เครื่องจักร", "104 ซ่อมรถ", "200 ดำเนินการ(อื่นๆ)", "non"
     ],
     "vat": ["1", "3", "5", "7", "ระบุเอง"],
     "หัก": ["1", "3", "5", "ระบุเอง"],
@@ -162,6 +162,20 @@ async function getFormSchemaWithSheetOptions(tableName: string): Promise<FieldSc
         if (DEFAULT_SYSTEM_OPTIONS[k]) {
           fieldValues = DEFAULT_SYSTEM_OPTIONS[k];
           break;
+        }
+      }
+    }
+
+    if (field.name === "สินค้า") {
+      const coreProducts = ["101 น้ำมัน", "102 ค่าขนส่ง", "103 เครื่องจักร", "104 ซ่อมรถ", "200 ดำเนินการ(อื่นๆ)"];
+      for (const cp of coreProducts) {
+        if (!fieldValues.some(v => v === cp || v.includes(cp.split(" ")[1]) || v.startsWith(cp.split(" ")[0]))) {
+          const nonIdx = fieldValues.indexOf("non");
+          if (nonIdx >= 0) {
+            fieldValues.splice(nonIdx, 0, cp);
+          } else {
+            fieldValues.push(cp);
+          }
         }
       }
     }

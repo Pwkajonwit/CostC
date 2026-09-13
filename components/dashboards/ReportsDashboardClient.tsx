@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -124,6 +124,7 @@ const DEFAULT_PRODUCT_CATEGORIES_LIST: ProductCategoryItemConfig[] = [
   { code: "101", label: "101. น้ำมัน", group: "หมวดงานเตรียมดิน & โลจิสติกส์", searchKeys: ["101", "น้ำมัน"] },
   { code: "102", label: "102. ค่าขนส่ง", group: "หมวดงานเตรียมดิน & โลจิสติกส์", searchKeys: ["102", "ค่าขนส่ง"] },
   { code: "103", label: "103. เครื่องจักร", group: "หมวดงานเตรียมดิน & โลจิสติกส์", searchKeys: ["103", "เครื่องจักร"] },
+  { code: "104", label: "104. ซ่อมรถ", group: "หมวดงานเตรียมดิน & โลจิสติกส์", searchKeys: ["104", "ซ่อมรถ"] },
   { code: "200", label: "200. ดำเนินการ(อื่นๆ)", group: "หมวดงานทั่วไป & ดำเนินการ", searchKeys: ["200", "ดำเนินการ"] },
   { code: "non", label: "non (7.เครื่องมือ 8.อื่นๆ ที่พัก)", group: "หมวดงานทั่วไป & ดำเนินการ", searchKeys: ["non"] },
 ];
