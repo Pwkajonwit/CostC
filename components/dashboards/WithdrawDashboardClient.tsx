@@ -1,14 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Banknote, Check, ChevronLeft, ChevronRight, Download, Filter, List, LoaderCircle, RotateCcw, RotateCw, Search, Send, X } from "lucide-react";
+import { Banknote, Check, ChevronLeft, ChevronRight, Filter, List, LoaderCircle, RotateCcw, RotateCw, Search, Send, X } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { showToast } from "@/components/shared/ToastProvider";
 import { money, toNumber } from "@/lib/utils/numbers";
 import type { SheetRow } from "@/lib/types";
 import { formatDateDisplay, normalizeDateToIso, parseDateStrict } from "@/lib/utils/dates";
 import { useRealtimeSync } from "@/lib/use-realtime-sync";
-import { exportToCsv } from "@/lib/utils/export-utils";
 
 export type WithdrawFilters = {
   requester?: string;
@@ -425,40 +424,6 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
     }
   }
 
-  function handleExportCsv() {
-    if (!displayRows.length) return;
-    const filename = `รายการขอเบิกเงิน_${new Date().toISOString().slice(0, 10)}`;
-    const headers = [
-      "ลำดับ",
-      "ว/ด/ป",
-      "ID Project",
-      "ชื่อ Project",
-      "ร้าน/บุคคล",
-      "สินค้า/ทำงาน",
-      "บิล",
-      "ประเภท",
-      "สถานะ",
-      "ยอดเงิน",
-      "ยอดโอน",
-      "ผู้เบิก"
-    ];
-    const data = displayRows.map((r, idx) => [
-      r["ลำดับ"] || idx + 1,
-      r["ว/ด/ป"] || "",
-      r["ID Project"] || "",
-      r["ชื่อ Project"] || "",
-      r["ร้าน/บุคคล"] || "",
-      r["สินค้า/ทำงาน"] || r["รายการ"] || "",
-      r["บิล"] || "",
-      r["ประเภท"] || "",
-      r["สถานะ"] || "",
-      toNumber(r["ยอดเงิน"]),
-      toNumber(r["ยอดโอน"]),
-      r["ผู้เบิก"] || ""
-    ]);
-    exportToCsv(filename, headers, data);
-    showToast("success", `ส่งออกไฟล์ Excel (${displayRows.length} รายการ) สำเร็จ!`);
-  }
 
   return (
     <div className="w-full flex flex-col gap-3 p-3 sm:p-5 max-w-[1600px] mx-auto font-sans text-sm text-slate-800">
@@ -665,18 +630,6 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
             <span className="sm:hidden">{resendMode ? "ออก" : "ส่งซ้ำ"}</span>
           </button>
 
-          {/* Export to Excel (CSV) Button */}
-          {displayRows.length > 0 && (
-            <button
-              type="button"
-              onClick={handleExportCsv}
-              className="h-8 px-3 rounded-lg border border-slate-200 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium flex items-center gap-1.5 transition cursor-pointer shrink-0 shadow-2xs active:scale-95"
-              title="ส่งออกรายการขอเบิกเงินเป็นไฟล์ Excel (CSV)"
-            >
-              <Download size={13} className="text-slate-600" />
-              <span className="hidden sm:inline">ส่งออก</span> Excel
-            </button>
-          )}
         </div>
       </div>
 
