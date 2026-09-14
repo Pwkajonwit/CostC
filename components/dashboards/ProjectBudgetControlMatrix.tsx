@@ -31,6 +31,7 @@ import { money, toNumber } from "@/lib/utils/numbers";
 import type { SheetRow } from "@/lib/types";
 import { getRowAmount, getRowTransferAmount } from "@/lib/reports";
 import { isPaidBill, isCommittedBill } from "@/lib/bills/bill-status";
+import { isMaterialCost, isLaborCost, isStaffCost } from "@/lib/cost-codes";
 
 export type ProjectBudgetControlMatrixProps = {
   projectRows: SheetRow[];
@@ -70,28 +71,20 @@ const DEFAULT_CATEGORY_MAP: CategoryConfig[] = [
   { field: "งบไม่เกินดิน", label: "16. ดิน", group: "หมวดงานเตรียมดิน & โลจิสติกส์", icon: "🌱", matchKeys: ["16", "ดิน"] },
   { field: "งบไม่เกินหินทราย", label: "17. หินทราย", group: "หมวดงานเตรียมดิน & โลจิสติกส์", icon: "🪨", matchKeys: ["17", "หินทราย"] },
   { field: "งบไม่เกินเตรียมงาน", label: "18. เตรียมงาน", group: "หมวดงานเตรียมดิน & โลจิสติกส์", icon: "🚜", matchKeys: ["18", "เตรียมงาน"] },
-  { field: "งบไม่เกินน้ำมัน", label: "101. น้ำมันเชื้อเพลิง", group: "หมวดงานเตรียมดิน & โลจิสติกส์", icon: "⛽", matchKeys: ["101", "4.น้ำมัน", "น้ำมัน"] },
-  { field: "งบไม่เกินค่าขนส่ง", label: "102. ค่าขนส่ง", group: "หมวดงานเตรียมดิน & โลจิสติกส์", icon: "🚚", matchKeys: ["102", "ขนส่ง", "ค่าขนส่ง"] },
-  { field: "งบไม่เกินเครื่องจักร", label: "103. เครื่องจักร", group: "หมวดงานเตรียมดิน & โลจิสติกส์", icon: "🏗️", matchKeys: ["103", "6.เครื่องจักร", "เครื่องจักร"] },
-  { field: "งบไม่เกินซ่อมรถ", label: "104. ซ่อมรถ", group: "หมวดงานเตรียมดิน & โลจิสติกส์", icon: "🚗", matchKeys: ["104", "5.ซ่อมรถ", "ซ่อมรถ"] },
+  { field: "งบไม่เกินน้ำมัน", label: "501. น้ำมันเชื้อเพลิง", group: "หมวดงานเตรียมดิน & โลจิสติกส์", icon: "⛽", matchKeys: ["501", "101", "4.น้ำมัน", "น้ำมัน"] },
+  { field: "งบไม่เกินค่าขนส่ง", label: "505. ค่าขนส่ง", group: "หมวดงานเตรียมดิน & โลจิสติกส์", icon: "🚚", matchKeys: ["505", "102", "ขนส่ง", "ค่าขนส่ง"] },
+  { field: "งบไม่เกินเครื่องจักร", label: "503. เครื่องจักร", group: "หมวดงานเตรียมดิน & โลจิสติกส์", icon: "🏗️", matchKeys: ["503", "103", "6.เครื่องจักร", "เครื่องจักร"] },
+  { field: "งบไม่เกินซ่อมรถ", label: "502. ซ่อมรถ", group: "หมวดงานเตรียมดิน & โลจิสติกส์", icon: "🚗", matchKeys: ["502", "104", "5.ซ่อมรถ", "ซ่อมรถ"] },
 
-  { field: "งบไม่เกินวัสดุอื่นๆ", label: "11. อื่นๆ(วัสดุ)", group: "หมวดงานทั่วไป & ดำเนินการ", icon: "📦", matchKeys: ["11", "อื่นๆ(วัสดุ)"] },
-  { field: "งบไม่เกินดำเนินการ", label: "200. ดำเนินการ(อื่นๆ)", group: "หมวดงานทั่วไป & ดำเนินการ", icon: "📁", matchKeys: ["200", "ดำเนินการ(อื่นๆ)", "ดำเนินการ"] },
+  { field: "งบไม่เกินวัสดุอื่นๆ", label: "119. อื่นๆ(วัสดุ)", group: "หมวดงานทั่วไป & ดำเนินการ", icon: "📦", matchKeys: ["119", "11", "อื่นๆ(วัสดุ)"] },
+  { field: "งบไม่เกินดำเนินการ", label: "อื่นๆ / ดำเนินการ", group: "หมวดงานทั่วไป & ดำเนินการ", icon: "📁", matchKeys: ["200", "ดำเนินการ(อื่นๆ)", "ดำเนินการ", "อื่นๆ"] },
 
-  { field: "งบไม่เกินค่าของ", label: "1. ค่าของ (ภาพรวม)", group: "ภาพรวมต้นทุนโครงการ", icon: "📦", matchKeys: ["1.ค่าของ", "ค่าของ"] },
-  { field: "งบไม่เกินค่าแรง", label: "2. ค่าแรง (ภาพรวม)", group: "ภาพรวมต้นทุนโครงการ", icon: "👷", matchKeys: ["2.ค่าแรง", "ค่าแรง"] },
-  { field: "งบไม่เกินพนักงาน", label: "3. พนักงาน", group: "หมวดงานทั่วไป & ดำเนินการ", icon: "👥", matchKeys: ["3.พนักงาน", "พนักงาน"] },
-  { field: "งบไม่เกินเครื่องมือ", label: "7. เครื่องมือช่าง", group: "หมวดงานทั่วไป & ดำเนินการ", icon: "🔨", matchKeys: ["7.เครื่องมือ", "เครื่องมือ"] },
+  { field: "งบไม่เกินค่าของ", label: "หมวด 100 ค่าของ (ภาพรวม)", group: "ภาพรวมต้นทุนโครงการ", icon: "📦", matchKeys: ["100", "1.ค่าของ", "ค่าของ"] },
+  { field: "งบไม่เกินค่าแรง", label: "หมวด 200 ค่าแรง (ภาพรวม)", group: "ภาพรวมต้นทุนโครงการ", icon: "👷", matchKeys: ["200", "2.ค่าแรง", "ค่าแรง"] },
+  { field: "งบไม่เกินพนักงาน", label: "หมวด 300 พนักงาน", group: "หมวดงานทั่วไป & ดำเนินการ", icon: "👥", matchKeys: ["300", "3.พนักงาน", "พนักงาน"] },
+  { field: "งบไม่เกินเครื่องมือ", label: "504. เครื่องมือช่าง", group: "หมวดงานทั่วไป & ดำเนินการ", icon: "🔨", matchKeys: ["504", "7.เครื่องมือ", "เครื่องมือ"] },
 ];
 
-function getGroupIcon(groupName: string) {
-  if (groupName.includes("โครงสร้าง")) return <Building2 size={16} className="text-amber-700 shrink-0" />;
-  if (groupName.includes("สถาปัตยกรรม")) return <Home size={16} className="text-indigo-700 shrink-0" />;
-  if (groupName.includes("ระบบ")) return <Zap size={16} className="text-cyan-700 shrink-0" />;
-  if (groupName.includes("เตรียมดิน") || groupName.includes("โลจิสติกส์")) return <Truck size={16} className="text-emerald-700 shrink-0" />;
-  if (groupName.includes("ภาพรวม")) return <PieChart size={16} className="text-emerald-700 shrink-0" />;
-  return <Package size={16} className="text-slate-700 shrink-0" />;
-}
 
 export function ProjectBudgetControlMatrix({
   projectRows,
@@ -126,8 +119,8 @@ export function ProjectBudgetControlMatrix({
           });
 
           const fullMap = [
-            { field: "งบไม่เกินค่าของ", label: "1. ค่าของ (ภาพรวม)", group: "ภาพรวมต้นทุนโครงการ", icon: "📦", matchKeys: ["1.ค่าของ", "ค่าของ"] },
-            { field: "งบไม่เกินค่าแรง", label: "2. ค่าแรง (ภาพรวม)", group: "ภาพรวมต้นทุนโครงการ", icon: "👷", matchKeys: ["2.ค่าแรง", "ค่าแรง"] },
+            { field: "งบไม่เกินค่าของ", label: "หมวด 100 ค่าของ (ภาพรวม)", group: "ภาพรวมต้นทุนโครงการ", icon: "📦", matchKeys: ["100", "1.ค่าของ", "ค่าของ"] },
+            { field: "งบไม่เกินค่าแรง", label: "หมวด 200 ค่าแรง (ภาพรวม)", group: "ภาพรวมต้นทุนโครงการ", icon: "👷", matchKeys: ["200", "2.ค่าแรง", "ค่าแรง"] },
             ...dynamicMap
           ];
 
@@ -167,13 +160,13 @@ export function ProjectBudgetControlMatrix({
 
         // Macro category checks
         if (cat.field === "งบไม่เกินค่าของ") {
-          return typeCat === "1.ค่าของ" || typeCat === "ค่าของ" || (!typeCat && prod) || toNumber(b["ค่าของ"]) > 0;
+          return isMaterialCost(typeCat) || (!typeCat && prod) || toNumber(b["ค่าของ"]) > 0;
         }
         if (cat.field === "งบไม่เกินค่าแรง") {
-          return typeCat === "2.ค่าแรง" || typeCat === "ค่าแรง" || toNumber(b["ค่าแรง"]) > 0;
+          return isLaborCost(typeCat) || toNumber(b["ค่าแรง"]) > 0;
         }
         if (cat.field === "งบไม่เกินพนักงาน") {
-          return typeCat === "3.พนักงาน" || typeCat === "พนักงาน" || toNumber(b["พนักงาน"]) > 0;
+          return isStaffCost(typeCat) || toNumber(b["พนักงาน"]) > 0;
         }
 
         return cat.matchKeys.some(key => {
@@ -227,37 +220,30 @@ export function ProjectBudgetControlMatrix({
     );
   }, [categoryAnalysis, searchTerm]);
 
-  const groupedAnalysis = useMemo(() => {
-    const map: Record<string, typeof categoryAnalysis> = {};
-    filteredCategoryAnalysis.forEach(c => {
-      const g = c.group || "หมวดงานทั่วไป & ดำเนินการ";
-      if (!map[g]) map[g] = [];
-      map[g].push(c);
-    });
-    return map;
-  }, [filteredCategoryAnalysis]);
+  const categoryComparisonStats = useMemo(() => {
+    return categoryAnalysis
+      .filter(c => c.budgetCap > 0 || c.actualSpent > 0)
+      .slice(0, 15)
+      .map((cat) => {
+        const capSum = cat.budgetCap;
+        const spentSum = cat.actualSpent;
+        const usagePercent = capSum > 0 ? Number(((spentSum / capSum) * 100).toFixed(1)) : 0;
+        const isOver = capSum > 0 && spentSum > capSum;
+        const isWarning = capSum > 0 && !isOver && usagePercent >= 85;
+        const totalBills = cat.matchingBills.length;
 
-  const workGroupChartStats = useMemo(() => {
-    return Object.entries(groupedAnalysis).map(([groupTitle, items]) => {
-      const capSum = items.reduce((s, i) => s + i.budgetCap, 0);
-      const spentSum = items.reduce((s, i) => s + i.actualSpent, 0);
-      const usagePercent = capSum > 0 ? Number(((spentSum / capSum) * 100).toFixed(1)) : 0;
-      const isOver = capSum > 0 && spentSum > capSum;
-      const isWarning = capSum > 0 && !isOver && usagePercent >= 85;
-      const totalBills = items.reduce((s, i) => s + i.matchingBills.length, 0);
-
-      return {
-        groupTitle,
-        capSum,
-        spentSum,
-        usagePercent,
-        isOver,
-        isWarning,
-        totalBills,
-        itemsCount: items.length
-      };
-    });
-  }, [groupedAnalysis]);
+        return {
+          title: cat.label,
+          icon: cat.icon || "📦",
+          capSum,
+          spentSum,
+          usagePercent,
+          isOver,
+          isWarning,
+          totalBills,
+        };
+      });
+  }, [categoryAnalysis]);
 
   const topCategoriesChart = useMemo(() => {
     return [...categoryAnalysis]
@@ -473,38 +459,38 @@ export function ProjectBudgetControlMatrix({
       {(viewMode === "all" || viewMode === "chart") && (
         <div className="space-y-4 font-normal">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {/* CHART A: WORK GROUP BUDGET COMPARISON BAR CHART (2 Columns) */}
+            {/* CHART A: CATEGORY BUDGET COMPARISON BAR CHART (2 Columns) */}
             <div className="lg:col-span-2 bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-3 shadow-sm">
               <div className="flex items-center justify-between border-b border-slate-200 pb-2.5">
                 <h3 className="text-xs font-normal text-slate-900 flex items-center gap-2">
                   <BarChart3 size={16} className="text-emerald-700" />
-                  <span>เปรียบเทียบ วงเงินคุมงบ (Cap) vs ยอดจ่ายจริง (Actual) แยกตามหมวดงาน</span>
+                  <span>เปรียบเทียบ วงเงินคุมงบ (Cap) vs ยอดจ่ายจริง (Actual) รายหมวด</span>
                 </h3>
-                <span className="text-xs text-slate-500 font-normal">Work Group Analysis</span>
+                <span className="text-xs text-slate-500 font-normal">Category Budget Analysis</span>
               </div>
 
               <div className="space-y-3">
-                {workGroupChartStats.length === 0 ? (
+                {categoryComparisonStats.length === 0 ? (
                   <div className="text-center py-6 text-slate-500 text-xs font-normal">
                     ไม่มีข้อมูลเปรียบเทียบสำหรับเงื่อนไขนี้
                   </div>
                 ) : (
-                  workGroupChartStats.map((wg) => (
-                    <div key={wg.groupTitle} className="bg-white border border-slate-200 rounded-md p-3.5 space-y-2 shadow-xs">
+                  categoryComparisonStats.map((item) => (
+                    <div key={item.title} className="bg-white border border-slate-200 rounded-md p-3.5 space-y-2 shadow-xs">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs">
                         <span className="font-normal text-slate-900 flex items-center gap-1.5">
-                          {getGroupIcon(wg.groupTitle)}
-                          <span>{wg.groupTitle}</span>
-                          <span className="text-xs text-slate-500 font-normal">({wg.itemsCount} หมวดย่อย)</span>
+                          <span>{item.icon}</span>
+                          <span>{item.title}</span>
+                          <span className="text-xs text-slate-500 font-normal">({item.totalBills} บิล)</span>
                         </span>
 
                         <div className="flex items-center gap-2 text-xs font-normal">
-                          <span className="text-slate-700">Cap: <span className="text-slate-900 font-normal">{money(wg.capSum)}</span> ฿</span>
+                          <span className="text-slate-700">Cap: <span className="text-slate-900 font-normal">{money(item.capSum)}</span> ฿</span>
                           <span className="text-slate-300">|</span>
-                          <span className="text-slate-700">Spent: <span className="text-emerald-800 font-normal">{money(wg.spentSum)}</span> ฿</span>
-                          {wg.isOver ? (
+                          <span className="text-slate-700">Spent: <span className="text-emerald-800 font-normal">{money(item.spentSum)}</span> ฿</span>
+                          {item.isOver ? (
                             <span className="px-2 py-0.5 bg-rose-100 text-rose-800 rounded-full font-normal text-xs border border-rose-300">เกินงบ</span>
-                          ) : wg.isWarning ? (
+                          ) : item.isWarning ? (
                             <span className="px-2 py-0.5 bg-amber-100 text-amber-900 rounded-full font-normal text-xs border border-amber-300">เฝ้าระวัง</span>
                           ) : (
                             <span className="px-2 py-0.5 bg-emerald-100 text-emerald-900 rounded-full font-normal text-xs border border-emerald-300">ปกติ</span>
@@ -516,19 +502,19 @@ export function ProjectBudgetControlMatrix({
                       <div className="space-y-1">
                         <div className="w-full bg-slate-100 h-3.5 rounded-full overflow-hidden p-0.5 border border-slate-300 flex">
                           <div
-                            className={`h-full rounded-full transition-all duration-500 ${wg.isOver ? "bg-rose-600" : wg.isWarning ? "bg-amber-500" : "bg-emerald-600"
+                            className={`h-full rounded-full transition-all duration-500 ${item.isOver ? "bg-rose-600" : item.isWarning ? "bg-amber-500" : "bg-emerald-600"
                               }`}
-                            style={{ width: `${Math.min(100, wg.usagePercent)}%` }}
+                            style={{ width: `${Math.min(100, item.usagePercent)}%` }}
                           />
                         </div>
                         <div className="flex justify-between text-xs text-slate-700 font-normal">
-                          <span>ใช้วงเงินไป {wg.usagePercent}%</span>
+                          <span>ใช้วงเงินไป {item.usagePercent}%</span>
                           <span>
-                            {wg.capSum > 0
-                              ? wg.capSum - wg.spentSum >= 0
-                                ? `คงเหลือ ${money(wg.capSum - wg.spentSum)} ฿`
-                                : `เกินงบ ${money(Math.abs(wg.capSum - wg.spentSum))} ฿`
-                              : `จ่ายสะสม ${money(wg.spentSum)} ฿`}
+                            {item.capSum > 0
+                              ? item.capSum - item.spentSum >= 0
+                                ? `คงเหลือ ${money(item.capSum - item.spentSum)} ฿`
+                                : `เกินงบ ${money(Math.abs(item.capSum - item.spentSum))} ฿`
+                              : `จ่ายสะสม ${money(item.spentSum)} ฿`}
                           </span>
                         </div>
                       </div>
@@ -595,35 +581,35 @@ export function ProjectBudgetControlMatrix({
             <div className="flex items-center justify-between border-b border-slate-200 pb-2.5">
               <h3 className="text-xs font-normal text-slate-900 flex items-center gap-2">
                 <PieChart size={16} className="text-sky-700" />
-                <span>การกระจายสัดส่วนงบประมาณแยกตามหมวดงาน (Budget Allocation Distribution)</span>
+                <span>การกระจายสัดส่วนงบประมาณแยกตามหมวดสินค้า (Category Spending Distribution)</span>
               </h3>
-              <span className="text-xs text-slate-500 font-normal">Group Breakdown</span>
+              <span className="text-xs text-slate-500 font-normal">Category Breakdown</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {workGroupChartStats.map((wg) => {
-                const groupShare = totalActualSpent > 0 ? (wg.spentSum / totalActualSpent) * 100 : 0;
+              {categoryComparisonStats.filter(c => c.spentSum > 0).map((cat) => {
+                const itemShare = totalActualSpent > 0 ? (cat.spentSum / totalActualSpent) * 100 : 0;
 
                 return (
-                  <div key={wg.groupTitle} className="bg-white p-3 rounded-md border border-slate-200 space-y-1.5 shadow-xs">
+                  <div key={cat.title} className="bg-white p-3 rounded-md border border-slate-200 space-y-1.5 shadow-xs">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="font-normal text-slate-900 flex items-center gap-1.5">
-                        {getGroupIcon(wg.groupTitle)}
-                        <span>{wg.groupTitle}</span>
+                      <span className="font-normal text-slate-900 flex items-center gap-1.5 truncate">
+                        <span>{cat.icon}</span>
+                        <span className="truncate">{cat.title}</span>
                       </span>
-                      <span className="font-normal text-slate-900 text-xs">{groupShare.toFixed(1)}%</span>
+                      <span className="font-normal text-slate-900 text-xs shrink-0">{itemShare.toFixed(1)}%</span>
                     </div>
 
                     <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden border border-slate-200">
                       <div
                         className="h-full bg-sky-600 rounded-full transition-all duration-500"
-                        style={{ width: `${Math.min(100, groupShare)}%` }}
+                        style={{ width: `${Math.min(100, itemShare)}%` }}
                       />
                     </div>
 
                     <div className="flex justify-between text-xs text-slate-600 font-normal">
-                      <span>เบิกจ่าย: {money(wg.spentSum)} ฿</span>
-                      <span>{wg.totalBills} บิล</span>
+                      <span>เบิกจ่าย: {money(cat.spentSum)} ฿</span>
+                      <span>{cat.totalBills} บิล</span>
                     </div>
                   </div>
                 );
@@ -682,31 +668,12 @@ export function ProjectBudgetControlMatrix({
                     </td>
                   </tr>
                 ) : (
-                  Object.entries(groupedAnalysis).map(([groupTitle, groupItems]) => (
-                    <Fragment key={groupTitle}>
-                      {/* Group Header Row */}
-                      <tr className="bg-slate-100 font-normal text-slate-900 border-t border-b border-slate-300">
-                        <td colSpan={7} className="py-2.5 px-3.5 text-xs bg-slate-100">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              {getGroupIcon(groupTitle)}
-                              <span className="text-slate-950 font-normal text-sm">{groupTitle}</span>
-                              <span className="text-xs text-slate-600 font-normal">({groupItems.length} รายการ)</span>
-                            </div>
-                            <span className="text-xs text-emerald-800 font-normal">
-                              รวมเบิกจ่ายหมวดนี้: {money(groupItems.reduce((s, i) => s + i.actualSpent, 0))} ฿
-                            </span>
-                          </div>
-                        </td>
-                      </tr>
-
-                      {/* Group Items */}
-                      {groupItems.map((cat, idx) => (
-                        <tr key={`${cat.field}-${idx}`} className="hover:bg-slate-50 transition border-b border-slate-100">
-                          {/* Category Label */}
-                          <td className="py-2.5 px-3.5 font-normal text-slate-900 flex items-center gap-2 pl-6">
-                            <span>{cat.icon || "📦"}</span> <span>{cat.label}</span>
-                          </td>
+                  filteredCategoryAnalysis.map((cat, idx) => (
+                    <tr key={`${cat.field}-${idx}`} className="hover:bg-slate-50 transition border-b border-slate-100">
+                      {/* Category Label */}
+                      <td className="py-2.5 px-3.5 font-normal text-slate-900 flex items-center gap-2 pl-4">
+                        <span>{cat.icon || "📦"}</span> <span>{cat.label}</span>
+                      </td>
 
                           {/* Budget Cap */}
                           <td className="py-2.5 px-3.5 text-right font-normal text-slate-900">
@@ -795,8 +762,6 @@ export function ProjectBudgetControlMatrix({
                             )}
                           </td>
                         </tr>
-                      ))}
-                    </Fragment>
                   ))
                 )}
               </tbody>

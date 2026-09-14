@@ -1,6 +1,16 @@
-﻿import type { SheetRow } from "@/lib/types";
+import type { SheetRow } from "@/lib/types";
 import { toNumber } from "@/lib/utils/numbers";
 import { computeBillTransferAmount } from "@/lib/project-summary";
+import {
+  isMaterialCost,
+  isLaborCost,
+  isStaffCost,
+  isFuelCost,
+  isRepairCost,
+  isMachineCost,
+  isToolCost,
+  isOtherExpense,
+} from "@/lib/cost-codes";
 
 export function hasValue(val: unknown): boolean {
   return val !== null && val !== undefined && String(val).trim() !== "";
@@ -31,8 +41,19 @@ export function getRowCategoryAmount(row: SheetRow, categoryKeyword: string): nu
   const legacyVal = toNumber(row[categoryKeyword]);
   if (legacyVal > 0) return legacyVal;
 
-  const categoryType = getRowCategory(row).toLowerCase();
-  if (categoryType.includes(categoryKeyword.toLowerCase())) {
+  const categoryType = getRowCategory(row);
+  const kw = categoryKeyword.trim();
+
+  if (kw === "ค่าของ" && isMaterialCost(categoryType)) return getRowAmount(row);
+  if (kw === "ค่าแรง" && isLaborCost(categoryType)) return getRowAmount(row);
+  if (kw === "พนักงาน" && isStaffCost(categoryType)) return getRowAmount(row);
+  if (kw === "น้ำมัน" && isFuelCost(categoryType)) return getRowAmount(row);
+  if (kw === "ซ่อมรถ" && isRepairCost(categoryType)) return getRowAmount(row);
+  if (kw === "เครื่องจักร" && isMachineCost(categoryType)) return getRowAmount(row);
+  if (kw === "เครื่องมือ" && isToolCost(categoryType)) return getRowAmount(row);
+  if (kw === "อื่นๆ" && isOtherExpense(categoryType)) return getRowAmount(row);
+
+  if (categoryType.toLowerCase().includes(kw.toLowerCase())) {
     return getRowAmount(row);
   }
 
@@ -40,8 +61,9 @@ export function getRowCategoryAmount(row: SheetRow, categoryKeyword: string): nu
 }
 
 export function isLaborRow(row: SheetRow): boolean {
-  const cat = getRowCategory(row).toLowerCase();
-  if (cat.includes("ค่าแรง")) return true;
+  const cat = getRowCategory(row);
+  if (isLaborCost(cat)) return true;
+  if (cat.toLowerCase().includes("ค่าแรง")) return true;
   if (hasValue(row["statusค่าแรง"])) return true;
   if (hasValue(row["ผู้รับเหมา"])) return true;
   return toNumber(row["ค่าแรง"]) > 0;

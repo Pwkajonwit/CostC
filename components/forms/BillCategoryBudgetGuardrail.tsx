@@ -5,6 +5,14 @@ import { AlertTriangle, CheckCircle2, Info, ShieldAlert, ShieldCheck } from "luc
 import { checkCategoryBudgetCap, type CategoryBudgetCheckResult } from "@/lib/bills/bill-validation";
 import { money } from "@/lib/utils/numbers";
 import type { SheetRow } from "@/lib/types";
+import {
+  isMaterialCost,
+  isFuelCost,
+  isRepairCost,
+  isMachineCost,
+  isToolCost,
+  isOtherExpense
+} from "@/lib/cost-codes";
 
 export type BillCategoryBudgetGuardrailProps = {
   values: Record<string, string>;
@@ -218,55 +226,30 @@ export function MultiItemsBudgetGuardrail({
 
   if (!matchedProject || items.length === 0) return null;
 
-  // ตรวจสอบงบภาพรวมของหมวดหมู่ในบิล (เช่น ค่าของ ภาพรวม)
-  // หมายเหตุ: งบเฉพาะรายการย่อยได้แสดงแยกอยู่ใต้แต่ละแถวแล้ว ที่นี่จึงแสดงเฉพาะงบภาพรวมของหมวด
-  const distinctTypes = Array.from(
-    new Set(items.map(i => (i.categoryType || "1.ค่าของ").trim()).filter(Boolean))
-  );
-  if (distinctTypes.length === 0) distinctTypes.push(values["ประเภท"] || "1.ค่าของ");
+  // คำนวณยอดรวมทั้งบิล เพื่อตรวจเช็คงบภาพรวมของโครงการ (เช่น ค่าของ ภาพรวม)
+  // หมายเหตุ: รายการสินค้า/หมวดย่อยเฉพาะเจาะจง (เช่น 102 ดิน/ทราย, 123 ดำเนินการ) มีแถบคุมงบแสดงใต้แต่ละแถวในตารางอยู่แล้ว
+  // ที่นี่จึงแสดงเฉพาะ "งบภาพรวม" ของโครงการเท่านั้น เพื่อไม่ให้ซ้ำซ้อนกับรายการในตาราง
+  const totalSum = items.reduce((s, i) => s + (Number(i.amount) || 0), 0);
 
-  const overallChecks = distinctTypes
-    .map(catType => {
-      const amtSum = items
-        .filter(i => (i.categoryType || "1.ค่าของ").trim() === catType)
-        .reduce((s, i) => s + (Number(i.amount) || 0), 0);
-      const rowForCat: SheetRow = {
-        ...values,
-        "สินค้า": "", // เคลียร์สินค้าออกเพื่อให้คำนวณงบภาพรวมของหมวดหมู่ ไม่ไปจับคู่งบเฉพาะสินค้า
-        "ประเภท": catType,
-        "ยอดเงิน": String(amtSum),
-        "ค่าของ": catType === "1.ค่าของ" ? String(amtSum) : "",
-        "เครื่องมือ": catType === "7.เครื่องมือ" ? String(amtSum) : "",
-        "อื่นๆ": catType === "8.อื่นๆ" ? String(amtSum) : "",
-      };
-      return checkCategoryBudgetCap(rowForCat, matchedProject, existingBills);
-    })
-    .filter(c => c && c.hasBudgetCap);
+  const rowForOverall: SheetRow = {
+    ...values,
+    "สินค้า": "",
+    "ประเภท": "101 เตรียมงาน",
+    "ยอดเงิน": String(totalSum),
+    "ค่าของ": String(totalSum),
+  };
 
-  // หากไม่มีหมวดใดที่ตั้งงบภาพรวมไว้
-  if (overallChecks.length === 0) {
-    return (
-      <div className="w-full h-9 px-3 rounded-lg border border-dashed border-slate-200 bg-slate-50/70 text-slate-500 text-xs font-sans flex items-center justify-between gap-2 shadow-2xs">
-        <div className="flex items-center gap-1.5 truncate">
-          <Info size={14} className="text-slate-400 shrink-0" />
-          <span className="truncate">โครงการนี้ไม่ได้ตั้งวงเงินคุมงบสำหรับหมวดหมู่นี้</span>
-        </div>
-        <span className="text-[10px] text-slate-400 shrink-0 bg-slate-200/60 px-1.5 py-0.5 rounded">
-          ไม่คุมงบ
-        </span>
-      </div>
-    );
-  }
+  const overallCheck = checkCategoryBudgetCap(rowForOverall, matchedProject, existingBills);
+
+  if (!overallCheck || !overallCheck.hasBudgetCap) return null;
 
   return (
-    <div className="space-y-1.5 w-full">
-      {overallChecks.map(check => (
-        <BudgetStatusCard
-          key={check.categoryLabel}
-          check={check}
-          prefix="คุมงบภาพรวม"
-        />
-      ))}
+    <div className="w-full">
+      <BudgetStatusCard
+        key={overallCheck.categoryLabel}
+        check={overallCheck}
+        prefix="คุมงบภาพรวม"
+      />
     </div>
   );
 }

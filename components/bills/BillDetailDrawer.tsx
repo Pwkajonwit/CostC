@@ -17,12 +17,14 @@ import {
   CreditCard,
   Tag,
   DollarSign,
-  FileText
+  FileText,
+  Store
 } from "lucide-react";
 import { BillImageThumbnail } from "@/components/bills/BillImageThumbnail";
 import { formatDateDisplay } from "@/lib/utils/dates";
 import { money, toNumber } from "@/lib/utils/numbers";
 import type { SheetRow } from "@/lib/types";
+import { getCostCodeBadgeStyle } from "@/lib/cost-codes";
 
 type BillDetailDrawerProps = {
   bill: SheetRow | null;
@@ -33,6 +35,7 @@ type BillDetailDrawerProps = {
   onNext?: () => void;
   hasPrev?: boolean;
   hasNext?: boolean;
+  stores?: SheetRow[];
 };
 
 type ProjectDetail = {
@@ -48,6 +51,8 @@ type ProjectDetail = {
   total_all?: number;
 };
 
+let cachedStores: SheetRow[] | null = null;
+
 export function BillDetailDrawer({
   bill,
   onClose,
@@ -57,12 +62,51 @@ export function BillDetailDrawer({
   onNext,
   hasPrev = false,
   hasNext = false,
+  stores,
 }: BillDetailDrawerProps) {
   const [activeTab, setActiveTab] = useState<"bill" | "project">("bill");
   const [projectData, setProjectData] = useState<ProjectDetail | null>(null);
   const [loadingProject, setLoadingProject] = useState(false);
+  const [loadedStores, setLoadedStores] = useState<SheetRow[]>(stores || cachedStores || []);
 
   const projectId = String(bill?.["ID Project"] || bill?.project_id || "").trim();
+
+  useEffect(() => {
+    if (stores && stores.length > 0) {
+      setLoadedStores(stores);
+      cachedStores = stores;
+      return;
+    }
+    if (!cachedStores) {
+      fetch("/api/rows?tableName=Store&limit=1000")
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          const rows = data?.rows || data || [];
+          if (Array.isArray(rows) && rows.length > 0) {
+            cachedStores = rows;
+            setLoadedStores(rows);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [stores]);
+
+  const resolveStoreName = (token: string): string => {
+    const trimmed = (token || "").trim();
+    if (!trimmed) return "";
+    const list = stores || loadedStores || cachedStores || [];
+    const found = list.find((s) => {
+      const code = String(s["id_store"] || s.id || "").trim().toLowerCase();
+      const shortName = String(s["ชื่อร้านค้า"] || "").trim().toLowerCase();
+      const fullName = String(s["ชื่อเต็ม"] || "").trim().toLowerCase();
+      const target = trimmed.toLowerCase();
+      return code === target || shortName === target || fullName === target;
+    });
+    if (found) {
+      return String(found["ชื่อร้านค้า"] || found["ชื่อเต็ม"] || found.name || "") || trimmed;
+    }
+    return trimmed;
+  };
 
   useEffect(() => {
     setActiveTab("bill");
@@ -113,7 +157,7 @@ export function BillDetailDrawer({
     }
   }
 
-  const lineItems = useMemo<Array<{ category?: string; categoryType?: string; amount?: string | number; name?: string; type?: string }>>(() => {
+  const lineItems = useMemo<Array<{ category?: string; categoryType?: string; amount?: string | number; name?: string; type?: string; storeGroup?: string }>>(() => {
     if (!bill) return [];
     const raw = bill.items || (bill.data as any)?.items;
     if (Array.isArray(raw) && raw.length > 0) return raw;
@@ -280,7 +324,16 @@ export function BillDetailDrawer({
 
                 <div>
                   <span className="text-xs text-slate-400 block">ร้าน/บุคคล:</span>
-                  <span className="text-slate-800 block mt-0.5">{String(bill["ร้าน/บุคคล"] || "-")}</span>
+                  <span className="text-slate-800 block mt-0.5">
+                    {(() => {
+                      const raw = String(bill["ร้าน/บุคคล"] || bill["ร้านค้า"] || bill["ผู้รับเหมา"] || "-");
+                      if (raw === "-") return "-";
+                      if (raw.includes(",")) {
+                        return raw.split(",").map(t => resolveStoreName(t)).filter(Boolean).join(", ");
+                      }
+                      return resolveStoreName(raw);
+                    })()}
+                  </span>
                 </div>
 
                 <div>
@@ -295,7 +348,13 @@ export function BillDetailDrawer({
 
                 <div>
                   <span className="text-xs text-slate-400 block">ประเภท:</span>
-                  <span className="text-slate-700 block mt-0.5">{String(bill["ประเภท"] || "-")}</span>
+                  {bill["ประเภท"] ? (
+                    <span className={`inline-flex items-center px-2 py-0.5 mt-0.5 rounded text-xs font-medium border ${getCostCodeBadgeStyle(String(bill["ประเภท"]))}`}>
+                      {String(bill["ประเภท"])}
+                    </span>
+                  ) : (
+                    <span className="text-slate-400 block mt-0.5">-</span>
+                  )}
                 </div>
 
                 <div>
@@ -327,45 +386,131 @@ export function BillDetailDrawer({
               </div>
 
               {/* Line Items Breakdown Table if present */}
-              {lineItems.length > 0 && (
-                <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs overflow-hidden">
-                  <div className="px-3.5 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-                    <span className="font-semibold text-xs text-slate-800 flex items-center gap-1.5">
-                      <Receipt size={14} className="text-emerald-600" />
-                      <span>รายการสินค้าในบิล ({lineItems.length} รายการ)</span>
-                    </span>
-                    <span className="text-xs font-mono font-bold text-slate-900">{money(bill["ยอดเงิน"])}</span>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead className="bg-slate-50/50 border-b border-slate-200 text-slate-500 text-[11px]">
-                        <tr>
-                          <th className="px-3 py-1.5 text-left w-8">#</th>
-                          <th className="px-3 py-1.5 text-left">สินค้า / หมวดงาน</th>
-                          <th className="px-3 py-1.5 text-left w-24">ประเภท</th>
-                          <th className="px-3 py-1.5 text-right w-28">จำนวนเงิน</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {lineItems.map((item, idx) => (
-                          <tr key={idx} className="hover:bg-slate-50/50">
-                            <td className="px-3 py-2 text-slate-400 font-mono">{idx + 1}</td>
-                            <td className="px-3 py-2 font-medium text-slate-900">{item.category || item.name || "-"}</td>
-                            <td className="px-3 py-2 text-slate-600">
-                              <span className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-[10px]">
-                                {item.categoryType || item.type || "1.ค่าของ"}
+              {lineItems.length > 0 && (() => {
+                const hasStoreGroups = lineItems.some(i => i.storeGroup && !i.storeGroup.startsWith("ร้านที่ "));
+                if (hasStoreGroups) {
+                  const groups: { storeName: string; items: typeof lineItems; total: number }[] = [];
+                  const groupMap = new Map<string, { storeName: string; items: typeof lineItems; total: number }>();
+                  lineItems.forEach(item => {
+                    const rawStore = (item.storeGroup || "").trim();
+                    const sName = resolveStoreName(rawStore) || "ร้านค้าทั่วไป";
+                    if (!groupMap.has(sName)) {
+                      const g = { storeName: sName, items: [], total: 0 };
+                      groupMap.set(sName, g);
+                      groups.push(g);
+                    }
+                    const g = groupMap.get(sName)!;
+                    g.items.push(item);
+                    g.total += toNumber(item.amount);
+                  });
+
+                  return (
+                    <div className="space-y-2.5">
+                      <div className="flex items-center justify-between px-1">
+                        <span className="font-semibold text-xs text-slate-800 flex items-center gap-1.5">
+                          <Store size={14} className="text-emerald-600" />
+                          <span>รายการสินค้าแยกตามร้านค้า ({groups.length} ร้าน, {lineItems.length} รายการ)</span>
+                        </span>
+                        <span className="text-xs font-mono font-bold text-slate-900">{money(bill["ยอดเงิน"])}</span>
+                      </div>
+                      {groups.map((group, gIdx) => (
+                        <div key={gIdx} className="bg-white rounded-xl border border-slate-200/90 shadow-2xs overflow-hidden">
+                          <div className="px-3.5 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                            <span className="font-semibold text-xs text-slate-800 flex items-center gap-1.5">
+                              <Store size={13} className="text-slate-500" />
+                              <span>{group.storeName}</span>
+                              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-200/70 text-slate-600">
+                                {group.items.length} รายการ
                               </span>
-                            </td>
-                            <td className="px-3 py-2 text-right font-mono font-semibold text-slate-900">
-                              {money(toNumber(item.amount))}
-                            </td>
+                            </span>
+                            <span className="text-xs font-mono font-semibold text-slate-700">
+                              {money(group.total)}
+                            </span>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead className="bg-slate-50/50 border-b border-slate-200 text-slate-500 text-[11px]">
+                                <tr>
+                                  <th className="px-3 py-1.5 text-left w-8">#</th>
+                                  <th className="px-3 py-1.5 text-left">สินค้า / หมวดงาน</th>
+                                  <th className="px-3 py-1.5 text-left w-24">ประเภท</th>
+                                  <th className="px-3 py-1.5 text-right w-28">จำนวนเงิน</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {group.items.map((item, idx) => (
+                                  <tr key={idx} className="hover:bg-slate-50/50">
+                                    <td className="px-3 py-2 text-slate-400 font-mono">{idx + 1}</td>
+                                    <td className="px-3 py-2 font-medium text-slate-900">{item.category || item.name || "-"}</td>
+                                    <td className="px-3 py-2 text-slate-600">
+                                      {(() => {
+                                        const cat = String(item.categoryType || item.type || item.category || "101 เตรียมงาน").trim();
+                                        return (
+                                          <span className={`px-1.5 py-0.5 rounded border text-[10px] ${getCostCodeBadgeStyle(cat)}`}>
+                                            {cat}
+                                          </span>
+                                        );
+                                      })()}
+                                    </td>
+                                    <td className="px-3 py-2 text-right font-mono font-semibold text-slate-900">
+                                      {money(toNumber(item.amount))}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs overflow-hidden">
+                    <div className="px-3.5 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                      <span className="font-semibold text-xs text-slate-800 flex items-center gap-1.5">
+                        <Receipt size={14} className="text-emerald-600" />
+                        <span>รายการสินค้าในบิล ({lineItems.length} รายการ)</span>
+                      </span>
+                      <span className="text-xs font-mono font-bold text-slate-900">{money(bill["ยอดเงิน"])}</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead className="bg-slate-50/50 border-b border-slate-200 text-slate-500 text-[11px]">
+                          <tr>
+                            <th className="px-3 py-1.5 text-left w-8">#</th>
+                            <th className="px-3 py-1.5 text-left">สินค้า / หมวดงาน</th>
+                            <th className="px-3 py-1.5 text-left w-24">ประเภท</th>
+                            <th className="px-3 py-1.5 text-right w-28">จำนวนเงิน</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {lineItems.map((item, idx) => (
+                            <tr key={idx} className="hover:bg-slate-50/50">
+                              <td className="px-3 py-2 text-slate-400 font-mono">{idx + 1}</td>
+                              <td className="px-3 py-2 font-medium text-slate-900">{item.category || item.name || "-"}</td>
+                              <td className="px-3 py-2 text-slate-600">
+                                {(() => {
+                                  const cat = String(item.categoryType || item.type || item.category || "101 เตรียมงาน").trim();
+                                  return (
+                                    <span className={`px-1.5 py-0.5 rounded border text-[10px] ${getCostCodeBadgeStyle(cat)}`}>
+                                      {cat}
+                                    </span>
+                                  );
+                                })()}
+                              </td>
+                              <td className="px-3 py-2 text-right font-mono font-semibold text-slate-900">
+                                {money(toNumber(item.amount))}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Image Preview Box */}
               <div className="bg-white p-4 rounded-xl border border-slate-200/90 shadow-2xs space-y-2.5">

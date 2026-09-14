@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { DataTable } from "@/components/tables/DataTable";
 import { ProjectDetailEditor } from "@/components/forms/ProjectDetailEditor";
+import { ProjectBudgetAllocationManager } from "@/components/dashboards/ProjectBudgetAllocationManager";
 import { getProjectColorInfo } from "@/components/dashboards/WorkStatusDashboardClient";
 import { money, toNumber } from "@/lib/utils/numbers";
 import { isPaidBill } from "@/lib/bills/bill-status";
@@ -55,11 +56,8 @@ type ProjectDetailClientProps = {
   };
   budgetControl?: ProjectBudgetSummary;
   summaryRows: SheetRow[];
-  expenseBreakdown: Record<string, number>;
-  pendingBreakdown?: Record<string, number>;
   detailFields: string[];
   relatedColumns: string[];
-  expenseCategories: string[];
 };
 
 export function ProjectDetailClient({
@@ -71,26 +69,20 @@ export function ProjectDetailClient({
   totals,
   budgetControl,
   summaryRows,
-  expenseBreakdown,
-  pendingBreakdown,
   detailFields,
   relatedColumns,
-  expenseCategories,
 }: ProjectDetailClientProps) {
-  const [activeTab, setActiveTab] = useState<"bills" | "budget-control" | "expenses" | "edit">("bills");
+  const [activeTab, setActiveTab] = useState<"bills" | "budget-control" | "allocation" | "edit">("bills");
   const [budgetViewMode, setBudgetViewMode] = useState<"grouped" | "table">("table");
   const [hideEmptyBudgets, setHideEmptyBudgets] = useState(false);
   const [billFilterTerm, setBillFilterTerm] = useState<string>("");
   const [autoEditMode, setAutoEditMode] = useState(false);
+  const [autoEditAllocation, setAutoEditAllocation] = useState(false);
 
   // Group accordion toggle state - default all open
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
-    "หมวดงานโครงสร้าง": true,
-    "หมวดงานสถาปัตยกรรม & ตกแต่ง": true,
-    "หมวดงานระบบ M&E": true,
-    "หมวดงานเตรียมดิน & โลจิสติกส์": true,
-    "หมวดงานทั่วไป & ดำเนินการ": true,
-    "หมวดงานค่าแรง & บุคลากร": true
+    "ค่าของ (Material Cost Code)": true,
+    "ค่าแรง (Labor Cost Code)": true
   });
 
   const colorInfo = getProjectColorInfo(hydratedProject.color);
@@ -123,51 +115,6 @@ export function ProjectDetailClient({
     });
   }, [summaryRows, billFilterTerm]);
 
-  // Main Expense Categories Budget Control calculations (8 Categories)
-  const categoryControlRows = useMemo(() => {
-    return expenseCategories.map(cat => {
-      const spent = expenseBreakdown[cat] || 0;
-      const pendingSpent = pendingBreakdown?.[cat] || 0;
-      let budget = 0;
-
-      if (cat === "ค่าของ") {
-        budget = bCtrl.materialBudget;
-      } else if (cat === "ค่าแรง") {
-        budget = bCtrl.laborDirectBudget;
-      } else if (cat === "พนักงาน") {
-        budget = bCtrl.staffBudget;
-      } else if (cat === "น้ำมัน") {
-        budget = toNumber(hydratedProject["งบไม่เกินน้ำมัน"]);
-      } else if (cat === "ซ่อมรถ") {
-        budget = toNumber(hydratedProject["งบไม่เกินซ่อมรถ"]);
-      } else if (cat === "เครื่องจักร") {
-        budget = toNumber(hydratedProject["งบไม่เกินเครื่องจักร"]);
-      } else if (cat === "เครื่องมือ") {
-        budget = toNumber(hydratedProject["งบไม่เกินเครื่องมือ"]);
-      } else if (cat === "อื่นๆ") {
-        budget = toNumber(hydratedProject["งบไม่เกินอื่นๆ"] || hydratedProject["งบไม่เกินดำเนินการ"]);
-      }
-
-      const paidCount = summaryRows.filter(r => isPaidBill(r) && (toNumber(r[cat]) > 0 || String(r["ประเภท"]).includes(cat))).length;
-      const pendingCount = summaryRows.filter(r => !isPaidBill(r) && (toNumber(r[cat]) > 0 || String(r["ประเภท"]).includes(cat))).length;
-      const remaining = budget > 0 ? budget - spent : 0;
-      const percent = budget > 0 ? Math.min(999, Math.round((spent / budget) * 100)) : 0;
-      const isOver = budget > 0 && remaining < 0;
-
-      return {
-        name: cat,
-        budget,
-        spent,
-        pendingSpent,
-        remaining,
-        percent,
-        isOver,
-        billCount: paidCount,
-        pendingCount
-      };
-    });
-  }, [hydratedProject, expenseCategories, expenseBreakdown, pendingBreakdown, summaryRows, bCtrl]);
-
   function toggleGroup(groupName: string) {
     setExpandedGroups(prev => ({
       ...prev,
@@ -182,8 +129,8 @@ export function ProjectDetailClient({
   }
 
   function handleOpenAllocatorEdit() {
-    setAutoEditMode(true);
-    setActiveTab("edit");
+    setAutoEditAllocation(true);
+    setActiveTab("allocation");
   }
 
   return (
@@ -471,14 +418,23 @@ export function ProjectDetailClient({
 
         <button
           type="button"
-          onClick={() => setActiveTab("expenses")}
-          className={`px-3.5 py-2.5 border-b-2 transition shrink-0 cursor-pointer ${
-            activeTab === "expenses"
-              ? "border-slate-900 text-slate-900 font-bold"
+          onClick={() => {
+            setAutoEditAllocation(false);
+            setActiveTab("allocation");
+          }}
+          className={`px-3.5 py-2.5 border-b-2 transition shrink-0 cursor-pointer flex items-center gap-1.5 ${
+            activeTab === "allocation"
+              ? "border-emerald-600 text-emerald-700 font-bold"
               : "border-transparent text-slate-500 hover:text-slate-800 font-medium"
           }`}
         >
-          สรุปหมวดบัญชี 8 หมวด ({categoryControlRows.length})
+          <PieChart size={14} />
+          <span>การจัดสรรงบประมาณโครงการ</span>
+          {bCtrl.totalAllocated > 0 && (
+            <span className="text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-800 rounded-full font-semibold">
+              {bCtrl.allocatedPercent.toFixed(0)}%
+            </span>
+          )}
         </button>
 
         <button
@@ -545,7 +501,7 @@ export function ProjectDetailClient({
                 <span>การควบคุมงบประมาณตามการจัดสรรโครงการ</span>
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                จำแนกตามโครงสร้าง 6 หมวดงานหลัก (22 รายการค่าของ + 2 รายการค่าแรง/พนักงาน) ตาม Master Data
+                จำแนกตาม 2 หมวดหลัก: ค่าของ ({bCtrl.items.filter(i => i.group === "ค่าของ (Material Cost Code)").length} รายการ) และ ค่าแรง ({bCtrl.items.filter(i => i.group === "ค่าแรง (Labor Cost Code)").length} รายการ รวมพนักงาน) ตาม Cost Code
               </p>
             </div>
 
@@ -559,7 +515,7 @@ export function ProjectDetailClient({
                     budgetViewMode === "table" ? "bg-white text-slate-900 shadow-2xs" : "text-slate-500 hover:text-slate-800"
                   }`}
                 >
-                  ตาราง 24 รายการ
+                  ตารางทั้งหมด ({bCtrl.items.length} รายการ)
                 </button>
                 <button
                   type="button"
@@ -568,7 +524,7 @@ export function ProjectDetailClient({
                     budgetViewMode === "grouped" ? "bg-white text-slate-900 shadow-2xs" : "text-slate-500 hover:text-slate-800"
                   }`}
                 >
-                  จัดกลุ่ม 6 หมวดงาน
+                  จัดกลุ่ม 2 หมวดหลัก (ค่าของ & ค่าแรง)
                 </button>
               </div>
 
@@ -842,7 +798,7 @@ export function ProjectDetailClient({
             <div className="border border-slate-200 rounded-xl bg-white overflow-hidden shadow-2xs">
               <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
                 <h3 className="text-xs font-semibold text-slate-800">
-                  ตารางเปรียบเทียบงบประมาณจัดสรรและการเบิกจ่ายจริงทั้งหมด (24 รายการ)
+                  ตารางเปรียบเทียบงบประมาณจัดสรรและการเบิกจ่ายจริงทั้งหมด ({bCtrl.items.length} หมวดตามบิล)
                 </h3>
                 <span className="text-[11px] text-slate-500">
                   รวมจัดสรร {money(bCtrl.totalAllocated)} ฿ · จ่ายจริง {money(bCtrl.actualPaidTotal)} ฿
@@ -948,7 +904,7 @@ export function ProjectDetailClient({
                   </tbody>
                   <tfoot className="bg-slate-50/80 border-t border-slate-200 font-semibold text-xs">
                     <tr>
-                      <td colSpan={2} className="py-3 px-4 text-slate-900">รวมทั้งหมด 24 รายการจัดสรร</td>
+                      <td colSpan={2} className="py-3 px-4 text-slate-900">รวมทั้งหมด {bCtrl.items.length} รายการจัดสรร</td>
                       <td className="py-3 px-4 text-right font-mono text-slate-900">{money(bCtrl.totalAllocated)}</td>
                       <td className="py-3 px-4 text-right font-mono text-indigo-700">{money(bCtrl.actualPaidTotal)}</td>
                       <td className={`py-3 px-4 text-right font-mono ${bCtrl.totalAllocated - bCtrl.actualPaidTotal < 0 ? "text-rose-600" : "text-emerald-700"}`}>
@@ -967,199 +923,13 @@ export function ProjectDetailClient({
         </div>
       )}
 
-      {/* 7. TAB 3: EXPENSES (8 CATEGORIES) */}
-      {activeTab === "expenses" && (
-        <div className="space-y-4">
-          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <h2 className="text-xs font-semibold text-slate-800 flex items-center gap-2">
-                <SlidersHorizontal size={15} className="text-indigo-600" />
-                <span>สรุปหมวดหมู่ค่าใช้จ่ายทางบัญชี (8 หมวดหมู่หลัก)</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                เปรียบเทียบวงเงินงบประมาณกับยอดเบิกจ่ายจริงตามหมวดหมู่หลักทางบัญชี
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <div className="bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg">
-                <span className="text-slate-500">งบจัดสรรรวม: </span>
-                <strong className="text-slate-900 font-mono">{money(categoryControlRows.reduce((s, r) => s + r.budget, 0))}</strong>
-              </div>
-              <div className="bg-indigo-50 border border-indigo-200 px-3 py-1.5 rounded-lg">
-                <span className="text-indigo-700">เบิกจ่ายจริงรวม: </span>
-                <strong className="text-indigo-900 font-mono">{money(categoryControlRows.reduce((s, r) => s + r.spent, 0))}</strong>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {categoryControlRows.map((cat) => (
-              <div
-                key={cat.name}
-                className={`p-3.5 bg-white rounded-xl border transition shadow-2xs space-y-2.5 ${
-                  cat.isOver ? "border-rose-200 bg-rose-50/20" : "border-slate-200 hover:border-slate-300"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-1">
-                  <span className="font-semibold text-xs text-slate-800 flex items-center gap-1.5">
-                    {getCategoryIcon(cat.name)}
-                    <span>{cat.name}</span>
-                  </span>
-                  <span className="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
-                    {cat.billCount} บิล{cat.pendingCount > 0 ? ` (${cat.pendingCount} รอ)` : ""}
-                  </span>
-                </div>
-
-                <div className="space-y-1">
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-[11px] text-slate-500">เบิกจ่ายจริง:</span>
-                    <div className="text-right">
-                      <span className="text-sm font-bold font-mono text-indigo-700">{money(cat.spent)}</span>
-                      {cat.pendingSpent > 0 && (
-                        <div className="text-[10px] text-amber-600 font-normal">
-                          (รอ {money(cat.pendingSpent)})
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex items-baseline justify-between text-xs">
-                    <span className="text-[11px] text-slate-500">ค่าควบคุม:</span>
-                    <span className="font-mono text-slate-700 text-xs">
-                      {cat.budget > 0 ? money(cat.budget) : <span className="text-slate-400 font-normal">-</span>}
-                    </span>
-                  </div>
-
-                  <div className="flex items-baseline justify-between text-xs pt-1 border-t border-slate-100">
-                    <span className="text-[11px] text-slate-500">คงเหลือ:</span>
-                    <span className={`font-mono font-semibold text-xs ${cat.isOver ? "text-rose-600" : cat.budget > 0 ? "text-emerald-700" : "text-slate-400"}`}>
-                      {cat.budget > 0 ? (
-                        <>
-                          {money(cat.remaining)} {cat.isOver && <span className="text-[10px] text-rose-500 font-normal">(เกินงบ)</span>}
-                        </>
-                      ) : "-"}
-                    </span>
-                  </div>
-                </div>
-
-                {cat.budget > 0 && (
-                  <div className="pt-0.5">
-                    <div className="flex items-center justify-between text-[11px] mb-1">
-                      <span className="text-slate-400 text-[10px]">สัดส่วน</span>
-                      <span className={`font-mono text-[11px] font-medium ${cat.isOver ? "text-rose-600 font-bold" : "text-slate-600"}`}>
-                        {cat.percent}%
-                      </span>
-                    </div>
-                    <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all duration-300 ${
-                          cat.isOver ? "bg-rose-500" : cat.percent > 85 ? "bg-amber-500" : "bg-emerald-500"
-                        }`}
-                        style={{ width: `${Math.min(100, cat.percent)}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-
-          <div className="border border-slate-200 rounded-xl bg-white overflow-hidden shadow-2xs">
-            <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
-              <h3 className="text-xs font-semibold text-slate-800">
-                ตารางเปรียบเทียบค่าควบคุมและยอดเบิกจ่ายจริง (8 หมวดหมู่หลัก)
-              </h3>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-100/80 border-b border-slate-200 text-slate-600 text-[11px]">
-                    <th className="py-2.5 px-4 font-semibold">หมวดหมู่ค่าใช้จ่าย</th>
-                    <th className="py-2.5 px-4 text-right font-semibold">ค่าควบคุม (งบประมาณ)</th>
-                    <th className="py-2.5 px-4 text-right font-semibold">เบิกจ่ายจริง</th>
-                    <th className="py-2.5 px-4 text-right font-semibold">ยอดคงเหลือ</th>
-                    <th className="py-2.5 px-4 text-center font-semibold">สัดส่วนการใช้งบ</th>
-                    <th className="py-2.5 px-4 text-center font-semibold">สถานะ</th>
-                    <th className="py-2.5 px-4 text-center font-semibold">จำนวนบิล</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {categoryControlRows.map((cat, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50/80 transition">
-                      <td className="py-2.5 px-4 font-medium text-slate-800 flex items-center gap-2">
-                        {getCategoryIcon(cat.name)}
-                        <span>{cat.name}</span>
-                      </td>
-                      <td className="py-2.5 px-4 text-right font-mono text-slate-700">
-                        {cat.budget > 0 ? money(cat.budget) : <span className="text-slate-400 font-sans text-xs">ไม่ได้ตั้งงบ</span>}
-                      </td>
-                      <td className="py-2.5 px-4 text-right font-mono font-semibold text-indigo-700">
-                        <div>{money(cat.spent)}</div>
-                        {cat.pendingSpent > 0 && (
-                          <div className="text-[10px] text-amber-600 font-normal">
-                            (รอเบิก {money(cat.pendingSpent)})
-                          </div>
-                        )}
-                      </td>
-                      <td className={`py-2.5 px-4 text-right font-mono font-semibold ${
-                        cat.isOver ? "text-rose-600" : cat.budget > 0 ? "text-emerald-700" : "text-slate-400"
-                      }`}>
-                        {cat.budget > 0 ? money(cat.remaining) : <span className="text-slate-400 font-sans text-xs">-</span>}
-                      </td>
-                      <td className="py-2.5 px-4 text-center">
-                        {cat.budget > 0 ? (
-                          <div className="flex items-center gap-2 justify-center">
-                            <div className="w-16 bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                              <div
-                                className={`h-full rounded-full ${
-                                  cat.isOver ? "bg-rose-500" : cat.percent > 85 ? "bg-amber-500" : "bg-emerald-500"
-                                }`}
-                                style={{ width: `${Math.min(100, cat.percent)}%` }}
-                              />
-                            </div>
-                            <span className={`text-[11px] font-mono ${cat.isOver ? "text-rose-600 font-bold" : "text-slate-600"}`}>
-                              {cat.percent}%
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-slate-400 text-[11px]">-</span>
-                        )}
-                      </td>
-                      <td className="py-2.5 px-4 text-center">
-                        {cat.budget > 0 ? (
-                          cat.isOver ? (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-rose-50 text-rose-700 border border-rose-200">
-                              เกินงบ
-                            </span>
-                          ) : cat.percent >= 85 ? (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
-                              ใกล้เต็ม
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-300">
-                              ปกติ
-                            </span>
-                          )
-                        ) : (
-                          <span className="text-slate-400 text-[10px]">ทั่วไป</span>
-                        )}
-                      </td>
-                      <td className="py-2.5 px-4 text-center">
-                        <span className="inline-block px-2 py-0.5 rounded-md text-[11px] bg-slate-100 text-slate-700">
-                          {cat.billCount} บิล
-                          {cat.pendingCount > 0 && (
-                            <span className="text-amber-600 ml-1">({cat.pendingCount} รอ)</span>
-                          )}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+      {/* 7. TAB 3: PROJECT BUDGET ALLOCATION (DEDICATED ALLOCATOR TAB) */}
+      {activeTab === "allocation" && (
+        <ProjectBudgetAllocationManager
+          project={hydratedProject}
+          projectId={projectId}
+          initialEditing={autoEditAllocation}
+        />
       )}
 
       {/* 8. TAB 4: EDIT & DETAIL VIEW */}
@@ -1186,40 +956,12 @@ function formatDateThai(value: unknown): string {
   return str;
 }
 
-function getCategoryIcon(name: string) {
-  switch (name) {
-    case "ค่าของ":
-      return <Package size={14} className="text-emerald-600 shrink-0" />;
-    case "ค่าแรง":
-      return <Hammer size={14} className="text-amber-600 shrink-0" />;
-    case "พนักงาน":
-      return <Users size={14} className="text-indigo-600 shrink-0" />;
-    case "น้ำมัน":
-      return <Fuel size={14} className="text-cyan-600 shrink-0" />;
-    case "ซ่อมรถ":
-      return <Wrench size={14} className="text-orange-600 shrink-0" />;
-    case "เครื่องจักร":
-      return <Truck size={14} className="text-blue-600 shrink-0" />;
-    case "เครื่องมือ":
-      return <Wrench size={14} className="text-purple-600 shrink-0" />;
-    default:
-      return <FileText size={14} className="text-slate-500 shrink-0" />;
-  }
-}
 
 function getGroupIcon(groupName: BudgetGroup): string {
   switch (groupName) {
-    case "หมวดงานโครงสร้าง":
-      return "🧱";
-    case "หมวดงานสถาปัตยกรรม & ตกแต่ง":
-      return "🏠";
-    case "หมวดงานระบบ M&E":
-      return "⚡";
-    case "หมวดงานเตรียมดิน & โลจิสติกส์":
-      return "🚜";
-    case "หมวดงานทั่วไป & ดำเนินการ":
+    case "ค่าของ (Material Cost Code)":
       return "📦";
-    case "หมวดงานค่าแรง & บุคลากร":
+    case "ค่าแรง (Labor Cost Code)":
       return "👷";
     default:
       return "📁";

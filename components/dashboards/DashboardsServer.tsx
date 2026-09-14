@@ -18,10 +18,11 @@ export async function MainDashboard() {
 }
 
 export async function WithdrawDashboard({ filters = {} }: { filters?: WithdrawFilters }) {
-  const [dataRows, peopleRows, usersList] = await Promise.all([
+  const [dataRows, peopleRows, usersList, storeRows] = await Promise.all([
     getWithdrawBills(),
     safeRows(TABLES.PEOPLE),
-    getUsersListFromSupabase()
+    getUsersListFromSupabase(),
+    safeRows(TABLES.STORE),
   ]);
   const cookieStore = await cookies();
   const authEmpId = cookieStore.get("auth_employee_id")?.value || "";
@@ -47,7 +48,7 @@ export async function WithdrawDashboard({ filters = {} }: { filters?: WithdrawFi
     if (status !== "รอตั้งเบิก" && status !== "ตั้งเบิก" && status !== "รออนุมัติ" && status !== "อนุมัติ") return false;
     return hasValue(row["ลำดับ"]) || hasValue(row["ID Project"]) || hasValue(row["ร้าน/บุคคล"]) || hasValue(row["สินค้า/ทำงาน"]);
   });
-  return <WithdrawDashboardClient rows={rows} peopleRows={peopleRows} usersList={usersList} initialFilters={effectiveFilters} isAdmin={isAdmin} />;
+  return <WithdrawDashboardClient rows={rows} peopleRows={peopleRows} usersList={usersList} stores={storeRows} initialFilters={effectiveFilters} isAdmin={isAdmin} />;
 }
 
 export async function BillFollowDashboard() {

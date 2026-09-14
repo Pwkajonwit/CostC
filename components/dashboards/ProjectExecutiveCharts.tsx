@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useMemo, useState } from "react";
 import { BarChart3, LineChart, PieChart, TrendingUp } from "lucide-react";
@@ -23,14 +23,14 @@ const THAI_MONTHS_SHORT = [
 
 // 8 Real System Categories (ตรงตามฐานข้อมูลจริง 100%)
 const REAL_8_CATEGORIES = [
-  { id: "1.ค่าของ", label: "1. ค่าของ", shortLabel: "ค่าของ", budgetField: "งบไม่เกินค่าของ", color: "#059669" },
-  { id: "2.ค่าแรง", label: "2. ค่าแรง", shortLabel: "ค่าแรง", budgetField: "งบไม่เกินค่าแรง", color: "#4f46e5" },
-  { id: "3.พนักงาน", label: "3. พนักงาน", shortLabel: "พนักงาน", budgetField: "งบไม่เกินพนักงาน", color: "#9333ea" },
-  { id: "4.น้ำมัน", label: "4. น้ำมัน", shortLabel: "น้ำมัน", budgetField: "งบไม่เกินน้ำมัน", color: "#d97706" },
-  { id: "5.ซ่อมรถ", label: "5. ซ่อมรถ", shortLabel: "ซ่อมรถ", budgetField: "งบไม่เกินซ่อมรถ", color: "#ea580c" },
-  { id: "6.เครื่องจักร", label: "6. เครื่องจักร", shortLabel: "เครื่องจักร", budgetField: "งบไม่เกินเครื่องจักร", color: "#2563eb" },
-  { id: "7.เครื่องมือ", label: "7. เครื่องมือ", shortLabel: "เครื่องมือ", budgetField: "งบไม่เกินเครื่องมือ", color: "#0891b2" },
-  { id: "8.อื่นๆ", label: "8. อื่นๆ", shortLabel: "อื่นๆ", budgetField: "งบไม่เกินอื่นๆ", color: "#e11d48" },
+  { id: "หมวด 100 ค่าของ", label: "หมวด 100 ค่าของ", shortLabel: "ค่าของ", budgetField: "งบไม่เกินค่าของ", color: "#059669" },
+  { id: "หมวด 200 ค่าแรง", label: "หมวด 200 ค่าแรง", shortLabel: "ค่าแรง", budgetField: "งบไม่เกินค่าแรง", color: "#4f46e5" },
+  { id: "หมวด 300 พนักงาน", label: "หมวด 300 พนักงาน", shortLabel: "พนักงาน", budgetField: "งบไม่เกินพนักงาน", color: "#9333ea" },
+  { id: "501 น้ำมัน", label: "501 น้ำมัน", shortLabel: "น้ำมัน", budgetField: "งบไม่เกินน้ำมัน", color: "#d97706" },
+  { id: "502 ซ่อมรถ", label: "502 ซ่อมรถ", shortLabel: "ซ่อมรถ", budgetField: "งบไม่เกินซ่อมรถ", color: "#ea580c" },
+  { id: "503 เครื่องจักร", label: "503 เครื่องจักร", shortLabel: "เครื่องจักร", budgetField: "งบไม่เกินเครื่องจักร", color: "#2563eb" },
+  { id: "504 เครื่องมือ", label: "504 เครื่องมือ", shortLabel: "เครื่องมือ", budgetField: "งบไม่เกินเครื่องมือ", color: "#0891b2" },
+  { id: "อื่นๆ / ดำเนินการ", label: "อื่นๆ / ดำเนินการ", shortLabel: "อื่นๆ", budgetField: "งบไม่เกินอื่นๆ", color: "#e11d48" },
 ];
 
 function formatShortAmount(amount: number): string {

@@ -73,15 +73,13 @@ type ManualItem = {
 
 const LINE_MANUAL_ITEMS: ManualItem[] = [
   // System Category
-  { id: "m1", category: "system", categoryName: "ตรวจสอบระบบ", keyword: "testbot", syntax: "testbot", description: "ทดสอบการเชื่อมต่อเซิร์ฟเวอร์ และสถานะฐานข้อมูล Supabase PostgreSQL", example: "testbot" },
-  { id: "m2", category: "system", categoryName: "ตรวจสอบระบบ", keyword: "check", syntax: "check", description: "เช็คสถานะการทำงานของ Webhook Engine (Next.js Serverless)", example: "check" },
-  { id: "m3", category: "system", categoryName: "ตรวจสอบระบบ", keyword: "status", syntax: "status", description: "แสดงรายงานสถานะบอทออนไลน์ และข้อมูลกลุ่มที่เชื่อมต่อ", example: "status" },
+  { id: "m1", category: "system", categoryName: "ตรวจสอบระบบ", keyword: "testbot / check / status", syntax: "testbot", description: "ทดสอบการเชื่อมต่อเซิร์ฟเวอร์ Next.js Webhook Engine และสถานะฐานข้อมูล Supabase PostgreSQL (สามารถพิมพ์คำว่า testbot, check หรือ status ก็ได้)", example: "testbot" },
   { id: "m4", category: "system", categoryName: "ตรวจสอบระบบ", keyword: "getid", syntax: "getid", description: "ดึงข้อมูล ID ของผู้ใช้ปัจจุบัน และ ID ของกลุ่ม LINE ที่พิมพ์คำสั่ง", example: "getid" },
   { id: "m5", category: "system", categoryName: "ตรวจสอบระบบ", keyword: "ช่วยด้วย / เมนู", syntax: "เมนู", description: "เปิดการ์ดคู่มือสรุปคำสั่งที่ใช้งานบ่อยและปุ่มช่วยเหลือด่วน", example: "ช่วยเหลือ" },
 
   // Finance Category
-  { id: "m6", category: "finance", categoryName: "สรุปการเงิน & เบิกเงิน", keyword: "สรุป / สรุปบิล", syntax: "สรุป", description: "แสดงการ์ด Flex สรุปภาพรวมยอดเบิกเงินประจำวัน ค่าใช้จ่ายสะสม และบิลค้างจ่าย", example: "สรุป" },
-  { id: "m7", category: "finance", categoryName: "สรุปการเงิน & เบิกเงิน", keyword: "สรุปวันนี้", syntax: "สรุปวันนี้", description: "เรียกดูสรุปรายการบิลเงินสดและใบตั้งเบิกที่บันทึกเพิ่มในวันนี้เฉพาะกลุ่ม", example: "สรุปวันนี้" },
+  { id: "m6", category: "finance", categoryName: "สรุปการเงิน & เบิกเงิน", keyword: "สรุป / สรุปวันนี้ / สรุปบิล", syntax: "สรุป", description: "แสดงการ์ด Flex สรุปภาพรวมยอดเบิกเงินประจำวัน (วันนี้) ทั้งจำนวนบิล สถานะรออนุมัติ อนุมัติแล้ว และยอดรวม", example: "สรุป" },
+  { id: "m7", category: "finance", categoryName: "สรุปการเงิน & เบิกเงิน", keyword: "สรุปทั้งหมด / :รวม", syntax: "สรุปทั้งหมด", description: "แสดงการ์ด Flex สรุปภาพรวมยอดบิลสะสมทั้งหมดในระบบ ทุกสถานะและยอดรวมสะสม", example: "สรุปทั้งหมด" },
   { id: "m8", category: "finance", categoryName: "สรุปการเงิน & เบิกเงิน", keyword: "รออนุมัติ", syntax: "รออนุมัติ", description: "ดึงตารางรายการบิลที่อยู่ระหว่างรอผู้มีสิทธิ์อนุมัติยอดเงิน (Approver)", example: "รออนุมัติ" },
   { id: "m9", category: "finance", categoryName: "สรุปการเงิน & เบิกเงิน", keyword: "บิลหลัก: [ชื่อ]", syntax: "บิลหลัก: [ชื่อโครงการ/บิล]", description: "ค้นหาหรือสร้างกลุ่มบิลหลักสำหรับรวบรวมใบเบิกเงินย่อยตามโครงการ", example: "บิลหลัก: ค่าอุปกรณ์ไซต์ A" },
   { id: "m10", category: "finance", categoryName: "สรุปการเงิน & เบิกเงิน", keyword: "บิลย่อย: [ชื่อ]", syntax: "บิลย่อย: [รายการ] - [จำนวนเงิน]", description: "บันทึกบิลค่าใช้จ่ายย่อยเข้าสู่ระบบเพื่อขอตั้งเบิกเงิน", example: "บิลย่อย: ค่าน้ำมันรถกระบะ - 1200" },

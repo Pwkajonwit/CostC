@@ -6,7 +6,6 @@ import { Pencil, Save, X } from "lucide-react";
 import { TABLES } from "@/lib/config";
 import { money, toNumber } from "@/lib/utils/numbers";
 import type { SheetRow } from "@/lib/types";
-import { ProjectBudgetAllocator } from "@/components/forms/ProjectBudgetAllocator";
 
 type ProjectDetailEditorProps = {
   fields: string[];
@@ -162,7 +161,6 @@ export function ProjectDetailEditor({
             ))}
           </div>
 
-          <ProjectBudgetAllocator values={draft} onChange={setDraftValue} />
           {error ? <div className="mt-4 p-3 bg-rose-50 text-rose-600 rounded-lg text-xs font-medium border border-rose-200">{error}</div> : null}
         </form>
       </section>
@@ -197,21 +195,6 @@ export function ProjectDetailEditor({
           </div>
         ))}
       </dl>
-      <div className="mt-6 border-t border-slate-100 pt-5">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-semibold text-slate-700">การจัดสรรงบประมาณโครงการ</span>
-          <button
-            type="button"
-            disabled={!canSave}
-            onClick={beginEdit}
-            className="text-xs text-indigo-700 hover:text-indigo-800 font-medium inline-flex items-center gap-1 cursor-pointer"
-          >
-            <Pencil size={12} />
-            <span>แก้ไขการจัดสรรงบ</span>
-          </button>
-        </div>
-        <ProjectBudgetAllocator values={project} onChange={() => beginEdit()} defaultExpanded={true} />
-      </div>
     </section>
   );
 

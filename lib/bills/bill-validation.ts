@@ -3,6 +3,22 @@ import { hydrateContractRows } from "@/lib/formulas";
 import { getRows } from "@/lib/db";
 import { money, toNumber } from "@/lib/utils/numbers";
 import type { SheetRow } from "@/lib/types";
+import {
+  isMaterialCost,
+  isLaborCost,
+  isStaffCost,
+  isFuelCost,
+  isRepairCost,
+  isMachineCost,
+  isToolCost,
+  isOtherExpense,
+  isFuelProduct,
+  isMachineProduct,
+  isCarRepairProduct,
+  isToolProduct,
+  isOtherExpenseProduct,
+  getCostCodeBudgetField
+} from "@/lib/cost-codes";
 
 const PRODUCT_BUDGET_MAP: Record<string, string> = {
   // Current Master Data Options (Dropdown values)
@@ -66,24 +82,17 @@ const PRODUCT_BUDGET_MAP: Record<string, string> = {
   "4 ไม้แบบ": "งบไม่เกินไม้แบบ",
 };
 
-const CATEGORY_BUDGET_MAP: Record<string, string> = {
-  "1.ค่าของ": "งบไม่เกินค่าของ",
-  "2.ค่าแรง": "งบไม่เกินค่าแรง",
-  "3.พนักงาน": "งบไม่เกินพนักงาน",
-  "4.น้ำมัน": "งบไม่เกินน้ำมัน",
-  "5.ซ่อมรถ": "งบไม่เกินซ่อมรถ",
-  "6.เครื่องจักร": "งบไม่เกินเครื่องจักร",
-  "7.เครื่องมือ": "งบไม่เกินเครื่องมือ",
-  "8.อื่นๆ": "งบไม่เกินอื่นๆ",
-  "ค่าของ": "งบไม่เกินค่าของ",
-  "ค่าแรง": "งบไม่เกินค่าแรง",
-  "พนักงาน": "งบไม่เกินพนักงาน",
-  "น้ำมัน": "งบไม่เกินน้ำมัน",
-  "ซ่อมรถ": "งบไม่เกินซ่อมรถ",
-  "เครื่องจักร": "งบไม่เกินเครื่องจักร",
-  "เครื่องมือ": "งบไม่เกินเครื่องมือ",
-  "อื่นๆ": "งบไม่เกินอื่นๆ",
-};
+function getCategoryBudgetField(cat: string): string {
+  if (isFuelCost(cat)) return "งบไม่เกินน้ำมัน";
+  if (isRepairCost(cat)) return "งบไม่เกินซ่อมรถ";
+  if (isMachineCost(cat)) return "งบไม่เกินเครื่องจักร";
+  if (isToolCost(cat)) return "งบไม่เกินเครื่องมือ";
+  if (isStaffCost(cat)) return "งบไม่เกินพนักงาน";
+  if (isLaborCost(cat)) return "งบไม่เกินค่าแรง";
+  if (isOtherExpense(cat)) return "งบไม่เกินอื่นๆ";
+  if (isMaterialCost(cat)) return "งบไม่เกินค่าของ";
+  return "";
+}
 
 export type CategoryBudgetCheckResult = {
   hasBudgetCap: boolean;
@@ -162,16 +171,13 @@ export function checkCategoryBudgetCap(
   let categoryLabel = "";
   let isProductLevel = false;
 
-  // A. หากผู้ใช้เลือกหมวดที่ไม่ใช่ค่าของ (เช่น "7.เครื่องมือ", "8.อื่นๆ", "4.น้ำมัน", "5.ซ่อมรถ", "6.เครื่องจักร", "2.ค่าแรง", "3.พนักงาน")
+  // A. หากผู้ใช้เลือกหมวดที่ไม่ใช่ค่าของ (เช่น เครื่องมือ, อื่นๆ, น้ำมัน, ซ่อมรถ, เครื่องจักร, ค่าแรง, พนักงาน)
   // ให้คุมงบตามหมวดนั้นทันที โดยไม่ไปเช็กสินค้า (เพราะสินค้าเป็นของหมวดค่าของ)
-  const isNonMaterialCategory = Boolean(
-    categoryVal &&
-    categoryVal !== "1.ค่าของ" &&
-    categoryVal !== "ค่าของ"
-  );
+  const isNonMaterialCategory = Boolean(categoryVal && !isMaterialCost(categoryVal));
 
-  if (isNonMaterialCategory && CATEGORY_BUDGET_MAP[categoryVal]) {
-    const fieldName = CATEGORY_BUDGET_MAP[categoryVal];
+  const directBudgetField = getCategoryBudgetField(categoryVal);
+  if (isNonMaterialCategory && directBudgetField) {
+    const fieldName = directBudgetField;
     let limit = toNumber(project?.[fieldName]);
     if (limit <= 0 && fieldName === "งบไม่เกินอื่นๆ") {
       limit = toNumber(project?.["งบไม่เกินดำเนินการ"]);
@@ -203,25 +209,25 @@ export function checkCategoryBudgetCap(
         const cleanProd = productVal.replace(/^\d+\s*/, "").trim();
         matchedField = PRODUCT_BUDGET_MAP[cleanProd];
       }
+      if (!matchedField) {
+        matchedField = getCostCodeBudgetField(productVal);
+      }
 
       if (matchedField && toNumber(project[matchedField]) > 0) {
         targetBudgetField = matchedField;
-        categoryLabel = productVal;
+        categoryLabel = matchedField;
         isProductLevel = true;
       }
     }
 
-    // C. หากไม่ได้ระบุงบเฉพาะสินค้านั้น หรือหมวดไซต์งานไม่ได้ตั้งงบแยก -> Fallback ถอยกลับมาคุมงบภาพรวม "1.ค่าของ"
+    // C. หากไม่ได้ระบุงบเฉพาะสินค้านั้น หรือหมวดไซต์งานไม่ได้ตั้งงบแยก -> Fallback ถอยกลับมาคุมงบภาพรวม ค่าของ
     const isMaterialOrSite =
       !categoryVal ||
-      categoryVal === "1.ค่าของ" ||
-      categoryVal === "ค่าของ" ||
-      categoryVal.includes("ค่าของ") ||
-      categoryVal.includes("น้ำมัน") ||
-      categoryVal.includes("ซ่อมรถ") ||
-      categoryVal.includes("เครื่องจักร") ||
-      categoryVal.includes("เครื่องมือ") ||
-      categoryVal.includes("อื่นๆ") ||
+      isMaterialCost(categoryVal) ||
+      isFuelCost(categoryVal) ||
+      isRepairCost(categoryVal) ||
+      isMachineCost(categoryVal) ||
+      isToolCost(categoryVal) ||
       Boolean(productVal);
 
     if (!targetBudgetField && isMaterialOrSite) {
@@ -311,7 +317,7 @@ export function checkCategoryBudgetCap(
       } else {
         for (const it of bLineItems) {
           const itType = String(it.categoryType || it.type || "").trim();
-          if (CATEGORY_BUDGET_MAP[itType] === targetBudgetField || (!itType && targetBudgetField === "งบไม่เกินค่าของ")) {
+          if (getCategoryBudgetField(itType) === targetBudgetField || (!itType && targetBudgetField === "งบไม่เกินค่าของ")) {
             accumulatedAmount += toNumber(it.amount ?? it.price ?? it.total ?? 0);
           }
         }
@@ -331,33 +337,33 @@ export function checkCategoryBudgetCap(
       } else if (targetBudgetField === "งบไม่เกินค่าของ") {
         const hasSeparateRepairBudget = toNumber(project["งบไม่เกินซ่อมรถ"]) > 0;
         const isExcludedFromMaterial = Boolean(
-          bCat === "4.น้ำมัน" || (hasSeparateRepairBudget && bCat === "5.ซ่อมรถ") || bCat === "6.เครื่องจักร" || bCat === "8.อื่นๆ" ||
-          toNumber(b["น้ำมัน"]) > 0 || (hasSeparateRepairBudget && toNumber(b["ซ่อมรถ"]) > 0) || toNumber(b["เครื่องจักร"]) > 0 || toNumber(b["อื่นๆ"]) > 0 ||
+          isFuelCost(bCat) || (hasSeparateRepairBudget && isRepairCost(bCat)) || isMachineCost(bCat) || isToolCost(bCat) || isOtherExpense(bCat) ||
+          toNumber(b["น้ำมัน"]) > 0 || (hasSeparateRepairBudget && toNumber(b["ซ่อมรถ"]) > 0) || toNumber(b["เครื่องจักร"]) > 0 || toNumber(b["เครื่องมือ"]) > 0 || toNumber(b["อื่นๆ"]) > 0 ||
           (bProd && (
-            bProd === "101 น้ำมัน" || bProd === "103 เครื่องจักร" || (hasSeparateRepairBudget && (bProd === "104 ซ่อมรถ" || bProd.startsWith("104") || bProd.includes("ซ่อมรถ"))) || bProd === "200 ดำเนินการ(อื่นๆ)" ||
-            bProd.startsWith("101") || bProd.startsWith("103") || bProd.startsWith("200")
+            isFuelProduct(bProd) || isMachineProduct(bProd) || (hasSeparateRepairBudget && isCarRepairProduct(bProd)) || isToolProduct(bProd) ||
+            bProd === "200 ดำเนินการ(อื่นๆ)" || bProd.startsWith("200")
           ))
         );
         isMatch = !isExcludedFromMaterial && Boolean(
-          bCat === "1.ค่าของ" || bCat === "ค่าของ" || (!bCat && bProd) || toNumber(b["ค่าของ"]) > 0 ||
-          (!hasSeparateRepairBudget && (bCat === "5.ซ่อมรถ" || bCat === "ซ่อมรถ" || toNumber(b["ซ่อมรถ"]) > 0 || (bProd && (bProd === "104 ซ่อมรถ" || bProd.includes("ซ่อมรถ") || bProd.startsWith("104")))))
+          isMaterialCost(bCat) || (!bCat && bProd) || toNumber(b["ค่าของ"]) > 0 ||
+          (!hasSeparateRepairBudget && (isRepairCost(bCat) || toNumber(b["ซ่อมรถ"]) > 0 || (bProd && isCarRepairProduct(bProd))))
         );
       } else if (targetBudgetField === "งบไม่เกินค่าแรง") {
-        isMatch = Boolean(bCat === "2.ค่าแรง" || bCat === "ค่าแรง" || toNumber(b["ค่าแรง"]) > 0);
+        isMatch = Boolean(isLaborCost(bCat) || toNumber(b["ค่าแรง"]) > 0);
       } else if (targetBudgetField === "งบไม่เกินพนักงาน") {
-        isMatch = Boolean(bCat === "3.พนักงาน" || bCat === "พนักงาน" || toNumber(b["พนักงาน"]) > 0);
+        isMatch = Boolean(isStaffCost(bCat) || toNumber(b["พนักงาน"]) > 0);
       } else if (targetBudgetField === "งบไม่เกินน้ำมัน") {
-        isMatch = Boolean(bCat === "4.น้ำมัน" || bCat === "น้ำมัน" || toNumber(b["น้ำมัน"]) > 0 || (bProd && (bProd === "101 น้ำมัน" || bProd.includes("น้ำมัน") || bProd.startsWith("101"))));
+        isMatch = Boolean(isFuelCost(bCat) || toNumber(b["น้ำมัน"]) > 0 || (bProd && isFuelProduct(bProd)));
       } else if (targetBudgetField === "งบไม่เกินซ่อมรถ") {
-        isMatch = Boolean(bCat === "5.ซ่อมรถ" || bCat === "ซ่อมรถ" || toNumber(b["ซ่อมรถ"]) > 0 || (bProd && (bProd === "104 ซ่อมรถ" || bProd.includes("ซ่อมรถ") || bProd.startsWith("104"))));
+        isMatch = Boolean(isRepairCost(bCat) || toNumber(b["ซ่อมรถ"]) > 0 || (bProd && isCarRepairProduct(bProd)));
       } else if (targetBudgetField === "งบไม่เกินเครื่องจักร") {
-        isMatch = Boolean(bCat === "6.เครื่องจักร" || bCat === "เครื่องจักร" || toNumber(b["เครื่องจักร"]) > 0 || (bProd && (bProd === "103 เครื่องจักร" || bProd.includes("เครื่องจักร") || bProd.startsWith("103"))));
+        isMatch = Boolean(isMachineCost(bCat) || toNumber(b["เครื่องจักร"]) > 0 || (bProd && isMachineProduct(bProd)));
       } else if (targetBudgetField === "งบไม่เกินเครื่องมือ") {
-        isMatch = Boolean(bCat === "7.เครื่องมือ" || bCat === "เครื่องมือ" || toNumber(b["เครื่องมือ"]) > 0 || (b["ชื่อเครื่องมือ"] && String(b["ชื่อเครื่องมือ"]).trim() !== ""));
+        isMatch = Boolean(isToolCost(bCat) || toNumber(b["เครื่องมือ"]) > 0 || (bProd && isToolProduct(bProd)) || (b["ชื่อเครื่องมือ"] && String(b["ชื่อเครื่องมือ"]).trim() !== ""));
       } else if (targetBudgetField === "งบไม่เกินอื่นๆ" || targetBudgetField === "งบไม่เกินดำเนินการ") {
         isMatch = Boolean(
-          bCat === "8.อื่นๆ" || bCat === "อื่นๆ" || toNumber(b["อื่นๆ"]) > 0 ||
-          (bProd && (bProd === "200 ดำเนินการ(อื่นๆ)" || bProd.includes("ดำเนินการ") || bProd.startsWith("200")))
+          isOtherExpense(bCat) || toNumber(b["อื่นๆ"]) > 0 ||
+          (bProd && (bProd === "200 ดำเนินการ(อื่นๆ)" || bProd.includes("ดำเนินการ") || bProd.startsWith("200") || bProd.startsWith("123") || bProd.startsWith("223")))
         );
       } else {
         isMatch = Boolean(categoryVal && (bCat === categoryVal || bCat.replace(/^\d+\.\s*/, "") === categoryVal.replace(/^\d+\.\s*/, "")));

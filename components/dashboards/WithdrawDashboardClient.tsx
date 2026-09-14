@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, useCallback, type FormEvent } from "react";
 import { Banknote, Check, ChevronLeft, ChevronRight, Filter, List, LoaderCircle, RotateCcw, RotateCw, Search, Send, X } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { showToast } from "@/components/shared/ToastProvider";
@@ -8,6 +8,7 @@ import { money, toNumber } from "@/lib/utils/numbers";
 import type { SheetRow } from "@/lib/types";
 import { formatDateDisplay, normalizeDateToIso, parseDateStrict } from "@/lib/utils/dates";
 import { useRealtimeSync } from "@/lib/use-realtime-sync";
+import { getCostCodeBadgeStyle } from "@/lib/cost-codes";
 
 export type WithdrawFilters = {
   requester?: string;
@@ -22,15 +23,38 @@ type WithdrawDashboardClientProps = {
   usersList?: any[];
   initialFilters?: WithdrawFilters;
   isAdmin?: boolean;
+  stores?: SheetRow[];
 };
 
 const ALL_COLUMNS = ["ลำดับ", "ID Project", "ชื่อ Project", "ร้าน/บุคคล", "สินค้า/ทำงาน", "บิล", "ประเภท", "ยอดเงิน", "ยอดโอน", "ผู้เบิก", "ว/ด/ป", "จัดการ"];
 const PAGE_SIZE_OPTIONS = [20, 50, 100, 200];
+let cachedStores: SheetRow[] | null = null;
 
-export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], initialFilters = {}, isAdmin = false }: WithdrawDashboardClientProps) {
+export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], initialFilters = {}, isAdmin = false, stores }: WithdrawDashboardClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const urlSearch = searchParams.get("search") || "";
+  const [loadedStores, setLoadedStores] = useState<SheetRow[]>(stores || cachedStores || []);
+
+  useEffect(() => {
+    if (stores && stores.length > 0) {
+      setLoadedStores(stores);
+      cachedStores = stores;
+      return;
+    }
+    if (!cachedStores) {
+      fetch("/api/rows?tableName=Store&limit=1000")
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          const sRows = data?.rows || data || [];
+          if (Array.isArray(sRows) && sRows.length > 0) {
+            cachedStores = sRows;
+            setLoadedStores(sRows);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [stores]);
 
   const [effectiveIsAdmin, setEffectiveIsAdmin] = useState(isAdmin);
   const [showMobileFilters, setShowMobileFilters] = useState(false);
@@ -111,6 +135,45 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
 
   const requesterNames = useMemo(() => requesterNameMap(peopleRows), [peopleRows]);
 
+  const resolveStoreName = useCallback((token: string): string => {
+    const trimmed = (token || "").trim();
+    if (!trimmed) return "";
+    const list = (stores && stores.length > 0) ? stores : (loadedStores.length > 0 ? loadedStores : (cachedStores || []));
+    const found = list.find((s) => {
+      const code = String(s["id_store"] || s.id || "").trim().toLowerCase();
+      const shortName = String(s["ชื่อร้านค้า"] || "").trim().toLowerCase();
+      const fullName = String(s["ชื่อเต็ม"] || "").trim().toLowerCase();
+      const target = trimmed.toLowerCase();
+      return code === target || shortName === target || fullName === target;
+    });
+    if (found) {
+      return String(found["ชื่อร้านค้า"] || found["ชื่อเต็ม"] || found.name || "") || trimmed;
+    }
+    return trimmed;
+  }, [stores, loadedStores]);
+
+  const formatVendorDisplay = useCallback((raw: unknown): string => {
+    const str = String(raw || "").trim();
+    if (!str || str === "-") return "-";
+    if (str.includes(",")) {
+      return str
+        .split(",")
+        .map((t) => {
+          const trimmed = t.trim();
+          const resolvedStore = resolveStoreName(trimmed);
+          if (resolvedStore !== trimmed) return resolvedStore;
+          if (requesterNames[trimmed]) return requesterNames[trimmed];
+          return trimmed;
+        })
+        .filter(Boolean)
+        .join(", ");
+    }
+    const resolvedStore = resolveStoreName(str);
+    if (resolvedStore !== str) return resolvedStore;
+    if (requesterNames[str]) return requesterNames[str];
+    return str;
+  }, [resolveStoreName, requesterNames]);
+
   const displayRows = useMemo(() => {
     const currentRows = rows.map(row => {
       const rowKey = Number(row.id ?? row["ลำดับ"] ?? row._sheetRow);
@@ -118,13 +181,13 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
       return override ? { ...row, "สถานะ": override } : row;
     });
     // แสดงบิลสถานะ "รอตั้งเบิก", "ตั้งเบิก" และ "อนุมัติ" (ยังไม่เบิก/ปิดงาน)
-    return filterWithdrawRows(currentRows, filters, requesterNames)
+    return filterWithdrawRows(currentRows, filters, requesterNames, formatVendorDisplay)
       .filter(row => {
         const st = normalizedStatus(row["สถานะ"]);
         return st === "รอตั้งเบิก" || st === "ตั้งเบิก" || st === "รออนุมัติ" || st === "อนุมัติ";
       })
       .sort((a, b) => Number(b.id ?? b["ลำดับ"] ?? b._sheetRow ?? 0) - Number(a.id ?? a["ลำดับ"] ?? a._sheetRow ?? 0));
-  }, [rows, filters, statusOverrides, requesterNames]);
+  }, [rows, filters, statusOverrides, requesterNames, formatVendorDisplay]);
 
   const totalPages = Math.max(1, Math.ceil(displayRows.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -855,8 +918,8 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
                       </span>
                     </div>
 
-                    <div className="text-xs text-slate-700 font-medium truncate" title={String(row["ร้าน/บุคคล"] || "")}>
-                      {String(row["ร้าน/บุคคล"] || "-")}
+                    <div className="text-xs text-slate-700 font-medium truncate" title={formatVendorDisplay(row["ร้าน/บุคคล"])}>
+                      {formatVendorDisplay(row["ร้าน/บุคคล"])}
                     </div>
 
                     <div className="text-xs text-slate-500 truncate flex items-center gap-1.5">
@@ -915,6 +978,7 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
             columns={columns}
             onApprove={approveRow}
             requesterNames={requesterNames}
+            formatVendorDisplay={formatVendorDisplay}
             rows={visibleRows}
             selectedRows={selectedRows}
             resendMode={resendMode}
@@ -972,7 +1036,12 @@ function normalizeFilters(filters: WithdrawFilters) {
   };
 }
 
-function filterWithdrawRows(rows: SheetRow[], filters: Required<WithdrawFilters>, requesterNames: Record<string, string> = {}) {
+function filterWithdrawRows(
+  rows: SheetRow[], 
+  filters: Required<WithdrawFilters>, 
+  requesterNames: Record<string, string> = {},
+  formatVendorDisplay?: (raw: unknown) => string
+) {
   const requester = filters.requester.trim();
   const bill = filters.bill.trim();
   const query = filters.search.trim().toLowerCase();
@@ -993,7 +1062,12 @@ function filterWithdrawRows(rows: SheetRow[], filters: Required<WithdrawFilters>
       const rowIsoDate = normalizeDateToIso(row["ว/ด/ป"]);
       if (rowIsoDate !== filterDateStr) return false;
     }
-    if (query && !Object.values(row).some(value => String(value || "").toLowerCase().includes(query))) return false;
+    if (query) {
+      const vendorStr = formatVendorDisplay ? formatVendorDisplay(row["ร้าน/บุคคล"]) : "";
+      const matchesVendor = vendorStr.toLowerCase().includes(query);
+      const matchesAny = Object.values(row).some(value => String(value || "").toLowerCase().includes(query));
+      if (!matchesVendor && !matchesAny) return false;
+    }
     return true;
   });
 }
@@ -1008,7 +1082,8 @@ function WithdrawTable({
   resendMode = false,
   selectedBillType = "",
   onSelectRow,
-  onSelectAll
+  onSelectAll,
+  formatVendorDisplay
 }: {
   rows: SheetRow[];
   columns: string[];
@@ -1020,6 +1095,7 @@ function WithdrawTable({
   selectedBillType?: string;
   onSelectRow: (rowId: number) => void;
   onSelectAll: (candidateRows: SheetRow[]) => void;
+  formatVendorDisplay?: (raw: unknown) => string;
 }) {
   if (!rows.length) return <div className="p-8 text-center text-slate-400 text-xs font-medium">ไม่พบรายการตั้งเบิก</div>;
 
@@ -1131,7 +1207,7 @@ function WithdrawTable({
                         </button>
                       )
                     ) : (
-                      formatWithdrawCell(column, row[column], requesterNames)
+                      formatWithdrawCell(column, row[column], requesterNames, formatVendorDisplay)
                     )}
                   </td>
                 ))}
@@ -1347,11 +1423,19 @@ function isAmountColumn(column: string) {
   return column === "ยอดเงิน" || column === "ยอดโอน" || column === "ยอดรวม vat" || column === "งบไม่เกิน" || column === "รวม ALL";
 }
 
-function formatWithdrawCell(column: string, value: unknown, requesterNames: Record<string, string>) {
+function formatWithdrawCell(
+  column: string, 
+  value: unknown, 
+  requesterNames: Record<string, string>,
+  formatVendorDisplay?: (raw: unknown) => string
+) {
   if (value === null || value === undefined) return "-";
   if (column === "ผู้เบิก") {
     const key = String(value).trim();
     return requesterNames[key] || key || "-";
+  }
+  if (column === "ร้าน/บุคคล") {
+    return formatVendorDisplay ? formatVendorDisplay(value) : (String(value) || "-");
   }
   if (column === "สถานะ") {
     const status = normalizedStatus(value);
@@ -1366,6 +1450,16 @@ function formatWithdrawCell(column: string, value: unknown, requesterNames: Reco
         }`}
       >
         {status}
+      </span>
+    );
+  }
+  if (column === "ประเภท") {
+    const str = String(value || "").trim();
+    if (!str) return "-";
+    const badgeStyle = getCostCodeBadgeStyle(str);
+    return (
+      <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium border ${badgeStyle}`}>
+        {str}
       </span>
     );
   }

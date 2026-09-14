@@ -23,6 +23,7 @@ import { formatBillConditions, normalizeBillStatus } from "@/lib/bills/bill-stat
 import { showConfirm, showToast } from "@/components/shared/ToastProvider";
 import { useRealtimeSync } from "@/lib/use-realtime-sync";
 import type { SheetRow } from "@/lib/types";
+import { getCostCodeBadgeStyle } from "@/lib/cost-codes";
 
 type BillsDashboardClientProps = {
   columns: string[];
@@ -30,6 +31,7 @@ type BillsDashboardClientProps = {
   form?: any;
   isAdmin: boolean;
   peopleRows: SheetRow[];
+  stores?: SheetRow[];
   authEmpId?: string;
   authName?: string;
   search: string;
@@ -39,6 +41,7 @@ type BillsDashboardClientProps = {
 };
 
 const PAGE_SIZE_OPTIONS = [20, 50, 100, 200];
+let cachedStores: SheetRow[] | null = null;
 
 function resolveMatchingRequesterKey(
   peopleRows: SheetRow[],
@@ -82,6 +85,7 @@ export function BillsDashboardClient({
   form,
   isAdmin,
   peopleRows,
+  stores,
   authEmpId,
   authName,
   search: initialSearch = "",
@@ -91,6 +95,27 @@ export function BillsDashboardClient({
 }: BillsDashboardClientProps) {
   const router = useRouter();
   const [rows, setRows] = useState<SheetRow[]>(initialRows);
+  const [loadedStores, setLoadedStores] = useState<SheetRow[]>(stores || cachedStores || []);
+
+  useEffect(() => {
+    if (stores && stores.length > 0) {
+      setLoadedStores(stores);
+      cachedStores = stores;
+      return;
+    }
+    if (!cachedStores) {
+      fetch("/api/rows?tableName=Store&limit=1000")
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          const sRows = data?.rows || data || [];
+          if (Array.isArray(sRows) && sRows.length > 0) {
+            cachedStores = sRows;
+            setLoadedStores(sRows);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [stores]);
 
   useEffect(() => {
     setRows(initialRows);
@@ -217,6 +242,45 @@ export function BillsDashboardClient({
     }, {});
   }, [peopleRows]);
 
+  const resolveStoreName = useCallback((token: string): string => {
+    const trimmed = (token || "").trim();
+    if (!trimmed) return "";
+    const list = (stores && stores.length > 0) ? stores : (loadedStores.length > 0 ? loadedStores : (cachedStores || []));
+    const found = list.find((s) => {
+      const code = String(s["id_store"] || s.id || "").trim().toLowerCase();
+      const shortName = String(s["ชื่อร้านค้า"] || "").trim().toLowerCase();
+      const fullName = String(s["ชื่อเต็ม"] || "").trim().toLowerCase();
+      const target = trimmed.toLowerCase();
+      return code === target || shortName === target || fullName === target;
+    });
+    if (found) {
+      return String(found["ชื่อร้านค้า"] || found["ชื่อเต็ม"] || found.name || "") || trimmed;
+    }
+    return trimmed;
+  }, [stores, loadedStores]);
+
+  const formatVendorDisplay = useCallback((raw: unknown): string => {
+    const str = String(raw || "").trim();
+    if (!str || str === "-") return "-";
+    if (str.includes(",")) {
+      return str
+        .split(",")
+        .map((t) => {
+          const trimmed = t.trim();
+          const resolvedStore = resolveStoreName(trimmed);
+          if (resolvedStore !== trimmed) return resolvedStore;
+          if (requesterNames[trimmed]) return requesterNames[trimmed];
+          return trimmed;
+        })
+        .filter(Boolean)
+        .join(", ");
+    }
+    const resolvedStore = resolveStoreName(str);
+    if (resolvedStore !== str) return resolvedStore;
+    if (requesterNames[str]) return requesterNames[str];
+    return str;
+  }, [resolveStoreName, requesterNames]);
+
   const filteredRows = useMemo(() => {
     const query = filters.search.trim().toLowerCase();
     const requester = filters.requester.trim();
@@ -256,8 +320,10 @@ export function BillsDashboardClient({
       }
       if (query) {
         // Fast search checks over primary visible fields first before scanning all values
+        const vendorDisplay = formatVendorDisplay(row["ร้าน/บุคคล"]);
         const primaryMatch = 
           String(row["ชื่อ Project"] || "").toLowerCase().includes(query) ||
+          vendorDisplay.toLowerCase().includes(query) ||
           String(row["ร้าน/บุคคล"] || "").toLowerCase().includes(query) ||
           String(row["สินค้า/ทำงาน"] || "").toLowerCase().includes(query) ||
           String(row["ผู้เบิก"] || "").toLowerCase().includes(query) ||
@@ -775,8 +841,8 @@ export function BillsDashboardClient({
                         </span>
                       </div>
 
-                      <div className="text-xs text-slate-700 font-medium truncate" title={String(row["ร้าน/บุคคล"] || "")}>
-                        {String(row["ร้าน/บุคคล"] || "-")}
+                      <div className="text-xs text-slate-700 font-medium truncate" title={formatVendorDisplay(row["ร้าน/บุคคล"])}>
+                        {formatVendorDisplay(row["ร้าน/บุคคล"])}
                       </div>
 
                       <div className="text-xs text-slate-500 truncate flex items-center gap-1.5">
@@ -850,14 +916,20 @@ export function BillsDashboardClient({
                         <td className="py-2 px-3 text-center border-r border-slate-100" onClick={(e) => e.stopPropagation()}>
                           <BillImageThumbnail value={row["รูปถ่ายบิล"]} />
                         </td>
-                        <td className="py-2 px-3 text-slate-800 max-w-[160px] truncate border-r border-slate-100" title={String(row["ร้าน/บุคคล"] || "")}>
-                          {String(row["ร้าน/บุคคล"] || "-")}
+                        <td className="py-2 px-3 text-slate-800 max-w-[160px] truncate border-r border-slate-100" title={formatVendorDisplay(row["ร้าน/บุคคล"])}>
+                          {formatVendorDisplay(row["ร้าน/บุคคล"])}
                         </td>
                         <td className="py-2 px-3 text-slate-700 max-w-[180px] truncate border-r border-slate-100" title={String(row["สินค้า/ทำงาน"] || "")}>
                           {String(row["สินค้า/ทำงาน"] || "-")}
                         </td>
                         <td className="py-2 px-3 text-center text-slate-700 border-r border-slate-100">{String(row["บิล"] || "-")}</td>
-                        <td className="py-2 px-3 text-center text-slate-600 border-r border-slate-100">{String(row["ประเภท"] || "-")}</td>
+                        <td className="py-2 px-3 text-center border-r border-slate-100">
+                          {row["ประเภท"] ? (
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium border ${getCostCodeBadgeStyle(String(row["ประเภท"]))}`}>
+                              {String(row["ประเภท"])}
+                            </span>
+                          ) : "-"}
+                        </td>
                         <td className="py-2 px-3 text-right text-slate-900 border-r border-slate-100">{money(row["ยอดเงิน"])}</td>
                         <td className="py-2 px-3 text-center text-xs text-slate-500 border-r border-slate-100">{conditions || "-"}</td>
                         <td className="py-2 px-3 text-center text-slate-700 border-r border-slate-100">{requesterName}</td>
@@ -974,6 +1046,7 @@ export function BillsDashboardClient({
       {selectedDetailIndex !== null && (
         <BillDetailDrawer
           bill={visibleRows[selectedDetailIndex] || null}
+          stores={(stores && stores.length > 0) ? stores : loadedStores}
           onClose={() => setSelectedDetailIndex(null)}
           onEdit={(bill) => {
             setSelectedDetailIndex(null);

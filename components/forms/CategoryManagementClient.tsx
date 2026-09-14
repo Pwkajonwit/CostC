@@ -3,24 +3,21 @@
 import { useState } from "react";
 import { Check, FolderPlus, Layers, Plus, Save, Sparkles, Trash2, Users, Store, Package } from "lucide-react";
 
+import {
+  ALL_STORE_CATEGORIES,
+  ALL_CONTRACTOR_CATEGORIES,
+  ALL_NEW_CATEGORIES,
+  EQUIPMENT_CATEGORY_OPTIONS
+} from "@/lib/cost-codes";
+
 type CategoryManagementClientProps = {
   initialOptions: Record<string, string[]>;
 };
 
-const DEFAULT_MASTER = [
-  "1.ค่าของ",
-  "2.ค่าแรง",
-  "3.พนักงาน",
-  "4.น้ำมัน",
-  "5.ซ่อมรถ",
-  "6.เครื่องจักร",
-  "7.เครื่องมือ",
-  "8.อื่นๆ"
-];
-
-const DEFAULT_CONTRACTOR = ["2.ค่าแรง", "3.พนักงาน", "8.อื่นๆ"];
-const DEFAULT_STORE = ["1.ค่าของ", "4.น้ำมัน", "5.ซ่อมรถ", "6.เครื่องจักร", "7.เครื่องมือ", "8.อื่นๆ"];
-const DEFAULT_STORE_ITEM = ["4.น้ำมัน", "5.ซ่อมรถ", "6.เครื่องจักร"];
+const DEFAULT_MASTER = ALL_NEW_CATEGORIES;
+const DEFAULT_CONTRACTOR = ALL_CONTRACTOR_CATEGORIES;
+const DEFAULT_STORE = ALL_STORE_CATEGORIES;
+const DEFAULT_STORE_ITEM = EQUIPMENT_CATEGORY_OPTIONS;
 
 export function CategoryManagementClient({ initialOptions }: CategoryManagementClientProps) {
   const [masterCategories, setMasterCategories] = useState<string[]>(() => {

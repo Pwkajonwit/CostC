@@ -6,6 +6,7 @@ import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 import { getNextBillSequence } from "@/lib/supabase/supabase-db";
 import type { FieldSchema, RefOption, SheetRow } from "@/lib/types";
 import { getTodayDateIso } from "@/lib/utils/dates";
+import { ALL_STORE_CATEGORIES, ALL_CONTRACTOR_CATEGORIES } from "@/lib/cost-codes";
 
 export async function getFormPayload(tableName: string, preloadedRows?: Record<string, SheetRow[]>) {
   const schema = await getFormSchemaWithSheetOptions(tableName);
@@ -45,10 +46,10 @@ async function listHydratedContractOptions(column: FieldSchema, preloadedRows?: 
   const [contractRows, contractorRows] = await Promise.all([
     preloadedRows?.[TABLES.CONTRACT_WORK]
       ? hydrateContractRows(preloadedRows[TABLES.CONTRACT_WORK], {
-          projects: preloadedRows[TABLES.PROJECT],
-          contractors: preloadedRows[TABLES.CONTRACTOR],
-          dataRows: preloadedRows[TABLES.DATA],
-        })
+        projects: preloadedRows[TABLES.PROJECT],
+        contractors: preloadedRows[TABLES.CONTRACTOR],
+        dataRows: preloadedRows[TABLES.DATA],
+      })
       : hydrateContractRows(await getRows(TABLES.CONTRACT_WORK, 30_000)),
     preloadedRows?.[TABLES.CONTRACTOR]
       ? Promise.resolve(preloadedRows[TABLES.CONTRACTOR])
@@ -72,13 +73,11 @@ async function listHydratedContractOptions(column: FieldSchema, preloadedRows?: 
       const idVal = String(row[keyColumn]);
       const contractorId = String(row["id_Contractor"] || "").trim();
       const contractorName = contractorMap.get(contractorId) ||
-                             String(row["ชื่อเล่น"] || row["ผู้รับเหมา"] || row["ชื่อ-นามสกุล"] || "").trim();
+        String(row["ชื่อเล่น"] || row["ผู้รับเหมา"] || row["ชื่อ-นามสกุล"] || "").trim();
       const details = String(row["รายละเอียดงาน"] || "").trim();
 
       let displayLabel = idVal;
-      if (contractorName && details) {
-        displayLabel = `${contractorName} (${details})`;
-      } else if (contractorName) {
+      if (contractorName) {
         displayLabel = contractorName;
       } else if (details) {
         displayLabel = details;
@@ -113,12 +112,7 @@ async function getFormSchemaWithSheetOptions(tableName: string): Promise<FieldSc
 
   const DEFAULT_SYSTEM_OPTIONS: Record<string, string[]> = {
     "ชื่อเครื่องมือ": ["สว่านเจาะเหล็กไฟฟ้า", "สว่านเจาะปูน Rotary", "ลูกหมูขนาด 4\"", "ลูกหมูขนาด 7\"", "ไฟเบอร์ตัดเหล็ก"],
-    "สินค้า": [
-      "1 เหล็กเส้น", "2 เหล็กรูปพรรณ", "3 คอนกรีต", "4 ไม้แบบ", "5 วัสดุมุง", "6 ฝ้าผนัง",
-      "7 ปูพื้น", "8 กระจก", "9 ไฟฟ้า", "10 ประปา", "11 อื่นๆ(วัสดุ)", "12 สีเคมี",
-      "13 สุขภัณฑ์", "14 บิวอิน", "15 แอร์", "16 ดิน", "17 หินทราย", "18 เตรียมงาน",
-      "101 น้ำมัน", "102 ค่าขนส่ง", "103 เครื่องจักร", "104 ซ่อมรถ", "200 ดำเนินการ(อื่นๆ)", "non"
-    ],
+    "สินค้า": ALL_STORE_CATEGORIES,
     "vat": ["1", "3", "5", "7", "ระบุเอง"],
     "หัก": ["1", "3", "5", "ระบุเอง"],
     "เครดิต": ["30", "45", "60", "ระบุเอง"],
@@ -167,7 +161,7 @@ async function getFormSchemaWithSheetOptions(tableName: string): Promise<FieldSc
     }
 
     if (field.name === "สินค้า") {
-      const coreProducts = ["101 น้ำมัน", "102 ค่าขนส่ง", "103 เครื่องจักร", "104 ซ่อมรถ", "200 ดำเนินการ(อื่นๆ)"];
+      const coreProducts = ["101 น้ำมัน", "102 ค่าขนส่ง", "103 เครื่องจักร", "104 ซ่อมรถ", "105 เครื่องมือ", "200 ดำเนินการ(อื่นๆ)"];
       for (const cp of coreProducts) {
         if (!fieldValues.some(v => v === cp || v.includes(cp.split(" ")[1]) || v.startsWith(cp.split(" ")[0]))) {
           const nonIdx = fieldValues.indexOf("non");
@@ -211,8 +205,8 @@ async function getFormSchemaWithSheetOptions(tableName: string): Promise<FieldSc
           .filter(Boolean);
       }
 
-      const productOptions = (Array.isArray(systemOptions["สินค้า"]) && systemOptions["สินค้า"].length > 1) 
-        ? systemOptions["สินค้า"] 
+      const productOptions = (Array.isArray(systemOptions["สินค้า"]) && systemOptions["สินค้า"].length > 1)
+        ? systemOptions["สินค้า"]
         : undefined;
 
       const defaultProducts = DEFAULT_SYSTEM_OPTIONS["สินค้า"] || [];
@@ -288,9 +282,9 @@ function getBillTypeOptionSets(rows: SheetRow[], systemOptions?: Record<string, 
     : unique(rows.map(row => String(row["ประเภท Name3"] || "")));
 
   return {
-    contractor: contractor.length > 0 ? contractor : ["2.ค่าแรง", "3.พนักงาน", "8.อื่นๆ"],
-    storeDefault: storeDefault.length > 0 ? storeDefault : ["4.น้ำมัน", "5.ซ่อมรถ", "6.เครื่องจักร"],
-    storeWithItem: storeWithItem.length > 0 ? storeWithItem : ["1.ค่าของ", "7.เครื่องมือ", "8.อื่นๆ"]
+    contractor: contractor.length > 0 ? contractor : ALL_CONTRACTOR_CATEGORIES,
+    storeDefault: storeDefault.length > 0 ? storeDefault : ALL_STORE_CATEGORIES,
+    storeWithItem: storeWithItem.length > 0 ? storeWithItem : ALL_STORE_CATEGORIES
   };
 }
 

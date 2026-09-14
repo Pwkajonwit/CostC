@@ -3,6 +3,7 @@ export { supabaseAdmin };
 import { normalizeDateToIso, formatDateDisplay, getTodayDateIso } from "@/lib/utils/dates";
 import { cached, clearCache } from "@/lib/utils/cache";
 import { isVatActive, isDeductActive, parseDeductPercent, parseCreditDays } from "@/lib/project-summary";
+import { ALL_STORE_CATEGORIES, ALL_CONTRACTOR_CATEGORIES } from "@/lib/cost-codes";
 
 export type SheetRow = Record<string, any>;
 
@@ -334,8 +335,10 @@ export function mapSupabaseRowToSheetRow(dbTable: string, row: Record<string, an
     res["ยอดรวม vat"] = row.vat_total ?? row["ยอดรวม vat"];
     res["วันที่"] = row.start_date ? String(row.start_date) : (row.created_at ? getTodayDateIso(new Date(row.created_at)) : "");
     res["color"] = row.color ?? row["color"];
-    res["บริษัท"] = row.company ?? row["บริษัท"];
     res["รับผิดชอบ"] = row.responsible_person ?? row["รับผิดชอบ"];
+    if (dataObj && typeof dataObj === "object") {
+      Object.assign(res, dataObj);
+    }
   } else if (dbTable === "stores") {
     res["id_store"] = row.id ?? row["id_store"];
     res["_sheetRow"] = row.id ?? row._sheetRow;
@@ -703,6 +706,18 @@ export function mapSheetRowToSupabaseRow(tableName: string, row: Record<string, 
     if (row["color"] !== undefined) dbRow.color = row["color"];
     if (row["บริษัท"] !== undefined) dbRow.company = row["บริษัท"];
     if (row["รับผิดชอบ"] !== undefined) dbRow.responsible_person = row["รับผิดชอบ"];
+
+    // Preserve dynamic budget allocation fields into data JSONB
+    const projectData = (row.data && typeof row.data === "object") ? { ...row.data } : {};
+    Object.entries(row).forEach(([k, v]) => {
+      if (
+        !k.startsWith("_") &&
+        !["ID Project", "ชื่อ Project", "ชื่อลูกค้า", "สถานที่", "ยอดงาน", "งบไม่เกิน", "ยอดรวม vat", "วันที่", "color", "บริษัท", "รับผิดชอบ", "id", "name", "customer_name", "location", "work_amount", "budget", "vat_total", "start_date", "company", "responsible_person", "created_at", "data"].includes(k)
+      ) {
+        projectData[k] = v;
+      }
+    });
+    dbRow.data = projectData;
   } else if (dbTable === "stores") {
     if (row["id_store"] !== undefined || row["id"] !== undefined) {
       dbRow.id = row["id_store"] ?? row["id"];
@@ -1506,9 +1521,9 @@ export async function getRowsFromSupabase(tableName: string, maxRows = 10_000): 
     if (!data || data.length === 0) {
       if ((tableName === "ประเภท" || dbTable === "categories")) {
         const options = await getSystemOptionsFromSupabase();
-        const list1 = options["ประเภท (ผู้รับเหมา)"] || options["ประเภท_ผู้รับเหมา"] || ["2.ค่าแรง", "3.พนักงาน", "8.อื่นๆ"];
-        const list2 = options["ประเภท (ร้านค้า)"] || options["ประเภท_ร้านค้า"] || ["1.ค่าของ", "4.น้ำมัน", "5.ซ่อมรถ", "6.เครื่องจักร", "7.เครื่องมือ", "8.อื่นๆ"];
-        const list3 = options["ประเภท (ร้านค้า+เลือกสินค้า)"] || options["ประเภท_ร้านค้า_สินค้า"] || ["4.น้ำมัน", "5.ซ่อมรถ", "6.เครื่องจักร"];
+        const list1 = options["ประเภท (ผู้รับเหมา)"] || options["ประเภท_ผู้รับเหมา"] || ALL_CONTRACTOR_CATEGORIES;
+        const list2 = options["ประเภท (ร้านค้า)"] || options["ประเภท_ร้านค้า"] || ALL_STORE_CATEGORIES;
+        const list3 = options["ประเภท (ร้านค้า+เลือกสินค้า)"] || options["ประเภท_ร้านค้า_สินค้า"] || ALL_STORE_CATEGORIES;
 
         const maxLen = Math.max(list1.length, list2.length, list3.length);
         const generatedRows: SheetRow[] = [];
@@ -1620,9 +1635,9 @@ export async function getRowsFromSupabase(tableName: string, maxRows = 10_000): 
 
     if ((tableName === "ประเภท" || dbTable === "categories") && mapped.length === 0) {
       const options = await getSystemOptionsFromSupabase();
-      const list1 = options["ประเภท (ผู้รับเหมา)"] || options["ประเภท_ผู้รับเหมา"] || ["2.ค่าแรง", "3.พนักงาน", "8.อื่นๆ"];
-      const list2 = options["ประเภท (ร้านค้า)"] || options["ประเภท_ร้านค้า"] || ["1.ค่าของ", "4.น้ำมัน", "5.ซ่อมรถ", "6.เครื่องจักร", "7.เครื่องมือ", "8.อื่นๆ"];
-      const list3 = options["ประเภท (ร้านค้า+เลือกสินค้า)"] || options["ประเภท_ร้านค้า_สินค้า"] || ["4.น้ำมัน", "5.ซ่อมรถ", "6.เครื่องจักร"];
+      const list1 = options["ประเภท (ผู้รับเหมา)"] || options["ประเภท_ผู้รับเหมา"] || ALL_CONTRACTOR_CATEGORIES;
+      const list2 = options["ประเภท (ร้านค้า)"] || options["ประเภท_ร้านค้า"] || ALL_STORE_CATEGORIES;
+      const list3 = options["ประเภท (ร้านค้า+เลือกสินค้า)"] || options["ประเภท_ร้านค้า_สินค้า"] || ALL_STORE_CATEGORIES;
 
       const maxLen = Math.max(list1.length, list2.length, list3.length);
       const generatedRows: SheetRow[] = [];

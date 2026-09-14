@@ -32,6 +32,18 @@ import {
   isMaterialOrExpenseRow,
 } from "@/lib/reports";
 import { isPaidBill, isCommittedBill } from "@/lib/bills/bill-status";
+import {
+  MATERIAL_100_CODES,
+  EQUIPMENT_500_CODES,
+  isMaterialCost,
+  isLaborCost,
+  isStaffCost,
+  isFuelCost,
+  isRepairCost,
+  isMachineCost,
+  isToolCost,
+  isOtherExpense,
+} from "@/lib/cost-codes";
 
 type ReportsDashboardClientProps = {
   initialDataRows: SheetRow[];
@@ -85,14 +97,14 @@ function formatDateThai(dateVal: unknown): string {
 }
 
 const CATEGORIES_LIST = [
-  { key: "1.ค่าของ", label: "1.ค่าของ", searchKey: "ค่าของ", color: "bg-emerald-50 text-emerald-900 border-emerald-200" },
-  { key: "2.ค่าแรง", label: "2.ค่าแรง", searchKey: "ค่าแรง", color: "bg-indigo-50 text-indigo-900 border-indigo-200" },
-  { key: "3.พนักงาน", label: "3.พนักงาน", searchKey: "พนักงาน", color: "bg-purple-50 text-purple-900 border-purple-200" },
-  { key: "4.น้ำมัน", label: "4.น้ำมัน", searchKey: "น้ำมัน", color: "bg-amber-50 text-amber-900 border-amber-200" },
-  { key: "5.ซ่อมรถ", label: "5.ซ่อมรถ", searchKey: "ซ่อมรถ", color: "bg-orange-50 text-orange-900 border-orange-200" },
-  { key: "6.เครื่องจักร", label: "6.เครื่องจักร", searchKey: "เครื่องจักร", color: "bg-blue-50 text-blue-900 border-blue-200" },
-  { key: "7.เครื่องมือ", label: "7.เครื่องมือ", searchKey: "เครื่องมือ", color: "bg-cyan-50 text-cyan-900 border-cyan-200" },
-  { key: "8.อื่นๆ", label: "8.อื่นๆ", searchKey: "อื่นๆ", color: "bg-rose-50 text-rose-900 border-rose-200" },
+  { key: "หมวด 100 ค่าของ", label: "หมวด 100 ค่าของ", searchKey: "ค่าของ", matcher: isMaterialCost, color: "bg-emerald-50 text-emerald-900 border-emerald-200" },
+  { key: "หมวด 200 ค่าแรง", label: "หมวด 200 ค่าแรง", searchKey: "ค่าแรง", matcher: isLaborCost, color: "bg-indigo-50 text-indigo-900 border-indigo-200" },
+  { key: "หมวด 300 พนักงาน", label: "หมวด 300 พนักงาน", searchKey: "พนักงาน", matcher: isStaffCost, color: "bg-purple-50 text-purple-900 border-purple-200" },
+  { key: "501 น้ำมัน", label: "501 น้ำมัน", searchKey: "น้ำมัน", matcher: isFuelCost, color: "bg-amber-50 text-amber-900 border-amber-200" },
+  { key: "502 ซ่อมรถ", label: "502 ซ่อมรถ", searchKey: "ซ่อมรถ", matcher: isRepairCost, color: "bg-orange-50 text-orange-900 border-orange-200" },
+  { key: "503 เครื่องจักร", label: "503 เครื่องจักร", searchKey: "เครื่องจักร", matcher: isMachineCost, color: "bg-blue-50 text-blue-900 border-blue-200" },
+  { key: "504 เครื่องมือ", label: "504 เครื่องมือ", searchKey: "เครื่องมือ", matcher: isToolCost, color: "bg-cyan-50 text-cyan-900 border-cyan-200" },
+  { key: "อื่นๆ / ดำเนินการ", label: "อื่นๆ / ดำเนินการ", searchKey: "อื่นๆ", matcher: isOtherExpense, color: "bg-rose-50 text-rose-900 border-rose-200" },
 ];
 
 type ProductCategoryItemConfig = {
@@ -103,30 +115,18 @@ type ProductCategoryItemConfig = {
 };
 
 const DEFAULT_PRODUCT_CATEGORIES_LIST: ProductCategoryItemConfig[] = [
-  { code: "1", label: "1. เหล็กเส้น", group: "หมวดงานโครงสร้าง", searchKeys: ["1", "เหล็กเส้น"] },
-  { code: "2", label: "2. รูปพรรณ", group: "หมวดงานโครงสร้าง", searchKeys: ["2", "รูปพรรณ"] },
-  { code: "3", label: "3. คอนกรีต", group: "หมวดงานโครงสร้าง", searchKeys: ["3", "คอนกรีต"] },
-  { code: "4", label: "4. ไม้แบบ", group: "หมวดงานโครงสร้าง", searchKeys: ["4", "ไม้แบบ"] },
-  { code: "5", label: "5. วัสดุมุง", group: "หมวดงานสถาปัตยกรรม & ตกแต่ง", searchKeys: ["5", "วัสดุมุง"] },
-  { code: "6", label: "6. ฝ้าผนัง", group: "หมวดงานสถาปัตยกรรม & ตกแต่ง", searchKeys: ["6", "ฝ้าผนัง"] },
-  { code: "7", label: "7. ปูพื้น", group: "หมวดงานสถาปัตยกรรม & ตกแต่ง", searchKeys: ["7", "ปูพื้น"] },
-  { code: "8", label: "8. กระจก", group: "หมวดงานสถาปัตยกรรม & ตกแต่ง", searchKeys: ["8", "กระจก"] },
-  { code: "9", label: "9. ไฟฟ้า", group: "หมวดงานระบบ M&E", searchKeys: ["9", "ไฟฟ้า"] },
-  { code: "10", label: "10. ประปา", group: "หมวดงานระบบ M&E", searchKeys: ["10", "ประปา"] },
-  { code: "11", label: "11. อื่นๆ", group: "หมวดงานทั่วไป & ดำเนินการ", searchKeys: ["11", "อื่นๆ"] },
-  { code: "12", label: "12. สีเคมี", group: "หมวดงานสถาปัตยกรรม & ตกแต่ง", searchKeys: ["12", "สีเคมี"] },
-  { code: "13", label: "13. สุขภัณฑ์", group: "หมวดงานสถาปัตยกรรม & ตกแต่ง", searchKeys: ["13", "สุขภัณฑ์"] },
-  { code: "14", label: "14. นั่งร้าน", group: "หมวดงานสถาปัตยกรรม & ตกแต่ง", searchKeys: ["14", "นั่งร้าน", "บิวอิน"] },
-  { code: "15", label: "15. แอร์", group: "หมวดงานระบบ M&E", searchKeys: ["15", "แอร์"] },
-  { code: "16", label: "16. ดิน", group: "หมวดงานเตรียมดิน & โลจิสติกส์", searchKeys: ["16", "ดิน"] },
-  { code: "17", label: "17. หินทราย", group: "หมวดงานเตรียมดิน & โลจิสติกส์", searchKeys: ["17", "หินทราย"] },
-  { code: "18", label: "18. เตรียมงาน", group: "หมวดงานเตรียมดิน & โลจิสติกส์", searchKeys: ["18", "เตรียมงาน"] },
-  { code: "101", label: "101. น้ำมัน", group: "หมวดงานเตรียมดิน & โลจิสติกส์", searchKeys: ["101", "น้ำมัน"] },
-  { code: "102", label: "102. ค่าขนส่ง", group: "หมวดงานเตรียมดิน & โลจิสติกส์", searchKeys: ["102", "ค่าขนส่ง"] },
-  { code: "103", label: "103. เครื่องจักร", group: "หมวดงานเตรียมดิน & โลจิสติกส์", searchKeys: ["103", "เครื่องจักร"] },
-  { code: "104", label: "104. ซ่อมรถ", group: "หมวดงานเตรียมดิน & โลจิสติกส์", searchKeys: ["104", "ซ่อมรถ"] },
-  { code: "200", label: "200. ดำเนินการ(อื่นๆ)", group: "หมวดงานทั่วไป & ดำเนินการ", searchKeys: ["200", "ดำเนินการ"] },
-  { code: "non", label: "non (7.เครื่องมือ 8.อื่นๆ ที่พัก)", group: "หมวดงานทั่วไป & ดำเนินการ", searchKeys: ["non"] },
+  ...MATERIAL_100_CODES.map((c) => ({
+    code: c.code,
+    label: `${c.code}. ${c.name}`,
+    group: "หมวด 100 ค่าของ",
+    searchKeys: [c.code, c.name, `${c.code} ${c.name}`],
+  })),
+  ...EQUIPMENT_500_CODES.map((c) => ({
+    code: c.code,
+    label: `${c.code}. ${c.name}`,
+    group: "หมวด 500 เครื่องจักร/เครื่องมือ/ยานพาหนะ",
+    searchKeys: [c.code, c.name, `${c.code} ${c.name}`],
+  })),
 ];
 
 export function ReportsDashboardClient({
@@ -479,8 +479,12 @@ export function ReportsDashboardClient({
 
     const breakdown = CATEGORIES_LIST.map((cat) => {
       const rows = searchFilteredRows.filter((r) => {
-        const rowCat = getRowCategory(r).toLowerCase();
-        return rowCat.includes(cat.searchKey) || rowCat.includes(cat.key.toLowerCase());
+        const rowCat = getRowCategory(r);
+        return (
+          (cat.matcher && cat.matcher(rowCat)) ||
+          rowCat.toLowerCase().includes(cat.searchKey) ||
+          rowCat.toLowerCase().includes(cat.key.toLowerCase())
+        );
       });
       const count = rows.length;
       const amount = rows.reduce((sum, r) => sum + getRowAmount(r), 0);
@@ -496,10 +500,11 @@ export function ReportsDashboardClient({
   const categoryFilteredRows = useMemo(() => {
     if (selectedCategory === "all") return searchFilteredRows;
     const catObj = CATEGORIES_LIST.find((c) => c.key === selectedCategory);
-    const searchKey = catObj ? catObj.searchKey : selectedCategory.toLowerCase();
     return searchFilteredRows.filter((r) => {
-      const rowCat = getRowCategory(r).toLowerCase();
-      return rowCat.includes(searchKey) || rowCat.includes(selectedCategory.toLowerCase());
+      const rowCat = getRowCategory(r);
+      if (catObj?.matcher && catObj.matcher(rowCat)) return true;
+      const searchKey = catObj ? catObj.searchKey : selectedCategory.toLowerCase();
+      return rowCat.toLowerCase().includes(searchKey) || rowCat.toLowerCase().includes(selectedCategory.toLowerCase());
     });
   }, [searchFilteredRows, selectedCategory]);
 

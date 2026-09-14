@@ -12,7 +12,7 @@ import { hydrateContractorsWithYearlySpend } from "@/lib/contractors/contractor-
 import { money, toNumber } from "@/lib/utils/numbers";
 import { getHeaders, getRows } from "@/lib/db";
 import { getViewById, getViewColumns } from "@/lib/views";
-import { CategoryManagementClient } from "@/components/forms/CategoryManagementClient";
+import { CategoryTableView } from "@/components/views/CategoryTableView";
 import { getSystemOptionsFromSupabase } from "@/lib/supabase/supabase-db";
 import { hydrateProjectRowsForList } from "@/lib/project-summary";
 import { DetailEditTrigger } from "@/components/forms/DetailEditTrigger";
@@ -370,10 +370,9 @@ async function renderView(
   if (view.id === "bill-follow") return <BillFollowDashboard />;
   if (view.id === "work-status") return <WorkStatusDashboard />;
   if (view.id === "categories") {
-    const options = await getSystemOptionsFromSupabase();
     return (
-      <section className="p-4 sm:p-6 lg:p-8">
-        <CategoryManagementClient initialOptions={options} />
+      <section className="p-3 sm:p-5 lg:p-6">
+        <CategoryTableView />
       </section>
     );
   }

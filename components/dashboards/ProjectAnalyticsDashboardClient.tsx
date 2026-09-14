@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -45,6 +45,16 @@ import {
 } from "@/lib/project-summary";
 import { ProjectBudgetControlMatrix } from "@/components/dashboards/ProjectBudgetControlMatrix";
 import { ProjectExecutiveCharts } from "@/components/dashboards/ProjectExecutiveCharts";
+import {
+  isMaterialCost,
+  isLaborCost,
+  isStaffCost,
+  isFuelCost,
+  isRepairCost,
+  isMachineCost,
+  isToolCost,
+  isOtherExpense
+} from "@/lib/cost-codes";
 
 type ProjectAnalyticsDashboardClientProps = {
   initialDataRows: SheetRow[];
@@ -64,14 +74,34 @@ const THAI_MONTHS_SHORT = [
 
 const CATEGORY_COLORS: Record<string, { hex: string; bg: string; text: string }> = {
   "1.ค่าของ": { hex: "#059669", bg: "bg-emerald-600", text: "text-emerald-700" },
+  "หมวด 100 ค่าของ": { hex: "#059669", bg: "bg-emerald-600", text: "text-emerald-700" },
   "2.ค่าแรง": { hex: "#4f46e5", bg: "bg-indigo-600", text: "text-indigo-700" },
+  "หมวด 200 ค่าแรง": { hex: "#4f46e5", bg: "bg-indigo-600", text: "text-indigo-700" },
   "3.พนักงาน": { hex: "#9333ea", bg: "bg-purple-600", text: "text-purple-700" },
+  "หมวด 300 พนักงาน": { hex: "#9333ea", bg: "bg-purple-600", text: "text-purple-700" },
   "4.น้ำมัน": { hex: "#d97706", bg: "bg-amber-600", text: "text-amber-700" },
+  "501 น้ำมัน": { hex: "#d97706", bg: "bg-amber-600", text: "text-amber-700" },
   "5.ซ่อมรถ": { hex: "#ea580c", bg: "bg-orange-600", text: "text-orange-700" },
+  "502 ซ่อมรถ": { hex: "#ea580c", bg: "bg-orange-600", text: "text-orange-700" },
   "6.เครื่องจักร": { hex: "#2563eb", bg: "bg-blue-600", text: "text-blue-700" },
+  "503 เครื่องจักร": { hex: "#2563eb", bg: "bg-blue-600", text: "text-blue-700" },
   "7.เครื่องมือ": { hex: "#0891b2", bg: "bg-cyan-600", text: "text-cyan-700" },
+  "504 เครื่องมือ": { hex: "#0891b2", bg: "bg-cyan-600", text: "text-cyan-700" },
   "8.อื่นๆ": { hex: "#e11d48", bg: "bg-rose-600", text: "text-rose-700" },
+  "อื่นๆ / ดำเนินการ": { hex: "#e11d48", bg: "bg-rose-600", text: "text-rose-700" },
 };
+
+function getCategoryColor(name: string): { hex: string; bg: string; text: string } {
+  if (CATEGORY_COLORS[name]) return CATEGORY_COLORS[name];
+  if (isMaterialCost(name)) return { hex: "#059669", bg: "bg-emerald-600", text: "text-emerald-700" };
+  if (isLaborCost(name)) return { hex: "#4f46e5", bg: "bg-indigo-600", text: "text-indigo-700" };
+  if (isStaffCost(name)) return { hex: "#9333ea", bg: "bg-purple-600", text: "text-purple-700" };
+  if (isFuelCost(name)) return { hex: "#d97706", bg: "bg-amber-600", text: "text-amber-700" };
+  if (isRepairCost(name)) return { hex: "#ea580c", bg: "bg-orange-600", text: "text-orange-700" };
+  if (isMachineCost(name)) return { hex: "#2563eb", bg: "bg-blue-600", text: "text-blue-700" };
+  if (isToolCost(name)) return { hex: "#0891b2", bg: "bg-cyan-600", text: "text-cyan-700" };
+  return { hex: "#e11d48", bg: "bg-rose-600", text: "text-rose-700" };
+}
 
 const PALETTE = [
   "#059669", "#4f46e5", "#9333ea", "#d97706", "#ea580c",
@@ -253,8 +283,8 @@ export function ProjectAnalyticsDashboardClient({
       const remaining = budgetCap - spent;
       const burnRate = budgetCap > 0 ? (spent / budgetCap) * 100 : 0;
 
-      const mat = paidRows.filter(r => getRowCategory(r).includes("ค่าของ")).reduce((sum, r) => sum + getRowAmount(r), 0);
-      const lab = paidRows.filter(r => getRowCategory(r).includes("ค่าแรง")).reduce((sum, r) => sum + getRowAmount(r), 0);
+      const mat = paidRows.filter(r => isMaterialCost(getRowCategory(r))).reduce((sum, r) => sum + getRowAmount(r), 0);
+      const lab = paidRows.filter(r => isLaborCost(getRowCategory(r))).reduce((sum, r) => sum + getRowAmount(r), 0);
       const oth = spent - (mat + lab);
 
       return {
@@ -297,7 +327,7 @@ export function ProjectAnalyticsDashboardClient({
         amount: data.amount,
         count: data.count,
         percent: total > 0 ? (data.amount / total) * 100 : 0,
-        color: CATEGORY_COLORS[name]?.hex || PALETTE[0],
+        color: getCategoryColor(name).hex,
         rows: data.rows,
       }))
       .sort((a, b) => b.amount - a.amount);

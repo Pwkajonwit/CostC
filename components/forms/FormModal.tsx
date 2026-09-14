@@ -19,6 +19,10 @@ import {
   FileText,
   Image as ImageIcon,
   ImagePlus,
+  Layers,
+  Package,
+  HardHat,
+  Users,
   Plus,
   Receipt,
   Save,
@@ -36,32 +40,38 @@ import { normalizeDateToIso, parseDateStrict, toInputDateValue, getTodayDateIso 
 import { imagePreviewUrl } from "@/components/bills/BillImageThumbnail";
 import { compressImageFiles } from "@/lib/utils/image-compressor";
 import { money } from "@/lib/utils/numbers";
+import {
+  ALL_STORE_CATEGORIES,
+  ALL_CONTRACTOR_CATEGORIES,
+  ALL_NEW_CATEGORIES,
+  LABOR_CATEGORY_OPTIONS,
+  STAFF_CATEGORY_OPTIONS,
+  SUB_ITEMS_123,
+  SUB_ITEMS_223,
+  isMaterialCost,
+  isLaborCost,
+  isStaffCost,
+  isFuelCost,
+  isRepairCost,
+  isMachineCost,
+  isToolCost,
+  isOtherExpense,
+  getExpenseFieldForCategory,
+  getCostCodeBadgeStyle,
+  isFuelProduct,
+  isMachineProduct,
+  isCarRepairProduct,
+  isOtherExpenseProduct,
+  isToolProduct,
+  deriveCategoryFromProduct,
+  getBudgetControlDisplayLabel,
+  getCostCodeBudgetField,
+} from "@/lib/cost-codes";
 
-const ProjectBudgetAllocator = dynamic(
-  () => import("@/components/forms/ProjectBudgetAllocator").then(mod => mod.ProjectBudgetAllocator),
-  { ssr: false }
-);
-
-const BillCategoryBudgetGuardrail = dynamic(
-  () => import("@/components/forms/BillCategoryBudgetGuardrail").then(mod => mod.BillCategoryBudgetGuardrail),
-  { ssr: false }
-);
-
-const MultiItemsBudgetGuardrail = dynamic(
-  () => import("@/components/forms/BillCategoryBudgetGuardrail").then(mod => mod.MultiItemsBudgetGuardrail),
-  { ssr: false }
-);
-
-const ContractLaborBudgetGuardrail = dynamic(
-  () => import("@/components/forms/ContractLaborBudgetGuardrail").then(mod => mod.ContractLaborBudgetGuardrail),
-  { ssr: false }
-);
-
-const ContractorQuotaGuardrail = dynamic(
-  () => import("@/components/forms/ContractorQuotaGuardrail").then(mod => mod.ContractorQuotaGuardrail),
-  { ssr: false }
-);
-
+import { ProjectBudgetAllocator } from "@/components/forms/ProjectBudgetAllocator";
+import { BillCategoryBudgetGuardrail, MultiItemsBudgetGuardrail } from "@/components/forms/BillCategoryBudgetGuardrail";
+import { ContractLaborBudgetGuardrail } from "@/components/forms/ContractLaborBudgetGuardrail";
+import { ContractorQuotaGuardrail } from "@/components/forms/ContractorQuotaGuardrail";
 import { checkCategoryBudgetCap } from "@/lib/bills/bill-validation";
 
 type FormPayload = {
@@ -146,16 +156,16 @@ const DATA_FORM_SECTIONS: { id: string; title: string; iconName: string; fields:
   },
   {
     id: "vendor",
-    title: "ร้านค้า / ผู้รับเหมา",
+    title: "ประเภทค่าใช้จ่าย & คู่ค้า",
     iconName: "Store",
-    fields: ["ร้านค้า/ผู้รับเหมา", "ร้านค้า", "ผู้รับเหมา", "รายละเอียดงาน", "สินค้า", "ประเภท"]
+    fields: ["ร้านค้า/ผู้รับเหมา", "ร้านค้า", "ผู้รับเหมา", "รายละเอียดงาน", "ชื่อพนักงาน", "สินค้า"]
   },
   {
     id: "expense",
     title: "รายการค่าใช้จ่าย & ยอดเงิน",
     iconName: "Coins",
     fields: [
-      "ค่าของ", "ค่าแรง", "statusค่าแรง", "ค่าแรงคงเหลือ", "พนักงาน", "ชื่อพนักงาน",
+      "ค่าของ", "ค่าแรง", "statusค่าแรง", "ค่าแรงคงเหลือ", "พนักงาน",
       "น้ำมัน", "ซ่อมรถ", "ทะเบียน", "เครื่องจักร", "เครื่องมือ", "ชื่อเครื่องมือ", "อื่นๆ", "รายการ"
     ]
   },
@@ -175,17 +185,34 @@ const DATA_FORM_SECTIONS: { id: string; title: string; iconName: string; fields:
 
 type MultiLineItem = {
   id: string;
-  category: string;       // e.g. "6.ฝ้าผนัง"
-  categoryType: string;   // e.g. "1.ค่าของ" | "7.เครื่องมือ" | "8.อื่นๆ"
+  storeGroup?: string;    // e.g. "ไทวัสดุ" (สำหรับบิลย่อยที่มีหลายร้าน)
+  category: string;       // e.g. "104 ซ่อมรถ", "105 เครื่องมือ"
+  categoryType: string;   // e.g. "1.ค่าของ" | "4.น้ำมัน" | "5.ซ่อมรถ" | "7.เครื่องมือ" | "8.อื่นๆ" ...
+  detail?: string;        // e.g. "เปลี่ยนถ่ายน้ำมันเครื่อง", "ปูนเสือ 20 ถุง", สเปกเครื่องมือ
+  vehiclePlate?: string;  // e.g. "8กข-1234" (สำหรับ 4.น้ำมัน และ 5.ซ่อมรถ)
+  toolName?: string;      // e.g. "สว่านเจาะปูน Rotary" (สำหรับ 7.เครื่องมือ)
+  subItem?: string;       // e.g. "ค่าที่พัก" (สำหรับ 8.อื่นๆ)
   amount: string;         // e.g. "5000"
 };
+
+function getCategoryBadgeStyle(cat: string): string {
+  return getCostCodeBadgeStyle(cat);
+}
+
+const MULTI_ITEM_CATEGORY_OPTIONS = ALL_STORE_CATEGORIES.map(c => ({ label: c, value: c }));
 
 function MultiLineItemsBuilder({
   items,
   productOptions,
+  vehicleOptions = [],
+  toolOptions = [],
+  otherItemOptions = [],
+  storeOptions = [],
   onAdd,
   onRemove,
   onUpdate,
+  onUpdateStoreGroup,
+  onRemoveStoreGroup,
   onCancel,
   projectId = "",
   projectRows = [],
@@ -194,15 +221,22 @@ function MultiLineItemsBuilder({
 }: {
   items: MultiLineItem[];
   productOptions: { label: string; value: string }[];
-  onAdd: () => void;
+  vehicleOptions?: { label: string; value: string }[];
+  toolOptions?: { label: string; value: string }[];
+  otherItemOptions?: { label: string; value: string }[];
+  storeOptions?: { label: string; value: string }[];
+  onAdd: (defaultStore?: string) => void;
   onRemove: (id: string) => void;
   onUpdate: (id: string, field: keyof MultiLineItem, value: string) => void;
+  onUpdateStoreGroup?: (oldStoreName: string, newStoreName: string) => void;
+  onRemoveStoreGroup?: (storeName: string) => void;
   onCancel: () => void;
   projectId?: string;
   projectRows?: SheetRow[];
   values?: Record<string, string>;
   existingBills?: SheetRow[];
 }) {
+  const isSubBill = String(values?.["บิล"] || "").includes("ย่อย");
   const totalSum = items.reduce((s, i) => s + (Number(i.amount) || 0), 0);
 
   const matchedProject = useMemo(() => {
@@ -221,6 +255,225 @@ function MultiLineItemsBuilder({
     });
   }, [projectId, projectRows]);
 
+  // Helper to resolve store ID (e.g. ST101) to store name
+  const resolveStoreName = useCallback((token: string) => {
+    const t = (token || "").trim();
+    if (!t) return "";
+    const matched = storeOptions.find(opt => {
+      const v = (opt.value || "").trim().toLowerCase();
+      const l = (opt.label || "").trim().toLowerCase();
+      const h = (((opt as any).hint) || "").trim().toLowerCase();
+      const target = t.toLowerCase();
+      return v === target || l === target || h === target;
+    });
+    return matched ? matched.label : t;
+  }, [storeOptions]);
+
+  // Group items by store for sub-bills
+  const storeGroups = useMemo(() => {
+    if (!isSubBill) return [];
+    const groups: { name: string; items: MultiLineItem[]; subtotal: number }[] = [];
+    const map = new Map<string, { name: string; items: MultiLineItem[]; subtotal: number }>();
+
+    items.forEach(item => {
+      const rawStore = (item.storeGroup || "").trim();
+      const resolved = resolveStoreName(rawStore);
+      const key = resolved || "ร้านที่ 1";
+      if (!map.has(key)) {
+        const g = { name: key, items: [], subtotal: 0 };
+        map.set(key, g);
+        groups.push(g);
+      }
+      const g = map.get(key)!;
+      g.items.push(item);
+      g.subtotal += Number(item.amount) || 0;
+    });
+
+    if (groups.length === 0) {
+      groups.push({ name: "ร้านที่ 1", items: [], subtotal: 0 });
+    }
+    return groups;
+  }, [items, isSubBill, resolveStoreName]);
+
+  function renderItemRow(item: MultiLineItem, idx: number, canDelete: boolean) {
+    let itemBudget: ReturnType<typeof checkCategoryBudgetCap> | null = null;
+    if (matchedProject && (item.category || item.categoryType)) {
+      const prod = String(item.category || "").trim();
+      const type = String(item.categoryType || item.category || "101 เตรียมงาน").trim();
+      const prodAmtSum = items
+        .filter(i => (i.category || "").trim() === prod)
+        .reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+      const amt = String(prodAmtSum > 0 ? prodAmtSum : (item.amount || "0")).trim();
+
+      itemBudget = checkCategoryBudgetCap({
+        "ID Project": projectId,
+        "สินค้า": prod,
+        "ประเภท": type,
+        "ยอดเงิน": amt,
+        "ค่าของ": isMaterialCost(type) ? amt : "",
+        "น้ำมัน": isFuelCost(type) ? amt : "",
+        "ซ่อมรถ": isRepairCost(type) ? amt : "",
+        "เครื่องจักร": isMachineCost(type) ? amt : "",
+        "เครื่องมือ": isToolCost(type) ? amt : "",
+        "อื่นๆ": isOtherExpense(type) ? amt : "",
+      }, matchedProject, existingBills);
+    }
+
+    const hasSubBudget = Boolean(itemBudget?.hasBudgetCap && (itemBudget.isProductLevel || itemBudget.targetBudgetField !== "งบไม่เกินค่าของ"));
+    const isOver = Boolean(itemBudget?.isOverBudget);
+
+    return (
+      <div
+        key={item.id}
+        className={`bg-white border rounded-lg p-2 sm:px-2.5 sm:py-2 flex flex-col sm:flex-row items-stretch sm:items-start gap-2 shadow-2xs transition-colors ${
+          isOver ? "border-rose-300 bg-rose-50/20" : "border-slate-200/90 hover:border-slate-300"
+        }`}
+      >
+        <span className="font-mono text-xs text-slate-400 font-semibold w-5 shrink-0 text-center hidden sm:block pt-2">
+          {idx + 1}
+        </span>
+
+        {/* Product Selector with Category Badge & Budget Indicator */}
+        <div className="w-full sm:w-48 md:w-56 shrink-0">
+          <SearchableRefSelect
+            name={`product_category_${item.id}`}
+            value={item.category}
+            options={productOptions}
+            readOnly={false}
+            placeholder={`เลือกสินค้า (${idx + 1})...`}
+            onChange={(val) => onUpdate(item.id, "category", val)}
+          />
+
+          {hasSubBudget && itemBudget ? (
+            <div
+              className={`mt-1 w-full h-6 px-2 rounded-md border flex items-center justify-between text-[11px] font-sans shadow-2xs transition-all ${
+                itemBudget.isOverBudget
+                  ? "bg-rose-50 border-rose-300 text-rose-950 animate-pulse"
+                  : itemBudget.isWarning
+                  ? "bg-amber-50 border-amber-300 text-amber-950"
+                  : "bg-sky-50/90 border-sky-200/90 text-sky-950"
+              }`}
+            >
+              <div className="flex items-center gap-1 min-w-0 truncate">
+                <span
+                  className={`text-[10px] font-semibold px-1.5 py-0.2 rounded shrink-0 ${
+                    itemBudget.isOverBudget
+                      ? "bg-rose-200 text-rose-800"
+                      : itemBudget.isWarning
+                      ? "bg-amber-200 text-amber-800"
+                      : "bg-sky-200/90 text-sky-800"
+                  }`}
+                >
+                  {itemBudget.percentUsedAfterBill}%
+                </span>
+                <span className="text-[10px] text-slate-600 truncate">
+                  {itemBudget.accumulatedAmount > 0
+                    ? `เบิกแล้ว ${money(itemBudget.accumulatedAmount)} (${itemBudget.percentUsedBeforeBill}%) | งบ ${money(itemBudget.budgetLimit)}`
+                    : `งบ ${money(itemBudget.budgetLimit)}`}
+                </span>
+              </div>
+              <span className="font-semibold shrink-0 text-[11px] ml-1">
+                {itemBudget.remainingAfterBill < 0 ? (
+                  <span className="text-rose-700 font-bold">เกินงบ {money(Math.abs(itemBudget.remainingAfterBill))} ฿</span>
+                ) : (
+                  <span className="text-sky-800">คงเหลือ {money(itemBudget.remainingAfterBill)} ฿</span>
+                )}
+              </span>
+            </div>
+          ) : null}
+        </div>
+
+        {/* Detail / Contextual Dropdown */}
+        <div className="flex-1 min-w-0">
+          {isFuelCost(item.categoryType) ? (
+            <SearchableRefSelect
+              name={`item_plate_${item.id}`}
+              value={item.vehiclePlate || item.detail || ""}
+              options={vehicleOptions}
+              readOnly={false}
+              placeholder="เลือกทะเบียนรถ (คันที่เติมน้ำมัน)..."
+              onChange={(val) => {
+                onUpdate(item.id, "vehiclePlate", val);
+                onUpdate(item.id, "detail", val);
+              }}
+            />
+          ) : isRepairCost(item.categoryType) ? (
+            <SearchableRefSelect
+              name={`item_plate_${item.id}`}
+              value={item.vehiclePlate || item.detail || ""}
+              options={vehicleOptions}
+              readOnly={false}
+              placeholder="เลือกทะเบียนรถ (คันที่ซ่อม)..."
+              onChange={(val) => {
+                onUpdate(item.id, "vehiclePlate", val);
+                onUpdate(item.id, "detail", val);
+              }}
+            />
+          ) : isToolCost(item.categoryType) ? (
+            <SearchableRefSelect
+              name={`item_tool_${item.id}`}
+              value={item.toolName || item.detail || ""}
+              options={toolOptions}
+              readOnly={false}
+              placeholder="เลือกชื่อเครื่องมือ..."
+              onChange={(val) => {
+                onUpdate(item.id, "toolName", val);
+                onUpdate(item.id, "detail", val);
+              }}
+              creatable
+            />
+          ) : isOtherExpense(item.categoryType) ? (
+            <SearchableRefSelect
+              name={`item_other_${item.id}`}
+              value={item.subItem || item.detail || ""}
+              options={otherItemOptions}
+              readOnly={false}
+              placeholder="เลือกหมวดรายการค่าใช้จ่าย..."
+              onChange={(val) => {
+                onUpdate(item.id, "subItem", val);
+                onUpdate(item.id, "detail", val);
+              }}
+            />
+          ) : (
+            <div className="h-10 sm:h-9 flex items-center justify-center text-xs text-slate-300 select-none bg-slate-50/50 rounded-lg border border-dashed border-slate-200">
+              -
+            </div>
+          )}
+        </div>
+
+        {/* Amount Input */}
+        <div className="w-full sm:w-28 md:w-32 shrink-0 relative">
+          <input
+            type="number"
+            step="any"
+            value={item.amount}
+            onChange={(e) => onUpdate(item.id, "amount", e.target.value)}
+            placeholder="0.00"
+            className={`w-full h-10 sm:h-9 bg-white border rounded-lg text-xs sm:text-sm px-2.5 py-1.5 focus:outline-none focus:border-slate-800 text-right font-semibold text-slate-900 placeholder:text-slate-400 ${
+              isOver ? "border-rose-400 bg-rose-50/30 text-rose-950" : "border-slate-300"
+            }`}
+          />
+          {isOver ? (
+            <span className="absolute -top-2 right-2 px-1.5 py-0.2 bg-rose-600 text-white text-[9px] font-bold rounded shadow-2xs">
+              เกินงบ
+            </span>
+          ) : null}
+        </div>
+
+        {/* Delete Button */}
+        <button
+          type="button"
+          onClick={() => onRemove(item.id)}
+          disabled={!canDelete}
+          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed shrink-0 self-end sm:self-start sm:mt-1"
+          title="ลบแถวนี้"
+        >
+          <Trash2 size={15} />
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="col-span-full bg-slate-50/70 border border-slate-200/90 rounded-xl p-3 sm:p-3.5 space-y-3 font-sans shadow-2xs">
       {/* Header */}
@@ -228,176 +481,144 @@ function MultiLineItemsBuilder({
         <div className="flex items-center gap-2">
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block ring-4 ring-emerald-100" />
           <span className="font-semibold text-xs text-slate-800">
-            รายการสินค้า / ค่าใช้จ่ายในบิล
+            {isSubBill ? "รายการสินค้า / จัดกลุ่มตามร้านค้า (บิลย่อย)" : "รายการสินค้า / ค่าใช้จ่ายในบิล"}
           </span>
           <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100/70 text-emerald-800">
-            {items.length} รายการ
+            {isSubBill ? `${storeGroups.length} ร้านค้า | ` : ""}{items.length} รายการ
           </span>
         </div>
       </div>
 
-      {/* Column Headers for Desktop */}
-      <div className="hidden sm:flex items-center gap-2 px-2 text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
-        <span className="w-5 text-center shrink-0">#</span>
-        <span className="flex-1 min-w-0">สินค้า / รายการ</span>
-        <span className="w-32 shrink-0">หมวดค่าใช้จ่าย</span>
-        <span className="w-36 text-right shrink-0 pr-1">ยอดเงิน (฿)</span>
-        <span className="w-8 shrink-0"></span>
-      </div>
+      {/* When isSubBill is TRUE: Render Store Group Cards */}
+      {isSubBill ? (
+        <div className="space-y-3">
+          {storeGroups.map((group, gIdx) => {
+            const isUnnamed = group.name.startsWith("ร้านที่ ");
+            return (
+              <div
+                key={group.name + "_" + gIdx}
+                className="bg-white border border-slate-200/90 rounded-xl overflow-hidden shadow-2xs"
+              >
+                {/* Store Header */}
+                <div className="bg-slate-100/80 px-3 py-2 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 flex-1 min-w-[240px]">
+                    <div className="w-6 h-6 rounded-md bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
+                      <Store size={14} />
+                    </div>
+                    <span className="text-xs font-semibold text-slate-700 shrink-0">
+                      ร้านที่ {gIdx + 1}:
+                    </span>
+                    <div className="flex-1 max-w-xs">
+                      <SearchableRefSelect
+                        name={`store_select_${gIdx}`}
+                        value={isUnnamed ? "" : group.name}
+                        options={storeOptions}
+                        readOnly={false}
+                        placeholder={isUnnamed ? `เลือกร้านค้า (${group.name})...` : "พิมพ์หรือเลือกร้านค้า..."}
+                        onChange={(val) => onUpdateStoreGroup?.(group.name, val)}
+                        creatable
+                      />
+                    </div>
+                  </div>
 
-      {/* Clean, Non-Nested Line Item Rows */}
-      <div className="space-y-2">
-        {items.map((item, idx) => {
-          let itemBudget: ReturnType<typeof checkCategoryBudgetCap> | null = null;
-          if (matchedProject && (item.category || item.categoryType)) {
-            const prod = String(item.category || "").trim();
-            const type = String(item.categoryType || "1.ค่าของ").trim();
-            const prodAmtSum = items
-              .filter(i => (i.category || "").trim() === prod)
-              .reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
-            const amt = String(prodAmtSum > 0 ? prodAmtSum : (item.amount || "0")).trim();
-
-            itemBudget = checkCategoryBudgetCap({
-              "ID Project": projectId,
-              "สินค้า": prod,
-              "ประเภท": type,
-              "ยอดเงิน": amt,
-              "ค่าของ": type === "1.ค่าของ" ? amt : "",
-              "เครื่องมือ": type === "7.เครื่องมือ" ? amt : "",
-              "อื่นๆ": type === "8.อื่นๆ" ? amt : "",
-            }, matchedProject, existingBills);
-          }
-
-          const hasSubBudget = Boolean(itemBudget?.hasBudgetCap && itemBudget.isProductLevel);
-          const isOver = Boolean(itemBudget?.isOverBudget);
-
-          return (
-            <div
-              key={item.id}
-              className={`bg-white border rounded-lg p-2 sm:px-2.5 sm:py-2 flex flex-col sm:flex-row items-stretch sm:items-start gap-2 shadow-2xs transition-colors ${
-                isOver ? "border-rose-300 bg-rose-50/20" : "border-slate-200/90 hover:border-slate-300"
-              }`}
-            >
-              <span className="font-mono text-xs text-slate-400 font-semibold w-5 shrink-0 text-center hidden sm:block pt-2">
-                {idx + 1}
-              </span>
-
-              {/* Product Category Dropdown */}
-              <div className="flex-1 min-w-0">
-                <SearchableRefSelect
-                  name={`product_category_${item.id}`}
-                  value={item.category}
-                  options={productOptions}
-                  readOnly={false}
-                  placeholder={`เลือกสินค้า (${idx + 1})...`}
-                  onChange={(val) => onUpdate(item.id, "category", val)}
-                />
-                {/* Slim Budget Indicator directly under the Product Selector */}
-                {hasSubBudget && itemBudget ? (
-                  <div
-                    className={`mt-1 w-full h-6 px-2 rounded-md border flex items-center justify-between text-[11px] font-sans shadow-2xs transition-all ${
-                      itemBudget.isOverBudget
-                        ? "bg-rose-50 border-rose-300 text-rose-950 animate-pulse"
-                        : itemBudget.isWarning
-                        ? "bg-amber-50 border-amber-300 text-amber-950"
-                        : "bg-sky-50/90 border-sky-200/90 text-sky-950"
-                    }`}
-                  >
-                    <div className="flex items-center gap-1 min-w-0 truncate">
-                      <span
-                        className={`text-[10px] font-semibold px-1.5 py-0.2 rounded shrink-0 ${
-                          itemBudget.isOverBudget
-                            ? "bg-rose-200 text-rose-800"
-                            : itemBudget.isWarning
-                            ? "bg-amber-200 text-amber-800"
-                            : "bg-sky-200/90 text-sky-800"
-                        }`}
-                      >
-                        {itemBudget.percentUsedAfterBill}%
-                      </span>
-                      <span className="text-[10px] text-slate-600 truncate">
-                        {itemBudget.accumulatedAmount > 0
-                          ? `เบิกแล้ว ${money(itemBudget.accumulatedAmount)} (${itemBudget.percentUsedBeforeBill}%) | งบ ${money(itemBudget.budgetLimit)}`
-                          : `งบ ${money(itemBudget.budgetLimit)}`}
+                  <div className="flex items-center gap-3">
+                    <div className="text-right">
+                      <span className="text-[11px] text-slate-500 mr-1.5">รวมร้านนี้:</span>
+                      <span className="text-xs font-bold text-slate-800 font-sans">
+                        ฿{group.subtotal.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
                     </div>
-                    <span className="font-semibold shrink-0 text-[11px] ml-1">
-                      {itemBudget.remainingAfterBill < 0 ? (
-                        <span className="text-rose-700 font-bold">เกินงบ {money(Math.abs(itemBudget.remainingAfterBill))} ฿</span>
-                      ) : (
-                        <span className="text-sky-800">คงเหลือ {money(itemBudget.remainingAfterBill)} ฿</span>
-                      )}
-                    </span>
+                    {storeGroups.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => onRemoveStoreGroup?.(group.name)}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                        title={`ลบ${group.name} และรายการทั้งหมดในร้าน`}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
                   </div>
-                ) : null}
+                </div>
+
+                {/* Store Items Rows */}
+                <div className="p-2 sm:p-2.5 space-y-2 bg-slate-50/40">
+                  <div className="hidden sm:flex items-center gap-2 px-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                    <span className="w-5 text-center shrink-0">#</span>
+                    <span className="w-48 sm:w-56 shrink-0">สินค้า / หมวด</span>
+                    <span className="flex-1 min-w-0">ทะเบียนรถ / รายการ (ถ้ามี)</span>
+                    <span className="w-28 sm:w-32 text-right shrink-0 pr-1">ยอดเงิน (฿)</span>
+                    <span className="w-8 shrink-0"></span>
+                  </div>
+
+                  {group.items.map((item, itemIdx) =>
+                    renderItemRow(item, itemIdx, group.items.length > 1 || storeGroups.length > 1)
+                  )}
+
+                  {/* Add item in this store */}
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => onAdd(group.name)}
+                      className="text-[11px] font-medium text-emerald-700 hover:text-emerald-900 flex items-center gap-1 px-2.5 py-1 rounded-md hover:bg-emerald-50 transition-colors border border-dashed border-emerald-300/80 cursor-pointer"
+                    >
+                      <Plus size={13} />
+                      <span>เพิ่มรายการในร้านนี้</span>
+                    </button>
+                  </div>
+                </div>
               </div>
+            );
+          })}
 
-              {/* Cost Type Pill Select */}
-              <div className="w-full sm:w-32 shrink-0">
-                <SearchableRefSelect
-                  name={`product_cost_type_${item.id}`}
-                  value={item.categoryType}
-                  options={[
-                    { label: "1.ค่าของ", value: "1.ค่าของ" },
-                    { label: "7.เครื่องมือ", value: "7.เครื่องมือ" },
-                    { label: "8.อื่นๆ", value: "8.อื่นๆ" }
-                  ]}
-                  readOnly={false}
-                  placeholder="ประเภท..."
-                  onChange={(val) => onUpdate(item.id, "categoryType", val)}
-                />
-              </div>
+          {/* Add New Store Button */}
+          <button
+            type="button"
+            onClick={() => onAdd(`ร้านที่ ${storeGroups.length + 1}`)}
+            className="w-full py-2.5 px-3 rounded-xl border-2 border-dashed border-slate-300 hover:border-emerald-500 hover:bg-emerald-50/50 text-slate-600 hover:text-emerald-800 text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-2xs"
+          >
+            <Store size={15} className="text-emerald-600" />
+            <span>+ เพิ่มร้านค้าใหม่ (ร้านที่ {storeGroups.length + 1})</span>
+          </button>
+        </div>
+      ) : (
+        /* When isSubBill is FALSE: Normal Flat Items List */
+        <div className="space-y-2">
+          <div className="hidden sm:flex items-center gap-2 px-2 text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
+            <span className="w-5 text-center shrink-0">#</span>
+            <span className="w-48 sm:w-56 shrink-0">สินค้า / หมวด</span>
+            <span className="flex-1 min-w-0">ทะเบียนรถ / รายการ (ถ้ามี)</span>
+            <span className="w-28 sm:w-32 text-right shrink-0 pr-1">ยอดเงิน (฿)</span>
+            <span className="w-8 shrink-0"></span>
+          </div>
 
-              {/* Amount Input */}
-              <div className="w-full sm:w-36 shrink-0 relative">
-                <input
-                  type="number"
-                  step="any"
-                  value={item.amount}
-                  onChange={(e) => onUpdate(item.id, "amount", e.target.value)}
-                  placeholder="0.00"
-                  className={`w-full h-10 sm:h-9 bg-white border rounded-lg text-xs sm:text-sm px-2.5 py-1.5 focus:outline-none focus:border-slate-800 text-right font-semibold text-slate-900 placeholder:text-slate-400 ${
-                    isOver ? "border-rose-400 bg-rose-50/30 text-rose-950" : "border-slate-300"
-                  }`}
-                />
-                {isOver ? (
-                  <span className="absolute -top-2 right-2 px-1.5 py-0.2 bg-rose-600 text-white text-[9px] font-bold rounded shadow-2xs">
-                    เกินงบ
-                  </span>
-                ) : null}
-              </div>
+          {items.map((item, idx) => renderItemRow(item, idx, items.length > 1))}
 
-              {/* Delete Button */}
-              <button
-                type="button"
-                onClick={() => onRemove(item.id)}
-                disabled={items.length <= 1}
-                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed shrink-0 self-end sm:self-start sm:mt-1"
-                title="ลบแถวนี้"
-              >
-                <Trash2 size={15} />
-              </button>
-            </div>
-          );
-        })}
-      </div>
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={() => onAdd()}
+              className="h-9 px-3.5 rounded-lg bg-emerald-50 text-emerald-800 hover:bg-emerald-100 hover:text-emerald-950 font-semibold text-xs flex items-center gap-1.5 cursor-pointer transition-colors border border-emerald-200/80 shadow-2xs shrink-0"
+            >
+              <Plus size={14} className="shrink-0 text-emerald-700" />
+              <span>เพิ่มรายการ</span>
+            </button>
+          </div>
+        </div>
+      )}
 
-      {/* Footer: ปุ่มเพิ่มรายการ, สถานะคุมงบประมาณ และ ยอดรวม ทั้งหมดอยู่ในแถวเดียวกัน */}
-      <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-2 pt-2 border-t border-slate-200/90">
-        {/* ปุ่มเพิ่มรายการ */}
-        <button
-          type="button"
-          onClick={onAdd}
-          className="h-9 px-3.5 rounded-lg bg-emerald-50 text-emerald-800 hover:bg-emerald-100 hover:text-emerald-950 font-semibold text-xs flex items-center gap-1.5 cursor-pointer transition-colors border border-emerald-200/80 shadow-2xs shrink-0 self-start lg:self-auto"
-        >
-          <Plus size={14} className="shrink-0 text-emerald-700" />
-          <span>เพิ่มรายการ</span>
-        </button>
+      {/* Footer: สถานะคุมงบประมาณ และ ยอดรวมทั้งหมด */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-2 border-t border-slate-200/90">
+        <div className="text-xs text-slate-500 font-medium">
+          {isSubBill
+            ? `รวมทั้งหมด ${storeGroups.length} ร้านค้า (${items.length} รายการ)`
+            : `รวมทั้งหมด ${items.length} รายการ`}
+        </div>
 
-        {/* แถบคุมงบประมาณ + รวมยอดเงิน (อยู่แถวเดียวกัน) */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-1 lg:justify-end min-w-0">
+        {/* แถบคุมงบประมาณ + รวมยอดเงิน */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-1 sm:justify-end min-w-0">
           {projectId && projectRows.length > 0 && (
-            <div className="min-w-0 flex-1 lg:max-w-md">
+            <div className="min-w-0 flex-1 sm:max-w-xs md:max-w-sm">
               <MultiItemsBudgetGuardrail
                 items={items}
                 projectId={projectId}
@@ -409,7 +630,7 @@ function MultiLineItemsBuilder({
           )}
 
           <div className="flex items-center gap-2 bg-white text-slate-700 px-3.5 h-9 rounded-lg border border-slate-200 text-xs shadow-2xs shrink-0 justify-between sm:justify-start">
-            <span className="text-slate-500 font-medium">รวมยอดเงิน:</span>
+            <span className="text-slate-500 font-medium">ยอดรวมเบิกทั้งหมด:</span>
             <span className="font-bold text-sm text-emerald-700 font-sans">
               ฿{totalSum.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
@@ -513,48 +734,177 @@ export function FormModal({
   const productOptions = useMemo(() => {
     const field = activeForm?.schema.find(f => f.name === "สินค้า");
     const rawList: string[] = Array.isArray(field?.values) ? field.values : [];
-    return rawList.map((v: string) => ({ label: v, value: v }));
+    if (rawList.length > 0) return rawList.map((v: string) => ({ label: String(v), value: String(v) }));
+    return (activeForm?.refOptions?.["สินค้า"] || []).map(opt => ({ label: String(opt.label || opt.value || ""), value: String(opt.value || "") }));
+  }, [activeForm]);
+
+  const vehicleOptions = useMemo(() => {
+    const fromRef = activeForm?.refOptions?.["ทะเบียน"] || activeForm?.refOptions?.["ทะเบียนรถ"] || [];
+    if (fromRef.length > 0) {
+      return fromRef.map(opt => ({ label: String(opt.label || opt.value || ""), value: String(opt.value || "") }));
+    }
+    const field = activeForm?.schema.find(f => f.name === "ทะเบียน" || f.name === "ทะเบียนรถ");
+    const rawList: string[] = Array.isArray(field?.values) ? field.values : [];
+    return rawList.map((v: string) => ({ label: String(v), value: String(v) }));
+  }, [activeForm]);
+
+  const toolOptions = useMemo(() => {
+    const fromRef = activeForm?.refOptions?.["ชื่อเครื่องมือ"] || activeForm?.refOptions?.["เครื่องมือ"] || [];
+    if (fromRef.length > 0) {
+      return fromRef.map(opt => ({ label: String(opt.label || opt.value || ""), value: String(opt.value || "") }));
+    }
+    const field = activeForm?.schema.find(f => f.name === "ชื่อเครื่องมือ" || f.name === "เครื่องมือ");
+    const rawList: string[] = Array.isArray(field?.values) ? field.values : [];
+    if (rawList.length > 0) return rawList.map((v: string) => ({ label: String(v), value: String(v) }));
+    return [
+      "สว่านเจาะเหล็กไฟฟ้า", "สว่านเจาะปูน Rotary", "ลูกหมูขนาด 4\"", "ลูกหมูขนาด 7\"", "ไฟเบอร์ตัดเหล็ก"
+    ].map(v => ({ label: v, value: v }));
+  }, [activeForm]);
+
+  const otherItemOptions = useMemo(() => {
+    const fromRef = activeForm?.refOptions?.["รายการ"] || activeForm?.refOptions?.["รายการค่าใช้จ่าย"] || [];
+    if (fromRef.length > 0) {
+      return fromRef.map(opt => ({ label: String(opt.label || opt.value || ""), value: String(opt.value || "") }));
+    }
+    const field = activeForm?.schema.find(f => f.name === "รายการ" || f.name === "รายการค่าใช้จ่าย");
+    const rawList: string[] = Array.isArray(field?.values) ? field.values : [];
+    if (rawList.length > 0) return rawList.map((v: string) => ({ label: String(v), value: String(v) }));
+    return SUB_ITEMS_123.map(v => ({ label: v, value: v }));
+  }, [activeForm]);
+
+  const storeOptions = useMemo(() => {
+    const fromRef = activeForm?.refOptions?.["ร้านค้า"] || activeForm?.refOptions?.["ร้าน/บุคคล"] || [];
+    if (fromRef.length > 0) {
+      return fromRef.map(opt => {
+        const storeName = String(opt.row?.["ชื่อร้านค้า"] || opt.row?.["ชื่อเต็ม"] || opt.label || opt.value || "").trim();
+        const cleanName = storeName.replace(/^[A-Za-z0-9_-]+\s*[-:]\s*/, "").trim() || storeName;
+        return {
+          label: cleanName,
+          value: cleanName,
+          hint: String(opt.value || "")
+        };
+      });
+    }
+    const field = activeForm?.schema.find(f => f.name === "ร้านค้า" || f.name === "ร้าน/บุคคล");
+    const rawList: string[] = Array.isArray(field?.values) ? field.values : [];
+    return rawList.map((v: string) => {
+      const cleanName = String(v).replace(/^[A-Za-z0-9_-]+\s*[-:]\s*/, "").trim() || String(v);
+      return { label: cleanName, value: cleanName };
+    });
+  }, [activeForm]);
+
+  const resolveStoreName = useCallback((token: string): string => {
+    const trimmed = (token || "").trim();
+    if (!trimmed) return "";
+    const fromRef = activeForm?.refOptions?.["ร้านค้า"] || activeForm?.refOptions?.["ร้าน/บุคคล"] || [];
+    const matched = fromRef.find(opt => {
+      const v = String(opt.value || "").trim().toLowerCase();
+      const l = String(opt.label || "").trim().toLowerCase();
+      const sName = String(opt.row?.["ชื่อร้านค้า"] || "").trim().toLowerCase();
+      const fName = String(opt.row?.["ชื่อเต็ม"] || "").trim().toLowerCase();
+      const t = trimmed.toLowerCase();
+      return v === t || l === t || sName === t || fName === t;
+    });
+    if (matched) {
+      const sName = String(matched.row?.["ชื่อร้านค้า"] || matched.row?.["ชื่อเต็ม"] || matched.label || "").trim();
+      return sName.replace(/^[A-Za-z0-9_-]+\s*[-:]\s*/, "").trim() || sName;
+    }
+    return trimmed;
   }, [activeForm]);
 
   function syncMultiLineItemsToValues(items: MultiLineItem[]) {
     if (items.length === 0) return;
-    const matSum = items.filter(i => i.categoryType === "1.ค่าของ").reduce((s, i) => s + (Number(i.amount) || 0), 0);
-    const toolSum = items.filter(i => i.categoryType === "7.เครื่องมือ").reduce((s, i) => s + (Number(i.amount) || 0), 0);
-    const otherSum = items.filter(i => i.categoryType === "8.อื่นๆ").reduce((s, i) => s + (Number(i.amount) || 0), 0);
+    const matSum = items.filter(i => isMaterialCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+    const fuelSum = items.filter(i => isFuelCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+    const repairSum = items.filter(i => isRepairCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+    const machineSum = items.filter(i => isMachineCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+    const toolSum = items.filter(i => isToolCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+    const otherSum = items.filter(i => isOtherExpense(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
     const totalSum = items.reduce((s, i) => s + (Number(i.amount) || 0), 0);
+
+    const hasFuelOrRepair = items.some(
+      i => isFuelCost(i.categoryType) || isRepairCost(i.categoryType) || isFuelProduct(i.category) || isCarRepairProduct(i.category)
+    );
+
+    const plates = items
+      .map(i => i.vehiclePlate || ((isFuelCost(i.categoryType) || isRepairCost(i.categoryType)) ? i.detail : ""))
+      .filter(Boolean);
+
+    const toolNames = items
+      .map(i => i.toolName || (isToolCost(i.categoryType) ? i.detail : ""))
+      .filter(Boolean);
+
+    const otherItems = items
+      .map(i => i.subItem || (isOtherExpense(i.categoryType) ? i.detail : ""))
+      .filter(Boolean);
+
+    const isSub = String(values["บิล"] || "").includes("ย่อย");
+    const storeNames = Array.from(new Set(
+      items.map(i => resolveStoreName(i.storeGroup || "").trim()).filter(name => Boolean(name) && !name.startsWith("ร้านที่ "))
+    ));
 
     setValues(current => {
       const next = { ...current };
       next["ค่าของ"] = matSum > 0 ? String(matSum) : "";
+      next["น้ำมัน"] = fuelSum > 0 ? String(fuelSum) : "";
+      next["ซ่อมรถ"] = repairSum > 0 ? String(repairSum) : "";
+      next["เครื่องจักร"] = machineSum > 0 ? String(machineSum) : "";
       next["เครื่องมือ"] = toolSum > 0 ? String(toolSum) : "";
       next["อื่นๆ"] = otherSum > 0 ? String(otherSum) : "";
       next["ยอดเงิน"] = String(totalSum);
       next["ยอดโอน"] = String(totalSum);
+      next["has_fuel_or_repair"] = hasFuelOrRepair ? "true" : "";
+      if (plates.length > 0) {
+        next["ทะเบียน"] = plates[0] || "";
+      }
+      if (toolNames.length > 0) {
+        next["ชื่อเครื่องมือ"] = toolNames.join(", ");
+      }
+      if (otherItems.length > 0) {
+        next["รายการ"] = otherItems[0] || "";
+      }
       if (items[0]?.category) next["สินค้า"] = items[0].category;
-      next["ประเภท"] = items[0]?.categoryType || current["ประเภท"] || "1.ค่าของ";
+      next["ประเภท"] = items[0]?.categoryType || current["ประเภท"] || "101 เตรียมงาน";
+      if (isSub && storeNames.length > 0) {
+        next["ร้านค้า"] = storeNames.join(", ");
+        next["ร้าน/บุคคล"] = storeNames.join(", ");
+      }
       return next;
     });
   }
 
   function enableMultiItemMode() {
     setIsMultiItemMode(true);
-    const primaryType = values["ประเภท"] || "1.ค่าของ";
+    const primaryType = values["ประเภท"] || deriveCategoryFromProduct(values["สินค้า"]) || "101 เตรียมงาน";
     setValues(current => ({
       ...current,
-      "ประเภท": current["ประเภท"] || "1.ค่าของ"
+      "ประเภท": primaryType
     }));
     if (multiLineItems.length === 0) {
+      const initialAmt = values["ค่าของ"] || values["น้ำมัน"] || values["ซ่อมรถ"] || values["เครื่องจักร"] || values["เครื่องมือ"] || values["อื่นๆ"] || values["ยอดเงิน"] || "";
+      const isSub = String(values["บิล"] || "").includes("ย่อย");
+      const initialStore = resolveStoreName(values["ร้านค้า"] || values["ร้าน/บุคคล"] || "") || (isSub ? "ร้านที่ 1" : "");
       const initialItems: MultiLineItem[] = [
         {
           id: "1",
+          storeGroup: initialStore,
           category: values["สินค้า"] || "",
           categoryType: primaryType,
-          amount: values["ค่าของ"] || values["ยอดเงิน"] || "",
+          detail: values["รายละเอียดงาน"] || "",
+          vehiclePlate: values["ทะเบียน"] || "",
+          toolName: values["ชื่อเครื่องมือ"] || "",
+          subItem: values["รายการ"] || "",
+          amount: initialAmt,
         },
         {
           id: "2",
+          storeGroup: initialStore,
           category: "",
-          categoryType: "1.ค่าของ",
+          categoryType: "101 เตรียมงาน",
+          detail: "",
+          vehiclePlate: "",
+          toolName: "",
+          subItem: "",
           amount: "",
         }
       ];
@@ -566,18 +916,61 @@ export function FormModal({
   function disableMultiItemMode() {
     setIsMultiItemMode(false);
     setMultiLineItems([]);
+    setValues(current => ({
+      ...current,
+      has_fuel_or_repair: ""
+    }));
   }
 
-  function handleAddLineItem() {
-    setMultiLineItems(prev => [
-      ...prev,
-      {
-        id: String(Date.now() + Math.random()),
-        category: "",
-        categoryType: "1.ค่าของ",
-        amount: "",
+  function handleAddLineItem(defaultStore?: string) {
+    setMultiLineItems(prev => {
+      let storeToUse = defaultStore;
+      if (storeToUse === undefined) {
+        const isSub = String(values["บิล"] || "").includes("ย่อย");
+        storeToUse = isSub && prev.length > 0 ? (prev[prev.length - 1]?.storeGroup || "ร้านที่ 1") : "";
       }
-    ]);
+      return [
+        ...prev,
+        {
+          id: String(Date.now() + Math.random()),
+          storeGroup: storeToUse,
+          category: "",
+          categoryType: "101 เตรียมงาน",
+          detail: "",
+          vehiclePlate: "",
+          toolName: "",
+          subItem: "",
+          amount: "",
+        }
+      ];
+    });
+  }
+
+  function handleUpdateStoreGroup(oldStoreName: string, newStoreName: string) {
+    setMultiLineItems(prev => {
+      const next = prev.map(item => {
+        const currentStore = (item.storeGroup || "").trim() || "ร้านที่ 1";
+        const resolvedCurrent = resolveStoreName(currentStore);
+        if (currentStore === oldStoreName || resolvedCurrent === oldStoreName) {
+          return { ...item, storeGroup: newStoreName };
+        }
+        return item;
+      });
+      syncMultiLineItemsToValues(next);
+      return next;
+    });
+  }
+
+  function handleRemoveStoreGroup(storeName: string) {
+    setMultiLineItems(prev => {
+      const next = prev.filter(item => {
+        const currentStore = (item.storeGroup || "").trim() || "ร้านที่ 1";
+        const resolvedCurrent = resolveStoreName(currentStore);
+        return currentStore !== storeName && resolvedCurrent !== storeName;
+      });
+      syncMultiLineItemsToValues(next);
+      return next;
+    });
   }
 
   function handleRemoveLineItem(id: string) {
@@ -590,7 +983,14 @@ export function FormModal({
 
   function handleUpdateLineItem(id: string, field: keyof MultiLineItem, val: string) {
     setMultiLineItems(prev => {
-      const next = prev.map(item => item.id === id ? { ...item, [field]: val } : item);
+      const next = prev.map(item => {
+        if (item.id !== id) return item;
+        const updated = { ...item, [field]: val };
+        if (field === "category") {
+          updated.categoryType = deriveCategoryFromProduct(val);
+        }
+        return updated;
+      });
       syncMultiLineItemsToValues(next);
       return next;
     });
@@ -846,24 +1246,85 @@ export function FormModal({
         return;
       }
 
-      const matSum = multiLineItems.filter(i => i.categoryType === "1.ค่าของ").reduce((s, i) => s + (Number(i.amount) || 0), 0);
-      const toolSum = multiLineItems.filter(i => i.categoryType === "7.เครื่องมือ").reduce((s, i) => s + (Number(i.amount) || 0), 0);
-      const otherSum = multiLineItems.filter(i => i.categoryType === "8.อื่นๆ").reduce((s, i) => s + (Number(i.amount) || 0), 0);
+      const matSum = multiLineItems.filter(i => isMaterialCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+      const fuelSum = multiLineItems.filter(i => isFuelCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+      const repairSum = multiLineItems.filter(i => isRepairCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+      const machineSum = multiLineItems.filter(i => isMachineCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+      const toolSum = multiLineItems.filter(i => isToolCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+      const otherSum = multiLineItems.filter(i => isOtherExpense(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
       const totalSum = multiLineItems.reduce((s, i) => s + (Number(i.amount) || 0), 0);
 
       submitValues["ค่าของ"] = matSum > 0 ? String(matSum) : "";
+      submitValues["น้ำมัน"] = fuelSum > 0 ? String(fuelSum) : "";
+      submitValues["ซ่อมรถ"] = repairSum > 0 ? String(repairSum) : "";
+      submitValues["เครื่องจักร"] = machineSum > 0 ? String(machineSum) : "";
       submitValues["เครื่องมือ"] = toolSum > 0 ? String(toolSum) : "";
       submitValues["อื่นๆ"] = otherSum > 0 ? String(otherSum) : "";
       submitValues["ยอดเงิน"] = String(totalSum);
       submitValues["ยอดโอน"] = String(totalSum);
-      submitValues["ประเภท"] = multiLineItems[0]?.categoryType || submitValues["ประเภท"] || "1.ค่าของ";
+      submitValues["ประเภท"] = multiLineItems[0]?.categoryType || submitValues["ประเภท"] || "101 เตรียมงาน";
       const prodNames = multiLineItems.map(i => i.category).filter(Boolean);
       submitValues["สินค้า"] = prodNames.join(", ") || submitValues["สินค้า"] || "";
       submitValues["สินค้า/ทำงาน"] = prodNames.join(", ") || submitValues["สินค้า/ทำงาน"] || "";
       submitValues["items"] = JSON.stringify(multiLineItems);
 
+      const isSub = String(submitValues["บิล"] || values["บิล"] || "").includes("ย่อย");
+      if (isSub) {
+        const storeNames = Array.from(new Set(
+          multiLineItems.map(i => resolveStoreName(i.storeGroup || "").trim()).filter(name => Boolean(name) && !name.startsWith("ร้านที่ "))
+        ));
+        if (storeNames.length > 0) {
+          const joinedStores = storeNames.join(", ");
+          submitValues["ร้านค้า"] = joinedStores;
+          submitValues["ร้าน/บุคคล"] = joinedStores;
+          body.set("ร้านค้า", joinedStores);
+          body.set("ร้าน/บุคคล", joinedStores);
+        }
+      }
+
+      const plates = multiLineItems
+        .map(i => i.vehiclePlate || ((isFuelCost(i.categoryType) || isRepairCost(i.categoryType)) ? i.detail : ""))
+        .filter(Boolean);
+      if (plates.length > 0 && plates[0]) {
+        submitValues["ทะเบียน"] = String(plates[0]);
+        body.set("ทะเบียน", String(plates[0]));
+      }
+
+      const toolNames = multiLineItems
+        .map(i => i.toolName || (isToolCost(i.categoryType) ? i.detail : ""))
+        .filter(Boolean);
+      if (toolNames.length > 0) {
+        submitValues["ชื่อเครื่องมือ"] = toolNames.join(", ");
+        body.set("ชื่อเครื่องมือ", toolNames.join(", "));
+      }
+
+      const otherItems = multiLineItems
+        .map(i => i.subItem || (isOtherExpense(i.categoryType) ? i.detail : ""))
+        .filter(Boolean);
+      if (otherItems.length > 0 && otherItems[0] && !submitValues["รายการ"]) {
+        submitValues["รายการ"] = otherItems[0];
+        body.set("รายการ", otherItems[0]);
+      }
+
+      const details = multiLineItems
+        .map(i => {
+          const d = (i.detail || "").trim();
+          if (!d) return "";
+          return i.category ? `${i.category}: ${d}` : d;
+        })
+        .filter(Boolean);
+      if (details.length > 0 && !submitValues["รายละเอียดงาน"]) {
+        submitValues["รายละเอียดงาน"] = details.join(" | ");
+      }
+      if (submitValues["รายละเอียดงาน"]) {
+        body.set("รายละเอียดงาน", submitValues["รายละเอียดงาน"]);
+      }
+
       body.set("ประเภท", submitValues["ประเภท"]);
       body.set("ค่าของ", submitValues["ค่าของ"]);
+      body.set("น้ำมัน", submitValues["น้ำมัน"]);
+      body.set("ซ่อมรถ", submitValues["ซ่อมรถ"]);
+      body.set("เครื่องจักร", submitValues["เครื่องจักร"]);
       body.set("เครื่องมือ", submitValues["เครื่องมือ"]);
       body.set("อื่นๆ", submitValues["อื่นๆ"]);
       body.set("ยอดเงิน", submitValues["ยอดเงิน"]);
@@ -1025,7 +1486,7 @@ export function FormModal({
       {open ? (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/65 backdrop-blur-md sm:backdrop-blur-lg animate-in fade-in duration-150" role="presentation">
           <form
-            className={`w-full bg-white rounded-t-2xl sm:rounded-xl shadow-2xl overflow-hidden flex flex-col border border-slate-300 h-[92vh] sm:h-auto sm:max-h-[90vh] ${
+            className={`w-full bg-white rounded-t-2xl sm:rounded-xl shadow-2xl overflow-hidden flex flex-col border border-slate-300 h-[92vh] sm:h-auto sm:max-h-[90vh] transition-all duration-200 ${
               relaxed ? "max-w-4xl" : "max-w-2xl sm:max-w-3xl"
             }`}
             role="dialog"
@@ -1108,13 +1569,17 @@ export function FormModal({
                     {isDataForm ? (
                       <div className="space-y-3">
                         {DATA_FORM_SECTIONS.map(section => {
-                          const isStoreVendor = values["ร้านค้า/ผู้รับเหมา"] === "ร้านค้า";
+                          const isStoreVendor = values["ร้านค้า/ผู้รับเหมา"] === "ร้านค้า" || !values["ร้านค้า/ผู้รับเหมา"];
                           const sectionFields = visibleFields.filter(f => {
+                            if (f.name === "ประเภท") return false;
                             if (isMultiItemMode && isStoreVendor && (
                               f.name === "สินค้า" ||
-                              f.name === "ประเภท" ||
                               f.name === "รายละเอียดงาน" ||
                               f.name === "ค่าของ" ||
+                              f.name === "น้ำมัน" ||
+                              f.name === "ซ่อมรถ" ||
+                              f.name === "ทะเบียน" ||
+                              f.name === "เครื่องจักร" ||
                               f.name === "เครื่องมือ" ||
                               f.name === "ชื่อเครื่องมือ" ||
                               f.name === "อื่นๆ" ||
@@ -1144,52 +1609,65 @@ export function FormModal({
                                   <SectionHeaderIcon name={section.iconName} />
                                   <h4 className="text-xs text-slate-800 m-0 font-semibold">{section.title}</h4>
                                 </div>
-
-                                {section.id === "vendor" && isStoreVendor ? (
-                                  <div className="inline-flex items-center p-0.5 bg-slate-100 rounded-lg border border-slate-200 shadow-2xs">
-                                    <button
-                                      type="button"
-                                      onClick={disableMultiItemMode}
-                                      className={`h-7 sm:h-8 px-3 rounded-md text-xs sm:text-sm transition-all cursor-pointer flex items-center justify-center gap-1 ${
-                                        !isMultiItemMode
-                                          ? "bg-white text-slate-900 shadow-2xs border border-slate-200/80 font-semibold"
-                                          : "text-slate-500 hover:text-slate-800 font-medium"
-                                      }`}
-                                    >
-                                      <span>รายการเดี่ยว</span>
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={enableMultiItemMode}
-                                      className={`h-7 sm:h-8 px-3 rounded-md text-xs sm:text-sm transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                                        isMultiItemMode
-                                          ? "bg-emerald-600 text-white shadow-2xs font-semibold"
-                                          : "text-emerald-800 hover:text-emerald-950 font-medium hover:bg-emerald-50/60"
-                                      }`}
-                                    >
-                                      <span className="text-xs sm:text-sm">📦</span>
-                                      <span>หลายรายการ</span>
-                                    </button>
-                                  </div>
-                                ) : null}
                               </div>
                               <div className={sectionGridClass}>
-                                {sectionFields.map(field => (
-                                  <MemoizedFormField
-                                    key={field.name}
-                                    field={field}
-                                    activeForm={activeForm}
-                                    value={values[field.name] || ""}
-                                    currentValues={values}
-                                    isEditing={isEditing}
-                                    onValueChange={value => updateValue(field, value)}
-                                    enumSearchValue={enumListSearch[field.name] || ""}
-                                    onEnumSearchChange={value => setEnumListSearch(current => ({ ...current, [field.name]: value }))}
-                                    resetKey={resetKey}
-                                    attachedFiles={attachedFilesByField[field.name] || []}
-                                    onAttachedFilesChange={files => setAttachedFilesByField(current => ({ ...current, [field.name]: files }))}
-                                  />
-                                ))}
+                                {sectionFields.map(field => {
+                                  const customClassName =
+                                    section.id === "vendor" && field.name === "ร้านค้า"
+                                      ? (isMultiItemMode ? "col-span-1 sm:col-span-2 lg:col-span-2" : "col-span-1")
+                                      : undefined;
+
+                                  return (
+                                    <MemoizedFormField
+                                      key={field.name}
+                                      field={field}
+                                      className={customClassName}
+                                      activeForm={activeForm}
+                                      value={values[field.name] || ""}
+                                      currentValues={values}
+                                      isEditing={isEditing}
+                                      onValueChange={value => updateValue(field, value)}
+                                      enumSearchValue={enumListSearch[field.name] || ""}
+                                      onEnumSearchChange={value => setEnumListSearch(current => ({ ...current, [field.name]: value }))}
+                                      resetKey={resetKey}
+                                      attachedFiles={attachedFilesByField[field.name] || []}
+                                      onAttachedFilesChange={files => setAttachedFilesByField(current => ({ ...current, [field.name]: files }))}
+                                    />
+                                  );
+                                })}
+
+                                {section.id === "vendor" && isStoreVendor ? (
+                                  <div className="col-span-1 space-y-1 min-w-0 w-full overflow-hidden">
+                                    <label className="text-xs font-medium text-slate-700 block">
+                                      รูปแบบรายการ
+                                    </label>
+                                    <div className="inline-flex items-center p-0.5 bg-slate-100 rounded-lg border border-slate-200 shadow-2xs w-full h-9 sm:h-9.5">
+                                      <button
+                                        type="button"
+                                        onClick={disableMultiItemMode}
+                                        className={`flex-1 h-full px-1.5 sm:px-2 rounded-md text-[11px] sm:text-xs whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-1 select-none active:scale-[0.98] ${
+                                          !isMultiItemMode
+                                            ? "bg-white text-slate-900 shadow-2xs border border-slate-200/80 font-semibold"
+                                            : "text-slate-500 hover:text-slate-800 font-medium hover:bg-white/40"
+                                        }`}
+                                      >
+                                        <span className="whitespace-nowrap">รายการเดี่ยว</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={enableMultiItemMode}
+                                        className={`flex-1 h-full px-1.5 sm:px-2 rounded-md text-[11px] sm:text-xs whitespace-nowrap transition-all cursor-pointer flex items-center justify-center gap-1 select-none active:scale-[0.98] ${
+                                          isMultiItemMode
+                                            ? "bg-emerald-600 text-white shadow-2xs font-semibold"
+                                            : "text-emerald-800 hover:text-emerald-950 font-medium hover:bg-emerald-50/60"
+                                        }`}
+                                      >
+                                        <Layers className="w-3 h-3 sm:w-3.5 sm:h-3.5 stroke-[2] shrink-0" />
+                                        <span className="whitespace-nowrap">หลายรายการ</span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : null}
 
                                 {section.id === "expense" && !isMultiItemMode ? (
                                   <div className="space-y-1 min-w-0 w-full overflow-hidden">
@@ -1208,9 +1686,15 @@ export function FormModal({
                                   <MultiLineItemsBuilder
                                     items={multiLineItems}
                                     productOptions={productOptions}
+                                    vehicleOptions={vehicleOptions}
+                                    toolOptions={toolOptions}
+                                    otherItemOptions={otherItemOptions}
+                                    storeOptions={storeOptions}
                                     onAdd={handleAddLineItem}
                                     onRemove={handleRemoveLineItem}
                                     onUpdate={handleUpdateLineItem}
+                                    onUpdateStoreGroup={handleUpdateStoreGroup}
+                                    onRemoveStoreGroup={handleRemoveStoreGroup}
                                     onCancel={disableMultiItemMode}
                                     projectId={values["ID Project"] || ""}
                                     projectRows={(activeForm.refOptions["ID Project"] || activeForm.refOptions["ชื่อ Project"] || []).map(opt => opt.row).filter(Boolean) as SheetRow[]}
@@ -1226,7 +1710,7 @@ export function FormModal({
                         {/* Catch-all for any unsectioned fields */}
                         {(() => {
                           const assignedNames = new Set(DATA_FORM_SECTIONS.flatMap(s => s.fields));
-                          const unsectionedFields = visibleFields.filter(f => !assignedNames.has(f.name));
+                          const unsectionedFields = visibleFields.filter(f => f.name !== "ประเภท" && !assignedNames.has(f.name));
                           if (!unsectionedFields.length) return null;
                           return (
                             <div className="bg-white rounded-xl p-3 sm:p-3.5 border border-slate-200/90 shadow-2xs space-y-2.5">
@@ -1901,6 +2385,99 @@ function EnumListFieldInput({
   );
 }
 
+function VendorExpenseSelector({
+  value,
+  onChange,
+  readOnly,
+  isRequired = true,
+}: {
+  value: string;
+  onChange: (val: string) => void;
+  readOnly?: boolean;
+  isRequired?: boolean;
+}) {
+  const current = value === "ผู้รับเหมา" ? "ผู้รับเหมา" : value === "พนักงาน" ? "พนักงาน" : "ร้านค้า";
+
+  return (
+    <div className="w-full col-span-full">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+        {/* หมวดค่าของ (1 col) */}
+        <div className="col-span-1 space-y-1">
+          <div className="flex items-center justify-between min-h-[18px]">
+            <label className="text-xs font-medium text-slate-700 flex items-center gap-1">
+              หมวดค่าของ {isRequired ? <span className="text-rose-600 font-medium ml-0.5">*</span> : null}
+            </label>
+            {current === "ร้านค้า" && (
+              <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/70 leading-none">
+                เลือกอยู่
+              </span>
+            )}
+          </div>
+          <div className="p-1 bg-slate-100/90 rounded-xl border border-slate-200/90 shadow-2xs">
+            <button
+              type="button"
+              disabled={readOnly}
+              onClick={() => onChange("ร้านค้า")}
+              className={`w-full h-9 sm:h-9.5 rounded-lg px-2 text-xs sm:text-sm font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5 select-none active:scale-[0.98] ${
+                current === "ร้านค้า"
+                  ? "bg-white text-emerald-950 font-semibold shadow-2xs border border-emerald-600/30 ring-1 ring-emerald-600/20"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-white/60 border border-transparent"
+              }`}
+            >
+              <Package className={`w-4 h-4 stroke-[2] shrink-0 ${current === "ร้านค้า" ? "text-emerald-700" : "text-slate-400"}`} />
+              <span className="truncate">ค่าของ</span>
+            </button>
+          </div>
+        </div>
+
+        {/* หมวดค่าแรง (2 cols) */}
+        <div className="col-span-1 sm:col-span-2 space-y-1">
+          <div className="flex items-center justify-between min-h-[18px]">
+            <label className="text-xs font-medium text-slate-700 flex items-center gap-1.5">
+              <span>หมวดค่าแรง</span>
+              <span className="text-slate-400 font-normal text-[11px]">(ผู้รับเหมา / พนักงาน)</span>
+            </label>
+            {(current === "ผู้รับเหมา" || current === "พนักงาน") && (
+              <span className="text-[10px] font-semibold text-sky-700 bg-sky-50 px-1.5 py-0.5 rounded border border-sky-200/70 leading-none">
+                เลือกอยู่
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-2 p-1 bg-slate-100/90 rounded-xl border border-slate-200/90 gap-1 sm:gap-1.5 shadow-2xs">
+            <button
+              type="button"
+              disabled={readOnly}
+              onClick={() => onChange("ผู้รับเหมา")}
+              className={`h-9 sm:h-9.5 rounded-lg px-2 text-xs sm:text-sm font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5 select-none active:scale-[0.98] ${
+                current === "ผู้รับเหมา"
+                  ? "bg-white text-sky-950 font-semibold shadow-2xs border border-sky-600/30 ring-1 ring-sky-600/20"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-white/60 border border-transparent"
+              }`}
+            >
+              <HardHat className={`w-4 h-4 stroke-[2] shrink-0 ${current === "ผู้รับเหมา" ? "text-sky-700" : "text-slate-400"}`} />
+              <span className="truncate">ผู้รับเหมา</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={readOnly}
+              onClick={() => onChange("พนักงาน")}
+              className={`h-9 sm:h-9.5 rounded-lg px-2 text-xs sm:text-sm font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5 select-none active:scale-[0.98] ${
+                current === "พนักงาน"
+                  ? "bg-white text-sky-950 font-semibold shadow-2xs border border-sky-600/30 ring-1 ring-sky-600/20"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-white/60 border border-transparent"
+              }`}
+            >
+              <Users className={`w-4 h-4 stroke-[2] shrink-0 ${current === "พนักงาน" ? "text-sky-700" : "text-slate-400"}`} />
+              <span className="truncate">พนักงาน</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function renderField(
   field: FieldSchema,
   form: FormPayload,
@@ -1931,6 +2508,16 @@ function renderField(
 
   if (field.type === "Ref" || field.type === "Enum" || field.type === "EnumList") {
     const options = getFieldOptions(field, form, currentValues);
+    if (field.name === "ร้านค้า/ผู้รับเหมา") {
+      return (
+        <VendorExpenseSelector
+          value={value}
+          onChange={onChange}
+          readOnly={readOnly}
+          isRequired={isFieldRequired(field, currentValues, form?.tableName)}
+        />
+      );
+    }
     if (field.type === "Ref" && field.name === "ร้านค้า") {
       return (
         <SearchableRefSelect
@@ -2103,25 +2690,40 @@ function renderField(
     }
 
     if (field.type === "Enum") {
+      let customPlaceholder = `เลือก${field.name}...`;
+      if (field.name === "สินค้า") {
+        const vType = currentValues["ร้านค้า/ผู้รับเหมา"];
+        if (vType === "ผู้รับเหมา") customPlaceholder = "เลือกประเภทงาน (ผู้รับเหมา)...";
+        else if (vType === "พนักงาน") customPlaceholder = "เลือกประเภทงาน (พนักงาน)...";
+        else customPlaceholder = "เลือกประเภทสินค้า...";
+      }
       return (
         <SearchableRefSelect
           name={field.name}
           value={value}
           options={options}
           readOnly={readOnly}
-          placeholder={`เลือก${field.name}...`}
+          placeholder={customPlaceholder}
           onChange={onChange}
+          creatable={field.name === "ชื่อเครื่องมือ"}
         />
       );
     }
+
+    const hasFilterParent = Boolean(field.filterBy);
+    const filterParentValue = field.filterBy ? String(currentValues[field.filterBy.field] || "").trim() : null;
+    const isWaitingForParent = hasFilterParent && !filterParentValue;
+    const placeholderText = isWaitingForParent
+      ? `กรุณาเลือก ${field.filterBy!.field} ก่อน`
+      : `เลือก${field.name}...`;
 
     return (
       <SearchableRefSelect
         name={field.name}
         value={value}
         options={options}
-        readOnly={readOnly}
-        placeholder={`เลือก${field.name}...`}
+        readOnly={readOnly || isWaitingForParent}
+        placeholder={placeholderText}
         onChange={onChange}
       />
     );
@@ -2218,7 +2820,8 @@ function SearchableRefSelect({
   options,
   readOnly,
   placeholder,
-  onChange
+  onChange,
+  creatable = false
 }: {
   name: string;
   value: string;
@@ -2226,6 +2829,7 @@ function SearchableRefSelect({
   readOnly: boolean;
   placeholder: string;
   onChange: (value: string) => void;
+  creatable?: boolean;
 }) {
   const selectedOption = value ? options.find(option =>
     String(option.value) === value ||
@@ -2295,6 +2899,23 @@ function SearchableRefSelect({
     setOpen(false);
     setSearch("");
   }
+
+  function handleCreateCustom() {
+    const trimmed = search.trim();
+    if (!trimmed) return;
+    onChange(trimmed);
+    setOpen(false);
+    setSearch("");
+  }
+
+  // Check if search text exactly matches any existing option
+  const searchMatchesExisting = normalizedSearch
+    ? options.some(opt => optionSearchText(opt, name).includes(normalizedSearch) && (
+        String(opt.value).toLowerCase() === normalizedSearch ||
+        String(opt.label || "").toLowerCase() === normalizedSearch
+      ))
+    : true;
+  const showCreateOption = creatable && normalizedSearch && !searchMatchesExisting;
 
   function handleClear(e: React.MouseEvent) {
     e.stopPropagation();
@@ -2448,11 +3069,21 @@ function SearchableRefSelect({
                           </button>
                         );
                       })
-                    ) : (
+                    ) : !showCreateOption ? (
                       <div className="p-8 text-center text-slate-400 text-xs">
                         🔍 ไม่พบข้อมูลที่ตรงกับคำค้นหา
                       </div>
-                    )}
+                    ) : null}
+                    {showCreateOption ? (
+                      <button
+                        type="button"
+                        onClick={handleCreateCustom}
+                        className="w-full min-h-[46px] py-2.5 px-3 rounded-xl flex items-center gap-2.5 text-left transition cursor-pointer active:scale-[0.99] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-medium border border-indigo-200 mt-1"
+                      >
+                        <span className="w-6 h-6 rounded-lg bg-indigo-100 flex items-center justify-center text-indigo-600 shrink-0 text-sm">＋</span>
+                        <span className="text-xs sm:text-sm truncate">ใช้ &quot;{search.trim()}&quot;</span>
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -2518,11 +3149,21 @@ function SearchableRefSelect({
                           />
                         );
                       })
-                    ) : (
+                    ) : !showCreateOption ? (
                       <div className="p-3 text-center text-slate-400 text-xs font-normal">
                         ไม่พบข้อมูล
                       </div>
-                    )}
+                    ) : null}
+                    {showCreateOption ? (
+                      <button
+                        type="button"
+                        onClick={handleCreateCustom}
+                        className="w-full px-2.5 py-2 text-left text-xs font-medium flex items-center gap-2 rounded-lg cursor-pointer transition-colors bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 mt-1"
+                      >
+                        <span className="w-5 h-5 rounded-md bg-indigo-100 flex items-center justify-center text-indigo-600 shrink-0 text-[11px]">＋</span>
+                        <span className="truncate">ใช้ &quot;{search.trim()}&quot;</span>
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -2587,11 +3228,22 @@ function optionLabel(option: RefOption | undefined, fieldName?: string) {
     fieldName === "contractor" ||
     fieldName === "id_Contractor_name"
   ) {
-    if (rawLabel.includes(" - ")) {
-      const parts = rawLabel.split(" - ");
-      return parts.slice(1).join(" - ").trim() || rawLabel;
+    if (option.row) {
+      const rowName = String(option.row["ชื่อเล่น"] || option.row["ผู้รับเหมา"] || option.row["ชื่อ-นามสกุล"] || "").trim();
+      if (rowName) return rowName;
     }
-    return rawLabel;
+    let clean = rawLabel;
+    if (clean.includes(" - ")) {
+      const parts = clean.split(" - ");
+      clean = parts.slice(1).join(" - ").trim() || clean;
+    }
+    if (option.row?.["รายละเอียดงาน"]) {
+      const details = String(option.row["รายละเอียดงาน"]).trim();
+      if (details && clean.includes(`(${details})`)) {
+        clean = clean.replace(`(${details})`, "").trim();
+      }
+    }
+    return clean;
   }
 
   if (fieldName === "ทะเบียน" || fieldName === "ทะเบียนรถ") {
@@ -2627,6 +3279,18 @@ function optionLabel(option: RefOption | undefined, fieldName?: string) {
     return rawLabel;
   }
 
+  if (fieldName === "ร้านค้า" || fieldName === "ร้าน/บุคคล" || fieldName?.startsWith("store_select_")) {
+    if (option.row?.["ชื่อร้านค้า"]) return String(option.row["ชื่อร้านค้า"]).trim();
+    if (option.row?.["ชื่อเต็ม"]) return String(option.row["ชื่อเต็ม"]).trim();
+    if (rawLabel.includes(" - ")) {
+      const parts = rawLabel.split(" - ");
+      return parts.slice(1).join(" - ").trim() || rawLabel;
+    }
+    const cleanStore = rawLabel.replace(/^[A-Za-z0-9_-]+\s*[-:]\s*/, "").trim();
+    if (cleanStore) return cleanStore;
+    return rawLabel;
+  }
+
   if (!val) return rawLabel;
   if (!rawLabel || rawLabel === val) return val;
   if (rawLabel.startsWith(val)) return rawLabel;
@@ -2634,7 +3298,8 @@ function optionLabel(option: RefOption | undefined, fieldName?: string) {
 }
 
 function optionSearchText(option: RefOption, fieldName?: string) {
-  return `${String(option.value || "")} ${optionLabel(option, fieldName)}`.toLowerCase();
+  const rowDetails = option.row ? Object.values(option.row).filter(v => typeof v === "string" || typeof v === "number").join(" ") : "";
+  return `${String(option.value || "")} ${optionLabel(option, fieldName)} ${rowDetails}`.toLowerCase();
 }
 
 /** กรองและดึง URL รูปภาพที่ถูกต้อง (HTTP/HTTPS, Data URL) */
@@ -2720,6 +3385,14 @@ function getInitialStringValues(form: FormPayload) {
   const todayIso = getTodayDateIso();
   const values = Object.fromEntries(
     form.schema.map(field => {
+      if (form.tableName === TABLES.DATA || form.tableName === "Data") {
+        if (field.name === "ร้านค้า/ผู้รับเหมา") {
+          return [field.name, "ร้านค้า"];
+        }
+        if (field.name === "ประเภท") {
+          return [field.name, "101 เตรียมงาน"];
+        }
+      }
       if (field.initialValue === "today" || (field.type === "Date" && (field.initialValue === "today" || field.name === "ว/ด/ป" || field.name === "วันที่" || field.name === "ดู/ทำ"))) {
         return [field.name, todayIso];
       }
@@ -2786,8 +3459,13 @@ function getRowStringValues(form: FormPayload, row: SheetRow) {
   const rawCategory = String(row["ประเภท"] || row.category || "").trim();
   const rawLaborStatus = String(row["statusค่าแรง"] || row.labor_status || "").trim();
   const hasLaborCost = Number(row["ค่าแรง"] || row.labor_cost || 0) > 0;
+  const hasStaffCost = Number(row["พนักงาน"] || row.staff_cost || 0) > 0 || Boolean(row["ชื่อพนักงาน"] || row.staff_name);
   const rawVendorType = firstNonEmpty(row["ร้านค้า/ผู้รับเหมา"], row.vendor_type);
-  const isContractor =
+
+  let vendorType = "ร้านค้า";
+  if (rawVendorType === "พนักงาน" || rawCategory.startsWith("3.") || rawCategory.includes("พนักงาน") || hasStaffCost) {
+    vendorType = "พนักงาน";
+  } else if (
     rawVendorType === "ผู้รับเหมา" ||
     Boolean(firstNonEmpty(row["ผู้รับเหมา"], row.contractor_id)) ||
     Boolean(firstNonEmpty(row["id_Conwork"], row["งานรับเหมา"])) ||
@@ -2795,9 +3473,12 @@ function getRowStringValues(form: FormPayload, row: SheetRow) {
     rawCategory.includes("ค่าแรง") ||
     rawCategory.includes("จ้าง") ||
     Boolean(rawLaborStatus) ||
-    hasLaborCost;
-
-  const vendorType = isContractor ? "ผู้รับเหมา" : (rawVendorType || "ร้านค้า");
+    hasLaborCost
+  ) {
+    vendorType = "ผู้รับเหมา";
+  } else {
+    vendorType = "ร้านค้า";
+  }
 
   form.schema.forEach(field => {
     let rawVal = firstNonEmpty(
@@ -2817,12 +3498,22 @@ function getRowStringValues(form: FormPayload, row: SheetRow) {
     if (form.tableName === TABLES.DATA || form.tableName === "Data") {
       if (field.name === "ร้านค้า/ผู้รับเหมา") {
         rawVal = vendorType;
+      } else if (field.name === "ประเภท") {
+        if (vendorType === "พนักงาน") {
+          rawVal = "301 พนักงาน";
+        } else if (vendorType === "ผู้รับเหมา") {
+          rawVal = "201 เตรียมงาน";
+        } else {
+          rawVal = rawCategory || deriveCategoryFromProduct(row["สินค้า"] || row.product) || "101 เตรียมงาน";
+        }
       } else if (field.name === "ร้านค้า") {
         rawVal = vendorType === "ร้านค้า" ? firstNonEmpty(row["ร้านค้า"], row.store_id, row["ร้าน/บุคคล"], row.vendor_or_person) : "";
       } else if (field.name === "ผู้รับเหมา") {
         rawVal = vendorType === "ผู้รับเหมา" ? firstNonEmpty(row["ผู้รับเหมา"], row.contractor_id, row["ร้าน/บุคคล"], row.vendor_or_person) : "";
+      } else if (field.name === "ชื่อพนักงาน") {
+        rawVal = vendorType === "พนักงาน" ? firstNonEmpty(row["ชื่อพนักงาน"], row.staff_name, row["ร้าน/บุคคล"], row.vendor_or_person) : "";
       } else if (field.name === "สินค้า") {
-        rawVal = vendorType === "ร้านค้า" ? firstNonEmpty(row["สินค้า"], row.product, row["สินค้า/ทำงาน"], row.description) : "";
+        rawVal = vendorType === "ร้านค้า" ? firstNonEmpty(row["สินค้า"], row.product, row["สินค้า/ทำงาน"], row.description, "101 เตรียมงาน") : (vendorType === "ผู้รับเหมา" ? "201 เตรียมงาน" : "301 พนักงาน");
       } else if (field.name === "รายละเอียดงาน") {
         rawVal = vendorType === "ผู้รับเหมา" ? firstNonEmpty(row["รายละเอียดงาน"], row.work_details, row["สินค้า/ทำงาน"], row.description) : "";
       } else if (field.name === "รายการ") {
@@ -2910,62 +3601,52 @@ function getFieldOptions(field: FieldSchema, form: FormPayload, values: Record<s
     return filterRefOptions(field, form.refOptions[field.name] || [], values);
   }
 
+  if (field.name === "สินค้า" || field.dynamicValues === "productCategoryOptions") {
+    const vType = values["ร้านค้า/ผู้รับเหมา"] || "ร้านค้า";
+    if (vType === "ผู้รับเหมา") {
+      return LABOR_CATEGORY_OPTIONS.map(c => ({ value: c, label: c }));
+    }
+    if (vType === "พนักงาน") {
+      return STAFF_CATEGORY_OPTIONS.map(c => ({ value: c, label: c }));
+    }
+    return ALL_STORE_CATEGORIES.map(c => ({ value: c, label: c }));
+  }
+
+  if (field.name === "รายการ") {
+    const isLabor = values["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา" || isLaborCost(values["ประเภท"]) || values["สินค้า"]?.startsWith("223");
+    const subList = isLabor ? SUB_ITEMS_223 : SUB_ITEMS_123;
+    return subList.map(v => ({ value: v, label: v }));
+  }
+
   return getEnumValues(field, values).map(value => ({ value, label: value }));
 }
 
 function filterRefOptions(field: FieldSchema, options: RefOption[], values: Record<string, string>) {
   if (!field.filterBy) return options;
-  const expectedValue = values[field.filterBy.field] || "";
+  const expectedValue = String(values[field.filterBy.field] || "").trim();
+  // หากยังไม่ได้เลือกข้อมูลหลักที่ต้องกรองตาม (เช่น ยังไม่ได้เลือก ID Project) จะไม่แสดงรายชื่อผู้รับเหมา
+  if (!expectedValue) return [];
+
+  const currentValue = String(values[field.name] || "").trim();
+
   return options.filter(option => {
-    if (expectedValue && String(option.row?.[field.filterBy!.column] ?? "") !== expectedValue) return false;
+    const rowVal = String(option.row?.[field.filterBy!.column] ?? "").trim();
+    if (rowVal !== expectedValue) return false;
+
+    // หากเป็นค่าเดิมที่ถูกเลือกไว้ในบิลปัจจุบัน ให้แสดงเสมอแม้สัญญาจะจ่ายครบแล้ว
+    if (currentValue && (String(option.value) === currentValue || String(option.label) === currentValue)) {
+      return true;
+    }
+
     if (!field.filterBy!.openContract) return true;
     return toNumber(option.row?.["ยอดเงินจ้าง"]) > toNumber(option.row?.["ยอดเงินจ่าย"]);
   });
 }
 
-function isFuelProduct(prod: unknown): boolean {
-  const str = String(prod || "").trim();
-  return str === "101 น้ำมัน" || str.includes("น้ำมัน") || str.startsWith("101");
-}
-
-function isMachineProduct(prod: unknown): boolean {
-  const str = String(prod || "").trim();
-  return str === "103 เครื่องจักร" || str.includes("เครื่องจักร") || str.startsWith("103");
-}
-
-function isCarRepairProduct(prod: unknown): boolean {
-  const str = String(prod || "").trim();
-  return str === "104 ซ่อมรถ" || str.includes("ซ่อมรถ") || str.startsWith("104");
-}
-
-function isOtherExpenseProduct(prod: unknown): boolean {
-  const str = String(prod || "").trim();
-  return str === "200 ดำเนินการ(อื่นๆ)" || str.includes("ดำเนินการ") || str.startsWith("200");
-}
-
-const EXPENSE_CATEGORY_FIELD_MAP: Record<string, string> = {
-  "1.ค่าของ": "ค่าของ",
-  "ค่าของ": "ค่าของ",
-  "2.ค่าแรง": "ค่าแรง",
-  "ค่าแรง": "ค่าแรง",
-  "3.พนักงาน": "พนักงาน",
-  "พนักงาน": "พนักงาน",
-  "4.น้ำมัน": "น้ำมัน",
-  "น้ำมัน": "น้ำมัน",
-  "5.ซ่อมรถ": "ซ่อมรถ",
-  "ซ่อมรถ": "ซ่อมรถ",
-  "6.เครื่องจักร": "เครื่องจักร",
-  "เครื่องจักร": "เครื่องจักร",
-  "7.เครื่องมือ": "เครื่องมือ",
-  "เครื่องมือ": "เครื่องมือ",
-  "8.อื่นๆ": "อื่นๆ",
-  "อื่นๆ": "อื่นๆ",
-};
-
 const ALL_EXPENSE_FIELDS = ["ค่าของ", "ค่าแรง", "พนักงาน", "น้ำมัน", "ซ่อมรถ", "เครื่องจักร", "เครื่องมือ", "อื่นๆ"];
 
 function transferAmountToCategory(values: Record<string, string>, targetCategory: string) {
-  const targetField = EXPENSE_CATEGORY_FIELD_MAP[targetCategory];
+  const targetField = getExpenseFieldForCategory(targetCategory);
   if (!targetField) return;
 
   // หากช่องปลายทางมียอดเงินอยู่แล้ว ไม่ต้องเขียนทับ
@@ -2987,11 +3668,9 @@ function getEnumValues(field: FieldSchema, values: Record<string, string>) {
   if (values["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา") {
     dynamicList = field.dynamicOptionSets.contractor || [];
   } else if (isFuelProduct(values["สินค้า"]) || isMachineProduct(values["สินค้า"]) || isCarRepairProduct(values["สินค้า"])) {
-    // เมื่อเลือก 101 น้ำมัน หรือ 103 เครื่องจักร หรือ 104 ซ่อมรถ ให้แสดงปุ่มหมวด storeDefault (4.น้ำมัน, 5.ซ่อมรถ, 6.เครื่องจักร)
     dynamicList = field.dynamicOptionSets.storeDefault || [];
   } else if (isOtherExpenseProduct(values["สินค้า"])) {
-    // เมื่อเลือก 200 ดำเนินการ(อื่นๆ) ให้แสดงปุ่มหมวด storeWithItem (1.ค่าของ, 7.เครื่องมือ, 8.อื่นๆ)
-    dynamicList = field.dynamicOptionSets.storeWithItem || ["1.ค่าของ", "7.เครื่องมือ", "8.อื่นๆ"];
+    dynamicList = field.dynamicOptionSets.storeWithItem || ALL_STORE_CATEGORIES;
   } else if (hasValue(values["สินค้า"])) {
     dynamicList = field.dynamicOptionSets.storeWithItem || [];
   } else {
@@ -3024,54 +3703,60 @@ function normalizeDependentValues(values: Record<string, string>, changedField: 
     }
   }
 
+  if (changedField === "ID Project") {
+    // เมื่อเปลี่ยนหรือล้าง ID Project ให้รีเซ็ตผู้รับเหมาและรายละเอียดสัญญาเดิม
+    values["ผู้รับเหมา"] = "";
+    values["รายละเอียดงาน"] = "";
+    values["ค่าแรงคงเหลือ"] = "";
+  }
+
   if (changedField === "ร้านค้า/ผู้รับเหมา") {
-    if (values[changedField] === "ร้านค้า") {
+    const vType = values["ร้านค้า/ผู้รับเหมา"];
+    if (vType === "ร้านค้า") {
       values["ผู้รับเหมา"] = "";
       values["รายละเอียดงาน"] = "";
       values["ค่าแรงคงเหลือ"] = "";
-    } else {
+      values["ชื่อพนักงาน"] = "";
+      values["statusค่าแรง"] = "";
+      if (!values["สินค้า"] || !ALL_STORE_CATEGORIES.includes(values["สินค้า"])) {
+        values["สินค้า"] = "101 เตรียมงาน";
+      }
+      const derived = deriveCategoryFromProduct(values["สินค้า"]);
+      values["ประเภท"] = derived;
+      transferAmountToCategory(values, derived);
+    } else if (vType === "พนักงาน") {
       values["ร้านค้า"] = "";
-      values["สินค้า"] = "";
+      values["ผู้รับเหมา"] = "";
+      values["รายละเอียดงาน"] = "";
+      values["ค่าแรงคงเหลือ"] = "";
+      values["statusค่าแรง"] = "";
+      values["สินค้า"] = "301 พนักงาน";
+      values["ประเภท"] = "301 พนักงาน";
+      transferAmountToCategory(values, "301 พนักงาน");
+    } else if (vType === "ผู้รับเหมา") {
+      values["ร้านค้า"] = "";
+      values["ชื่อพนักงาน"] = "";
+      if (!values["สินค้า"] || !LABOR_CATEGORY_OPTIONS.includes(values["สินค้า"])) {
+        values["สินค้า"] = "201 เตรียมงาน";
+      }
+      values["ประเภท"] = values["สินค้า"] || "201 เตรียมงาน";
+      transferAmountToCategory(values, values["ประเภท"]);
     }
-    values["ประเภท"] = "";
   }
 
   if (changedField === "สินค้า") {
     const selectedProd = String(values["สินค้า"] || "").trim();
-    if (isFuelProduct(selectedProd)) {
-      // Auto-convert: ถ้าเลือก 101 น้ำมัน ให้สลับประเภทเป็น 4.น้ำมัน ทันที พร้อมย้ายยอดเงิน
-      values["ประเภท"] = "4.น้ำมัน";
-      transferAmountToCategory(values, "4.น้ำมัน");
-    } else if (isMachineProduct(selectedProd)) {
-      // Auto-convert: ถ้าเลือก 103 เครื่องจักร ให้สลับประเภทเป็น 6.เครื่องจักร ทันที พร้อมย้ายยอดเงิน
-      values["ประเภท"] = "6.เครื่องจักร";
-      transferAmountToCategory(values, "6.เครื่องจักร");
-    } else if (isCarRepairProduct(selectedProd)) {
-      // Auto-convert: ถ้าเลือก 104 ซ่อมรถ ให้สลับประเภทเป็น 5.ซ่อมรถ ทันที พร้อมย้ายยอดเงิน
-      values["ประเภท"] = "5.ซ่อมรถ";
-      transferAmountToCategory(values, "5.ซ่อมรถ");
-    } else if (isOtherExpenseProduct(selectedProd)) {
-      // Auto-convert: ถ้าเลือก 200 ดำเนินการ(อื่นๆ) ให้สลับประเภทเป็น 8.อื่นๆ ทันที พร้อมย้ายยอดเงิน
-      values["ประเภท"] = "8.อื่นๆ";
-      transferAmountToCategory(values, "8.อื่นๆ");
-    } else if (hasValue(selectedProd)) {
-      // เมื่อเป็นสินค้าวัสดุทั่วไป แต่ประเภทเดิมค้างอยู่ที่ 4.น้ำมัน, 5.ซ่อมรถ, 6.เครื่องจักร หรือ 8.อื่นๆ ให้สลับกลับมาที่ 1.ค่าของ
-      if (
-        values["ประเภท"] === "4.น้ำมัน" ||
-        values["ประเภท"] === "5.ซ่อมรถ" ||
-        values["ประเภท"] === "6.เครื่องจักร" ||
-        values["ประเภท"] === "8.อื่นๆ"
-      ) {
-        values["ประเภท"] = "1.ค่าของ";
-        transferAmountToCategory(values, "1.ค่าของ");
-      } else if (!values["ประเภท"]) {
-        values["ประเภท"] = "1.ค่าของ";
-      }
-    }
-
-    const typeField = form.schema.find(field => field.name === "ประเภท");
-    if (typeField && values["ประเภท"] && !getEnumValues(typeField, values).includes(values["ประเภท"])) {
-      values["ประเภท"] = "";
+    const vType = values["ร้านค้า/ผู้รับเหมา"] || "ร้านค้า";
+    if (vType === "ร้านค้า") {
+      const derived = deriveCategoryFromProduct(selectedProd);
+      values["ประเภท"] = derived;
+      transferAmountToCategory(values, derived);
+    } else if (vType === "ผู้รับเหมา") {
+      values["ประเภท"] = selectedProd || "201 เตรียมงาน";
+      transferAmountToCategory(values, selectedProd || "201 เตรียมงาน");
+    } else if (vType === "พนักงาน") {
+      values["ประเภท"] = "301 พนักงาน";
+      transferAmountToCategory(values, "301 พนักงาน");
     }
   }
 
@@ -3082,18 +3767,18 @@ function normalizeDependentValues(values: Record<string, string>, changedField: 
     }
 
     // ถ้าผู้ใช้กดเลือกหมวด แต่สินค้าเดิมไม่ตรง ให้เคลียร์สินค้าออก
-    if (selectedCat === "4.น้ำมัน" && hasValue(values["สินค้า"]) && !isFuelProduct(values["สินค้า"])) {
+    if (isFuelCost(selectedCat) && hasValue(values["สินค้า"]) && !isFuelProduct(values["สินค้า"])) {
       values["สินค้า"] = "";
-    } else if (selectedCat === "5.ซ่อมรถ" && hasValue(values["สินค้า"]) && !isCarRepairProduct(values["สินค้า"])) {
+    } else if (isRepairCost(selectedCat) && hasValue(values["สินค้า"]) && !isCarRepairProduct(values["สินค้า"])) {
       values["สินค้า"] = "";
-    } else if (selectedCat === "6.เครื่องจักร" && hasValue(values["สินค้า"]) && !isMachineProduct(values["สินค้า"])) {
+    } else if (isMachineCost(selectedCat) && hasValue(values["สินค้า"]) && !isMachineProduct(values["สินค้า"])) {
       values["สินค้า"] = "";
-    } else if (selectedCat === "8.อื่นๆ" && hasValue(values["สินค้า"]) && !isOtherExpenseProduct(values["สินค้า"])) {
+    } else if (isOtherExpense(selectedCat) && hasValue(values["สินค้า"]) && !isOtherExpenseProduct(values["สินค้า"])) {
       if (isFuelProduct(values["สินค้า"]) || isMachineProduct(values["สินค้า"]) || isCarRepairProduct(values["สินค้า"])) {
         values["สินค้า"] = "";
       }
     } else if (
-      (selectedCat === "1.ค่าของ" || selectedCat === "7.เครื่องมือ") &&
+      (isMaterialCost(selectedCat) || isToolCost(selectedCat)) &&
       (isFuelProduct(values["สินค้า"]) || isMachineProduct(values["สินค้า"]) || isCarRepairProduct(values["สินค้า"]) || isOtherExpenseProduct(values["สินค้า"]))
     ) {
       values["สินค้า"] = "";
@@ -3102,18 +3787,18 @@ function normalizeDependentValues(values: Record<string, string>, changedField: 
 
   if (changedField === "ชื่อเครื่องมือ") {
     if (hasValue(values["ชื่อเครื่องมือ"])) {
-      if (values["ประเภท"] !== "7.เครื่องมือ") {
-        values["ประเภท"] = "7.เครื่องมือ";
-        transferAmountToCategory(values, "7.เครื่องมือ");
+      if (!isToolCost(values["ประเภท"])) {
+        values["ประเภท"] = "504 เครื่องมือ";
+        transferAmountToCategory(values, "504 เครื่องมือ");
       }
     }
   }
 
   if (changedField === "ผู้รับเหมา") {
     if (hasValue(values["ผู้รับเหมา"])) {
-      if (!values["ประเภท"] || values["ประเภท"] === "1.ค่าของ") {
-        values["ประเภท"] = "2.ค่าแรง";
-        transferAmountToCategory(values, "2.ค่าแรง");
+      if (!values["ประเภท"] || isMaterialCost(values["ประเภท"])) {
+        values["ประเภท"] = "201 เตรียมงาน";
+        transferAmountToCategory(values, "201 เตรียมงาน");
       }
       const conOption = (form.refOptions?.["ผู้รับเหมา"] || []).find(opt => opt.value === values["ผู้รับเหมา"]);
       const conType = String(conOption?.row?.["ประเภท"] || conOption?.row?.["statusค่าแรง"] || "");
@@ -3167,9 +3852,11 @@ function normalizeDependentValues(values: Record<string, string>, changedField: 
     }
   }
 
-  const typeField = form.schema.find(field => field.name === "ประเภท");
-  if (typeField && values["ประเภท"] && !getEnumValues(typeField, values).includes(values["ประเภท"])) {
-    values["ประเภท"] = "";
+  if (form.tableName !== TABLES.DATA && form.tableName !== "Data") {
+    const typeField = form.schema.find(field => field.name === "ประเภท");
+    if (typeField && values["ประเภท"] && !getEnumValues(typeField, values).includes(values["ประเภท"])) {
+      values["ประเภท"] = "";
+    }
   }
 }
 
@@ -3313,11 +4000,26 @@ function sanitizeValuesForSubmit(values: Record<string, string>, form: FormPaylo
   pruneHiddenConditionalValues(next, form);
   applyLocalFormulas(next, form.tableName);
   if (form.tableName === TABLES.DATA || form.tableName === "Data" || form.tableName === "bills") {
-    const cat = String(next["ประเภท"] || "").trim();
-    if (cat.startsWith("3.") || cat.includes("พนักงาน")) {
-      next["ร้านค้า/ผู้รับเหมา"] = "พนักงาน";
-      if (next["ชื่อพนักงาน"] && (!next["ร้าน/บุคคล"] || next["ร้าน/บุคคล"] === "ผู้รับเหมา" || next["ร้าน/บุคคล"] === "-")) {
+    const vType = String(next["ร้านค้า/ผู้รับเหมา"] || "").trim();
+    if (vType === "พนักงาน") {
+      next["ประเภท"] = "301 พนักงาน";
+      if (next["ชื่อพนักงาน"]) {
         next["ร้าน/บุคคล"] = next["ชื่อพนักงาน"];
+      }
+      next["ผู้รับเหมา"] = "";
+      next["ร้านค้า"] = "";
+    } else if (vType === "ผู้รับเหมา") {
+      if (!next["ประเภท"] || next["ประเภท"] === "2.ค่าแรง" || !ALL_CONTRACTOR_CATEGORIES.includes(next["ประเภท"])) {
+        next["ประเภท"] = "201 เตรียมงาน";
+      }
+      next["ร้านค้า"] = "";
+      next["ชื่อพนักงาน"] = "";
+    } else {
+      next["ร้านค้า/ผู้รับเหมา"] = "ร้านค้า";
+      next["ผู้รับเหมา"] = "";
+      next["ชื่อพนักงาน"] = "";
+      if (!next["ประเภท"] || next["ประเภท"] === "1.ค่าของ") {
+        next["ประเภท"] = deriveCategoryFromProduct(next["สินค้า"]) || "101 เตรียมงาน";
       }
     }
   }
@@ -3328,17 +4030,18 @@ function isFieldRequired(field: FieldSchema, values: Record<string, string>, tab
   if (!field.required) return false;
   if (field.type === "Hidden" || field.readonly) return false;
 
-  // กรณีตารางบิล: เมื่อเลือก ผู้รับเหมา แต่ประเภทงานเป็น "พนักงาน" (3.พนักงาน) หรือ "อื่นๆ" (8.อื่นๆ) -> ผู้รับเหมาจะไม่บังคับ
+  const vendorType = values["ร้านค้า/ผู้รับเหมา"] || "ร้านค้า";
+  if (field.name === "ร้านค้า") {
+    return vendorType === "ร้านค้า";
+  }
   if (field.name === "ผู้รับเหมา") {
-    const category = String(values["ประเภท"] || "").trim();
-    if (
-      category.startsWith("3.") ||
-      category.includes("พนักงาน") ||
-      category.startsWith("8.") ||
-      category.includes("อื่นๆ")
-    ) {
-      return false;
-    }
+    return vendorType === "ผู้รับเหมา";
+  }
+  if (field.name === "ชื่อพนักงาน") {
+    return vendorType === "พนักงาน";
+  }
+  if (field.name === "ประเภท") {
+    return false;
   }
 
   return true;
@@ -3356,33 +4059,81 @@ function validateVisibleRequiredFields(values: Record<string, string>, form: For
 
 function pruneHiddenConditionalValues(values: Record<string, string>, form: FormPayload) {
   form.schema.forEach(field => {
-    if (field.type === "Hidden") return;
+    if (field.type === "Hidden" || field.name === "ประเภท") return;
     if (isFieldVisible(field, values)) return;
     values[field.name] = "";
   });
 }
 
 function isFieldVisible(field: FieldSchema, values: Record<string, string>) {
-  if (field.name === "ผู้รับเหมา") {
-    const category = String(values["ประเภท"] || "").trim();
-    if (
-      category.startsWith("3.") ||
-      category.includes("พนักงาน") ||
-      category.startsWith("8.") ||
-      category.includes("อื่นๆ")
-    ) {
-      return false;
-    }
+  const vendorType = values["ร้านค้า/ผู้รับเหมา"] || "ร้านค้า";
+  const cat = values["ประเภท"] || "";
+
+  // 1. Vendor / Contractor / Staff specific fields
+  if (field.name === "ร้านค้า") {
+    return vendorType === "ร้านค้า";
   }
+  if (field.name === "สินค้า") {
+    return true;
+  }
+  if (field.name === "ผู้รับเหมา" || field.name === "รายละเอียดงาน" || field.name === "ค่าแรงคงเหลือ") {
+    return vendorType === "ผู้รับเหมา";
+  }
+  if (field.name === "ชื่อพนักงาน") {
+    return vendorType === "พนักงาน" || isStaffCost(cat);
+  }
+
+  // 2. Expense amounts & specifics
+  if (field.name === "ค่าแรง" || field.name === "statusค่าแรง") {
+    return vendorType === "ผู้รับเหมา" || isLaborCost(cat);
+  }
+  if (field.name === "พนักงาน") {
+    return vendorType === "พนักงาน" || isStaffCost(cat);
+  }
+  if (field.name === "น้ำมัน") {
+    return isFuelCost(cat);
+  }
+  if (field.name === "ซ่อมรถ") {
+    return isRepairCost(cat);
+  }
+  if (field.name === "ทะเบียน") {
+    return (
+      isFuelCost(cat) ||
+      isRepairCost(cat) ||
+      values["has_fuel_or_repair"] === "true" ||
+      Number(values["น้ำมัน"] || 0) > 0 ||
+      Number(values["ซ่อมรถ"] || 0) > 0
+    );
+  }
+  if (field.name === "เครื่องจักร") {
+    return isMachineCost(cat);
+  }
+  if (field.name === "เครื่องมือ" || field.name === "ชื่อเครื่องมือ") {
+    return isToolCost(cat);
+  }
+  if (field.name === "อื่นๆ") {
+    return vendorType === "ร้านค้า" && isOtherExpense(cat);
+  }
+  if (field.name === "รายการ") {
+    return isOtherExpense(cat);
+  }
+  if (field.name === "ค่าของ") {
+    return vendorType === "ร้านค้า" && (!cat || isMaterialCost(cat));
+  }
+
+  // 3. Tax / Credit
   if (field.name === "วันได้บิล") {
-    // วันที่ได้บิลทำงานร่วมกับ vat โดยยังไม่เลือกเครดิต (หากเลือกเครดิต จะซ่อนและเคลียข้อมูล)
     const hasVat = isVatActive(values["vat"]);
     const hasCredit = parseCreditDays(values["เครดิต"]) > 0;
     return hasVat && !hasCredit;
   }
-  if (field.name === "vat" && values["ร้านค้า/ผู้รับเหมา"] === "ร้านค้า") {
-    return true;
+  if (field.name === "vat") {
+    return vendorType === "ร้านค้า" || (vendorType === "ผู้รับเหมา" && values["statusค่าแรง"] === "บริษัท");
   }
+  if (field.name === "หัก") {
+    return vendorType === "ผู้รับเหมา" || isLaborCost(cat) || isOtherExpense(cat);
+  }
+
   if (!field.showIf) return true;
   const actual = values[field.showIf.column] || "";
   if (field.showIf.equals !== undefined) return actual === field.showIf.equals;
@@ -3396,19 +4147,55 @@ function isFieldVisible(field: FieldSchema, values: Record<string, string>) {
   return true;
 }
 
-function getFieldClassName(field: FieldSchema) {
-  if (field.type === "LongText" || field.type === "Image" || field.type === "File" || field.type === "EnumList" || field.name === "รายละเอียดงาน") {
+function getFieldClassName(field: FieldSchema, values?: Record<string, string>) {
+  const vendorType = values?.["ร้านค้า/ผู้รับเหมา"];
+
+  if (
+    field.type === "LongText" ||
+    field.type === "Image" ||
+    field.type === "File" ||
+    field.type === "EnumList" ||
+    field.name === "ร้านค้า/ผู้รับเหมา"
+  ) {
     return "col-span-full";
   }
-  if (field.name === "ID Project" || field.name === "ชื่อ Project" || field.name === "ร้านค้า" || field.name === "ผู้รับเหมา" || field.name === "ประเภท") {
+  if (field.name === "ผู้รับเหมา") {
+    // แสดง 1 คอลัมน์ทางซ้าย เพื่อให้ "รายละเอียดงาน" อยู่ข้างๆ ทางขวาในแถวเดียวกัน (1 + 2 = 3 คอลัมน์)
+    return "col-span-1";
+  }
+  if (field.name === "รายละเอียดงาน") {
+    // แสดง 2 คอลัมน์ทางขวา ต่อจากช่อง "ผู้รับเหมา" พอดี
+    return "col-span-1 sm:col-span-2 lg:col-span-2";
+  }
+  if (field.name === "สินค้า" && vendorType === "ผู้รับเหมา") {
+    // เมื่อเป็นผู้รับเหมา ให้ช่อง "ประเภทงาน (ผู้รับเหมา)" ขยายเต็มแถว
+    return "col-span-full";
+  }
+  if (
+    field.name === "ID Project" ||
+    field.name === "ชื่อ Project" ||
+    field.name === "ร้านค้า" ||
+    field.name === "ชื่อพนักงาน" ||
+    field.name === "ประเภท"
+  ) {
     return "col-span-1 sm:col-span-2 lg:col-span-2";
   }
   return "col-span-1";
 }
 
-function getFieldLabel(field: FieldSchema) {
+function getFieldLabel(field: FieldSchema, values?: Record<string, string>) {
   if (field.label) return field.label;
-  if (field.name === "พนักงาน") return "จำนวน";
+  if (field.name === "น้ำมัน" || field.name === "ซ่อมรถ" || field.name === "เครื่องจักร" || field.name === "เครื่องมือ" || field.name === "ค่าของ" || field.name === "อื่นๆ") {
+    return "ค่าใช้จ่าย";
+  }
+  if (field.name === "ร้านค้า/ผู้รับเหมา") return "ประเภทค่าใช้จ่าย";
+  if (field.name === "สินค้า") {
+    const vType = values?.["ร้านค้า/ผู้รับเหมา"];
+    if (vType === "ผู้รับเหมา") return "ประเภทงาน (ผู้รับเหมา)";
+    if (vType === "พนักงาน") return "ประเภทงาน (พนักงาน)";
+    return "ประเภทสินค้า";
+  }
+  if (field.name === "พนักงาน") return "ยอดเงิน (พนักงาน)";
   if (field.name === "LINE User ID" || field.name === "LINE") return "LINE User ID (ไอดีไลน์สำหรับแจ้งเตือน)";
   if (field.name === "วันออก 3%") return "วันออก";
   if (field.name === "id_Contractor" || field.name === "id_contractor") return "ผู้รับเหมา";
@@ -3452,6 +4239,7 @@ type MemoizedFormFieldProps = {
   resetKey?: number;
   attachedFiles?: File[];
   onAttachedFilesChange?: (files: File[]) => void;
+  className?: string;
 };
 
 const MemoizedFormField = memo(function MemoizedFormField({
@@ -3466,13 +4254,34 @@ const MemoizedFormField = memo(function MemoizedFormField({
   resetKey = 0,
   attachedFiles = [],
   onAttachedFilesChange = () => {},
+  className,
 }: MemoizedFormFieldProps) {
   const isRequired = isFieldRequired(field, currentValues, activeForm?.tableName);
 
+  if (field.name === "ร้านค้า/ผู้รับเหมา") {
+    return (
+      <div className="col-span-full" key={field.name}>
+        {renderField(
+          field,
+          activeForm,
+          value,
+          currentValues,
+          isEditing,
+          onValueChange,
+          enumSearchValue,
+          onEnumSearchChange,
+          resetKey,
+          attachedFiles,
+          onAttachedFilesChange
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div className={`${getFieldClassName(field)} space-y-1 min-w-0 w-full overflow-hidden`} key={field.name}>
+    <div className={`${className || getFieldClassName(field, currentValues)} space-y-1 min-w-0 w-full overflow-hidden`} key={field.name}>
       <label className="text-xs font-medium text-slate-700 block">
-        {getFieldLabel(field)}
+        {getFieldLabel(field, currentValues)}
         {isRequired ? <span className="text-rose-600 font-medium ml-0.5">*</span> : ""}
       </label>
       {renderField(
@@ -3495,11 +4304,13 @@ const MemoizedFormField = memo(function MemoizedFormField({
     prev.field === next.field &&
     prev.value === next.value &&
     prev.isEditing === next.isEditing &&
+    prev.className === next.className &&
     prev.enumSearchValue === next.enumSearchValue &&
     prev.resetKey === next.resetKey &&
     prev.attachedFiles === next.attachedFiles &&
     isFieldRequired(prev.field, prev.currentValues, prev.activeForm?.tableName) ===
       isFieldRequired(next.field, next.currentValues, next.activeForm?.tableName) &&
+    prev.currentValues["ร้านค้า/ผู้รับเหมา"] === next.currentValues["ร้านค้า/ผู้รับเหมา"] &&
     prev.currentValues[prev.field.showIf?.column || ""] === next.currentValues[next.field.showIf?.column || ""] &&
     prev.currentValues[prev.field.filterBy?.column || ""] === next.currentValues[next.field.filterBy?.column || ""]
   );

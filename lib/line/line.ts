@@ -3199,6 +3199,7 @@ export const PRODUCT_BUDGET_FIELD_MAP: Record<string, string> = {
   "102 ค่าขนส่ง": "งบไม่เกินค่าขนส่ง",
   "103 เครื่องจักร": "งบไม่เกินเครื่องจักร",
   "104 ซ่อมรถ": "งบไม่เกินซ่อมรถ",
+  "105 เครื่องมือ": "งบไม่เกินเครื่องมือ",
   "200 ดำเนินการ(อื่นๆ)": "งบไม่เกินดำเนินการ",
   "ค่าขนส่ง": "งบไม่เกินค่าขนส่ง",
   "ดำเนินการ(อื่นๆ)": "งบไม่เกินดำเนินการ",
@@ -3841,37 +3842,6 @@ export function resolveVendorName(
   bill?: Record<string, any>,
   peopleMap?: Map<string, string> | Record<string, string>
 ): string {
-  if (bill) {
-    const explicit = String(
-      bill["ชื่อร้านค้า"] ||
-      bill.store_name ||
-      bill.storeName ||
-      bill["ชื่อผู้รับเหมา"] ||
-      bill.contractor_name ||
-      bill.contractorName ||
-      ""
-    ).trim();
-    if (explicit && explicit !== "-" && explicit !== "non" && !/^[a-zA-Z]{1,3}[-_]?\d+$/.test(explicit)) {
-      return explicit;
-    }
-
-    const vendorOrPerson = String(
-      bill["ร้าน/บุคคล"] ||
-      bill.vendor_or_person ||
-      bill.data?.["ร้าน/บุคคล"] ||
-      bill.data?.vendor_or_person ||
-      bill.data?.data?.["ร้าน/บุคคล"] ||
-      bill.data?.data?.vendor_or_person ||
-      ""
-    ).trim();
-    if (vendorOrPerson && vendorOrPerson !== "-" && vendorOrPerson !== "non" && !/^[a-zA-Z]{1,3}[-_]?\d+$/.test(vendorOrPerson)) {
-      return vendorOrPerson;
-    }
-  }
-
-  const raw = String(rawVendor || "").trim();
-  if (!raw || raw === "-" || raw === "non") return "-";
-
   const getFromBankMap = (k: string): BankLookupInfo | undefined => {
     if (!k) return undefined;
     const cleanK = k.trim();
@@ -3894,44 +3864,175 @@ export function resolveVendorName(
     return undefined;
   };
 
-  // 1. Direct ID match in bankInfoMap
-  const info = getFromBankMap(raw);
-  if (info && (info.storeName || info.vendorName || info.accountName)) {
-    return info.storeName || info.vendorName || info.accountName!;
-  }
+  const isIdCode = (t: string): boolean => {
+    return /^[a-zA-Z]{1,3}[-_]?\d+$/i.test((t || "").trim());
+  };
 
-  // 2. Prefix stripped match (e.g. "st101" -> "101" or "ct101" -> "101")
-  if (/^(st|ct|pe|pt)[-_]?\d+/i.test(raw)) {
-    const clean = raw.toLowerCase().replace(/^(st|ct|pe|pt)[-_]?/i, "").trim();
-    const infoClean = getFromBankMap(clean);
-    if (infoClean && (infoClean.storeName || infoClean.vendorName || infoClean.accountName)) {
-      return infoClean.storeName || infoClean.vendorName || infoClean.accountName!;
+  const hasUnresolvedCodes = (str: string): boolean => {
+    if (!str) return false;
+    const tokens = str.split(/[,/]/).map(t => t.trim()).filter(Boolean);
+    return tokens.some(t => isIdCode(t));
+  };
+
+  const resolveSingleToken = (token: string): string => {
+    const t = token.trim();
+    if (!t || t === "-" || t === "non") return "";
+
+    // 1. Direct ID match in bankInfoMap
+    const info = getFromBankMap(t);
+    if (info && (info.storeName || info.vendorName || info.accountName)) {
+      return info.storeName || info.vendorName || info.accountName!;
+    }
+
+    // 2. Prefix stripped match (e.g. "st101" -> "101" or "ct101" -> "101")
+    if (/^(st|ct|pe|pt)[-_]?\d+/i.test(t)) {
+      const clean = t.toLowerCase().replace(/^(st|ct|pe|pt)[-_]?/i, "").trim();
+      const infoClean = getFromBankMap(clean);
+      if (infoClean && (infoClean.storeName || infoClean.vendorName || infoClean.accountName)) {
+        return infoClean.storeName || infoClean.vendorName || infoClean.accountName!;
+      }
+    }
+
+    // 3. Check peopleMap (which indexes stores and contractors too)
+    const fromPeople = resolveRequesterNameFromMap(t, peopleMap);
+    if (fromPeople && fromPeople !== t && fromPeople !== "-") {
+      return fromPeople;
+    }
+
+    // 4. Composite format with dash (e.g. "ST101 - ปัญญาสตีล")
+    if (t.includes(" - ")) {
+      const parts = t.split(" - ");
+      const info0 = getFromBankMap(parts[0].trim());
+      if (info0 && (info0.storeName || info0.vendorName)) return info0.storeName || info0.vendorName!;
+      if (parts[1] && !isIdCode(parts[1].trim())) return parts[1].trim();
+    }
+
+    // 5. Composite format with space (e.g. "ST101 ปัญญาสตีล")
+    if (/^[a-zA-Z]{1,3}[-_]?\d+\s+/.test(t)) {
+      const match = t.match(/^([a-zA-Z]{1,3}[-_]?\d+)\s+(.+)$/);
+      if (match) {
+        const codeInfo = getFromBankMap(match[1]);
+        if (codeInfo && (codeInfo.storeName || codeInfo.vendorName)) {
+          return codeInfo.storeName || codeInfo.vendorName!;
+        }
+        if (match[2] && !isIdCode(match[2])) {
+          return match[2].trim();
+        }
+      }
+    }
+
+    return t;
+  };
+
+  const resolveTokenList = (input: string): string => {
+    const trimmed = (input || "").trim();
+    if (!trimmed || trimmed === "-" || trimmed === "non") return "-";
+
+    if (trimmed.includes(",") || (trimmed.includes("/") && !trimmed.startsWith("http"))) {
+      const separator = trimmed.includes(",") ? "," : "/";
+      const tokens = trimmed.split(separator).map(s => s.trim()).filter(Boolean);
+      if (tokens.length > 1 && tokens.some(t => isIdCode(t) || getFromBankMap(t))) {
+        const resolved = tokens.map(tok => resolveSingleToken(tok)).filter(Boolean);
+        const unique = Array.from(new Set(resolved));
+        return unique.join(", ") || trimmed;
+      }
+    }
+
+    return resolveSingleToken(trimmed);
+  };
+
+  if (bill) {
+    const explicit = String(
+      bill["ชื่อร้านค้า"] ||
+      bill.store_name ||
+      bill.storeName ||
+      bill["ชื่อผู้รับเหมา"] ||
+      bill.contractor_name ||
+      bill.contractorName ||
+      ""
+    ).trim();
+    if (explicit && explicit !== "-" && explicit !== "non") {
+      if (!hasUnresolvedCodes(explicit)) {
+        return explicit;
+      }
+      const resolvedExplicit = resolveTokenList(explicit);
+      if (resolvedExplicit && resolvedExplicit !== "-" && !hasUnresolvedCodes(resolvedExplicit)) {
+        return resolvedExplicit;
+      }
+    }
+
+    const vendorOrPerson = String(
+      bill["ร้าน/บุคคล"] ||
+      bill.vendor_or_person ||
+      bill.data?.["ร้าน/บุคคล"] ||
+      bill.data?.vendor_or_person ||
+      bill.data?.data?.["ร้าน/บุคคล"] ||
+      bill.data?.data?.vendor_or_person ||
+      ""
+    ).trim();
+    if (vendorOrPerson && vendorOrPerson !== "-" && vendorOrPerson !== "non") {
+      if (!hasUnresolvedCodes(vendorOrPerson)) {
+        return vendorOrPerson;
+      }
+      const resolvedVop = resolveTokenList(vendorOrPerson);
+      if (resolvedVop && resolvedVop !== "-" && !hasUnresolvedCodes(resolvedVop)) {
+        return resolvedVop;
+      }
+    }
+
+    const storeId = String(
+      bill["ร้านค้า"] ||
+      bill.store_id ||
+      bill.data?.["ร้านค้า"] ||
+      bill.data?.store_id ||
+      ""
+    ).trim();
+    if (storeId && storeId !== "-" && storeId !== "non") {
+      const resolvedStoreId = resolveTokenList(storeId);
+      if (resolvedStoreId && resolvedStoreId !== "-" && !hasUnresolvedCodes(resolvedStoreId)) {
+        return resolvedStoreId;
+      }
+    }
+
+    // Check items in bill for multi-store sub-bills
+    const rawItems = bill.items || bill.data?.items || bill["รายการสินค้า"] || bill.line_items;
+    let lineItems: any[] = [];
+    if (Array.isArray(rawItems)) {
+      lineItems = rawItems;
+    } else if (typeof rawItems === "string" && rawItems.trim().startsWith("[")) {
+      try { lineItems = JSON.parse(rawItems); } catch {}
+    }
+    if (lineItems.length > 0) {
+      const itemStores = Array.from(new Set(
+        lineItems.map(it => {
+          const s = String(it.storeGroup || it.store_name || it.store || it.store_id || "").trim();
+          if (!s || s.startsWith("ร้านที่ ")) return "";
+          return resolveSingleToken(s);
+        }).filter(name => Boolean(name) && !hasUnresolvedCodes(name))
+      ));
+      if (itemStores.length > 0) {
+        return itemStores.join(", ");
+      }
     }
   }
 
-  // 3. Check peopleMap (which indexes stores and contractors too)
-  const fromPeople = resolveRequesterNameFromMap(raw, peopleMap);
-  if (fromPeople && fromPeople !== raw && fromPeople !== "-") {
-    return fromPeople;
-  }
+  const raw = String(rawVendor || "").trim();
+  if (!raw || raw === "-" || raw === "non") return "-";
 
-  // 4. Composite format (e.g. "ST101 - ปัญญาสตีล")
-  if (raw.includes(" - ")) {
-    const parts = raw.split(" - ");
-    const info0 = getFromBankMap(parts[0].trim());
-    if (info0 && (info0.storeName || info0.vendorName)) return info0.storeName || info0.vendorName!;
-    if (parts[1] && !/^[a-zA-Z]{1,3}[-_]?\d+$/.test(parts[1].trim())) return parts[1].trim();
+  const resolved = resolveTokenList(raw);
+  if (resolved && resolved !== "-" && (!hasUnresolvedCodes(resolved) || !bill)) {
+    return resolved;
   }
 
   // 5. Fallback: if bill has bankInfo already resolved and raw is an ID code
   if (bill) {
     const bInfo = resolveBankInfo(bill, bankInfoMap);
-    if (bInfo && (bInfo.storeName || bInfo.accountName) && /^[a-zA-Z]{1,3}[-_]?\d+$/.test(raw)) {
+    if (bInfo && (bInfo.storeName || bInfo.accountName) && hasUnresolvedCodes(raw)) {
       return bInfo.storeName || bInfo.accountName!;
     }
   }
 
-  return raw;
+  return resolved || raw;
 }
 
 export function createMultiBillFlex(
@@ -4060,16 +4161,26 @@ export function createMultiBillFlex(
   const firstBill = bills[0];
   const firstReq = getRequesterDisplayName(firstBill);
   const firstCreator = getCreatorDisplayName(firstBill);
-  const rawBillType = String(firstBill["บิล"] || firstBill.bill || firstBill.bill_type || "หลัก").trim();
-  const firstBillTypeTag = rawBillType ? `[${rawBillType.includes("บิล") ? rawBillType : `บิล${rawBillType}`}]` : "[บิลหลัก]";
-  const sheetRowIds = bills.map(b => String(b._sheetRow || b.id || b["ลำดับ"] || "").trim()).filter(Boolean);
+  const allBillTypes = Array.from(new Set(bills.map(b => {
+    const bt = String(b["บิล"] || b.bill || b.bill_type || "").trim();
+    if (bt.includes("ย่อย")) return "บิลย่อย";
+    if (bt.includes("หลัก")) return "บิลหลัก";
+    return bt ? (bt.includes("บิล") ? bt : `บิล${bt}`) : "";
+  }).filter(Boolean)));
+  const firstBillTypeTag = allBillTypes.length === 1
+    ? `[${allBillTypes[0]}]`
+    : (allBillTypes.length > 1 ? "[บิลหลัก+ย่อย]" : "");
+  const sheetRowIds = bills.map(b => String(b._sheetRow || b.id || b["ลำดับ"] || b.bill_no || "").trim()).filter(Boolean);
   const sheetRowStr = sheetRowIds.join(",");
 
   // Helper to extract image URLs from a bill object
   function getBillImages(b: Record<string, any>): string[] {
-    const rawVal = b["รูปถ่ายบิล"] || b.bill_image || b.file_url || b.attachment || b.image || b.pictures || "";
+    const rawVal = b["รูปถ่ายบิล"] || b.bill_image || b.file_url || b.attachment || b.image || b.image_url || b.pictures || "";
     if (Array.isArray(rawVal)) {
       return rawVal.map(v => normalizeUri(String(v))).filter(v => v.startsWith("http"));
+    }
+    if (Array.isArray(b.image_urls) && b.image_urls.length > 0) {
+      return b.image_urls.map((v: any) => normalizeUri(String(v))).filter((v: string) => v.startsWith("http"));
     }
     if (typeof rawVal === "string" && rawVal.trim()) {
       return rawVal.split(",").map(v => normalizeUri(v.trim())).filter(v => v.startsWith("http"));
@@ -4164,19 +4275,19 @@ export function createMultiBillFlex(
       } else {
         const namedVendor = String(b["ชื่อร้านค้า"] || b.store_name || b["ร้าน/บุคคล"] || b.vendor_or_person || b.data?.["ร้าน/บุคคล"] || b.data?.vendor_or_person || "").trim();
         const idStore = String(b["ร้านค้า"] || b.store_id || b.data?.["ร้านค้า"] || "").trim();
-        if (namedVendor && namedVendor !== "-" && namedVendor !== "non" && !/^[a-zA-Z]{1,3}[-_]?\d+$/.test(namedVendor)) {
+        if (namedVendor && namedVendor !== "-" && namedVendor !== "non") {
           rawVendorCandidate = namedVendor;
         } else if (idStore) {
           rawVendorCandidate = idStore;
         } else {
-          rawVendorCandidate = namedVendor || "-";
+          rawVendorCandidate = "-";
         }
       }
       const bankInfo = resolveBankInfo(b, bankInfoMap);
       const isSubBill = isSubBillRecord(b);
       const reqBank = resolveRequesterBankInfo(b, bankInfoMap, peopleMap);
       let vendorName = isStaffBill ? (staffName || rawVendorCandidate) : resolveVendorName(rawVendorCandidate, bankInfoMap, b, peopleMap);
-      if ((!vendorName || vendorName === "-" || /^[a-zA-Z]{1,3}[-_]?\d+$/.test(vendorName)) && bankInfo) {
+      if ((!vendorName || vendorName === "-" || /^[a-zA-Z]{1,3}[-_]?\d+$/i.test(vendorName) || /^[a-zA-Z]{1,3}[-_]?\d+(\s*,\s*[a-zA-Z]{1,3}[-_]?\d+)+$/i.test(vendorName)) && bankInfo) {
         vendorName = bankInfo.storeName || bankInfo.accountName || vendorName;
       }
       const projName = b["ชื่อ Project"] || b.project_name || "โครงการทั่วไป";
@@ -5286,18 +5397,18 @@ export function createDailyTransferSummaryFlex(
         } else {
           const namedVendor = String(b["ชื่อร้านค้า"] || b.store_name || b["ร้าน/บุคคล"] || b.vendor_or_person || b.data?.["ร้าน/บุคคล"] || b.data?.vendor_or_person || "").trim();
           const idStore = String(b["ร้านค้า"] || b.store_id || b.data?.["ร้านค้า"] || "").trim();
-          if (namedVendor && namedVendor !== "-" && namedVendor !== "non" && !/^[a-zA-Z]{1,3}[-_]?\d+$/.test(namedVendor)) {
+          if (namedVendor && namedVendor !== "-" && namedVendor !== "non") {
             rawVendorCandidate = namedVendor;
           } else if (idStore) {
             rawVendorCandidate = idStore;
           } else {
-            rawVendorCandidate = namedVendor || "-";
+            rawVendorCandidate = "-";
           }
         }
 
         const bankInfo = resolveBankInfo(b, bankInfoMap);
         payeeName = resolveVendorName(rawVendorCandidate, bankInfoMap, b, peopleMap);
-        if ((!payeeName || payeeName === "-" || /^[a-zA-Z]{1,3}[-_]?\d+$/.test(payeeName)) && bankInfo) {
+        if ((!payeeName || payeeName === "-" || /^[a-zA-Z]{1,3}[-_]?\d+$/i.test(payeeName) || /^[a-zA-Z]{1,3}[-_]?\d+(\s*,\s*[a-zA-Z]{1,3}[-_]?\d+)+$/i.test(payeeName)) && bankInfo) {
           payeeName = bankInfo.storeName || bankInfo.accountName || payeeName;
         }
         if (!payeeName || payeeName === "-") {
