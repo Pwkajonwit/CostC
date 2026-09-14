@@ -570,25 +570,45 @@ function ensureBillVendorType(row: SheetRow) {
   const hasLaborCost = Number(row["ค่าแรง"] ?? row.labor_cost ?? 0) > 0;
   const hasLaborStatus = Boolean(row["statusค่าแรง"] ?? row.labor_status);
 
+  if (current === "ร้านค้า") {
+    row["ร้านค้า/ผู้รับเหมา"] = "ร้านค้า";
+    row["ผู้รับเหมา"] = "";
+    if (!row["ร้านค้า"] && row["ร้าน/บุคคล"]) row["ร้านค้า"] = row["ร้าน/บุคคล"];
+    return;
+  }
+
+  if (current === "พนักงาน") {
+    row["ร้านค้า/ผู้รับเหมา"] = "พนักงาน";
+    row["ผู้รับเหมา"] = "";
+    row["ร้านค้า"] = "";
+    return;
+  }
+
+  if (current === "ผู้รับเหมา") {
+    row["ร้านค้า/ผู้รับเหมา"] = "ผู้รับเหมา";
+    row["ร้านค้า"] = "";
+    if (!row["ผู้รับเหมา"] && row["ร้าน/บุคคล"]) row["ผู้รับเหมา"] = row["ร้าน/บุคคล"];
+    return;
+  }
+
   if (
-    current === "ผู้รับเหมา" ||
     hasRowValue(row["ผู้รับเหมา"]) ||
     hasRowValue(row.contractor_id) ||
-    hasRowValue(row["รายละเอียดงาน"]) ||
     category.startsWith("2.") ||
     category.includes("ค่าแรง") ||
-    category.includes("จ้าง") ||
     hasLaborCost ||
     hasLaborStatus
   ) {
     row["ร้านค้า/ผู้รับเหมา"] = "ผู้รับเหมา";
+    row["ร้านค้า"] = "";
     if (!row["ผู้รับเหมา"] && row["ร้าน/บุคคล"]) row["ผู้รับเหมา"] = row["ร้าน/บุคคล"];
-    if (!row["ผู้รับเหมา"] && row["ร้านค้า"]) {
-      row["ผู้รับเหมา"] = row["ร้านค้า"];
-      row["ร้านค้า"] = "";
-    }
+  } else if (category.startsWith("3.") || category.includes("พนักงาน")) {
+    row["ร้านค้า/ผู้รับเหมา"] = "พนักงาน";
+    row["ผู้รับเหมา"] = "";
+    row["ร้านค้า"] = "";
   } else {
     row["ร้านค้า/ผู้รับเหมา"] = "ร้านค้า";
+    row["ผู้รับเหมา"] = "";
     if (!row["ร้านค้า"] && row["ร้าน/บุคคล"]) row["ร้านค้า"] = row["ร้าน/บุคคล"];
   }
 }

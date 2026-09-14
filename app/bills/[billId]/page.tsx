@@ -115,57 +115,56 @@ export default async function BillDetailPage({ params }: BillDetailPageProps) {
       })
     : null;
 
-  const matchedStore = !isContractorBill && rawVendor
-    ? storeRows.find((s) => {
-        const code = text(s["id_store"] || s.id).toLowerCase();
-        const shortName = text(s["ชื่อร้านค้า"]).toLowerCase();
-        const fullName = text(s["ชื่อเต็ม"]).toLowerCase();
-        const cand1 = (storeIdFromBill || rawVendor).toLowerCase();
-        const cand2 = storeNameFromBill.toLowerCase();
-        const cand3 = vendorOrPerson.toLowerCase();
-        return (
-          (code && (code === cand1 || code === cand3)) ||
-          (shortName && (shortName === cand1 || shortName === cand2 || shortName === cand3 || cand3.includes(shortName))) ||
-          (fullName && (fullName === cand1 || fullName === cand2 || fullName === cand3 || cand3.includes(fullName)))
-        );
-      })
-    : null;
+  const resolveStoreName = (idOrName: string): string => {
+    const token = idOrName.trim();
+    if (!token) return "";
+    const found = storeRows.find((s) => {
+      const code = text(s["id_store"] || s.id).toLowerCase();
+      const shortName = text(s["ชื่อร้านค้า"]).toLowerCase();
+      const fullName = text(s["ชื่อเต็ม"]).toLowerCase();
+      const target = token.toLowerCase();
+      return code === target || shortName === target || fullName === target;
+    });
+    if (found) {
+      return text(found["ชื่อร้านค้า"] || found["ชื่อเต็ม"] || found.name) || token;
+    }
+    return token;
+  };
 
   let vendorDisplay = rawVendor || "-";
   let vendorSubText = "";
+  let matchedStore: SheetRow | undefined = undefined;
 
-  if (matchedStore) {
-    const code = text(matchedStore["id_store"] || matchedStore.id || storeIdFromBill);
-    const sName = text(matchedStore["ชื่อร้านค้า"] || storeNameFromBill || matchedStore.name);
-    const fullName = text(matchedStore["ชื่อเต็ม"]);
-
-    if (code && sName && code.toLowerCase() !== sName.toLowerCase()) {
-      vendorDisplay = `${code} - ${sName}`;
+  if (!isContractorBill && rawVendor) {
+    if (rawVendor.includes(",")) {
+      vendorDisplay = rawVendor
+        .split(",")
+        .map((t) => resolveStoreName(t))
+        .filter(Boolean)
+        .join(", ");
     } else {
-      vendorDisplay = sName || code || rawVendor;
+      vendorDisplay = resolveStoreName(rawVendor);
     }
 
-    if (fullName && fullName !== sName && fullName !== vendorDisplay) {
-      vendorSubText = fullName;
-    }
-  } else if (!isContractorBill && storeNameFromBill) {
-    if (storeIdFromBill && storeIdFromBill.toLowerCase() !== storeNameFromBill.toLowerCase()) {
-      vendorDisplay = `${storeIdFromBill} - ${storeNameFromBill}`;
-    } else {
-      vendorDisplay = storeNameFromBill;
+    matchedStore = storeRows.find((s) => {
+      const code = text(s["id_store"] || s.id).toLowerCase();
+      const shortName = text(s["ชื่อร้านค้า"]).toLowerCase();
+      const target = rawVendor.trim().toLowerCase();
+      return code === target || shortName === target;
+    });
+    if (matchedStore) {
+      const fullName = text(matchedStore["ชื่อเต็ม"]);
+      if (fullName && fullName !== vendorDisplay) {
+        vendorSubText = fullName;
+      }
     }
   } else if (matchedContractor) {
     const code = text(matchedContractor["id_Contractor"] || matchedContractor.id || contractorIdFromBill);
     const nickname = text(matchedContractor["ชื่อเล่น"] || contractorNameFromBill || matchedContractor.name);
     const fullName = text(matchedContractor["ชื่อ-นามสกุล"]);
 
-    if (code && nickname && code.toLowerCase() !== nickname.toLowerCase()) {
-      vendorDisplay = `${code} - ${nickname}`;
-    } else {
-      vendorDisplay = nickname || code || rawVendor;
-    }
-
-    if (fullName && fullName !== nickname && fullName !== vendorDisplay) {
+    vendorDisplay = nickname || fullName || code || rawVendor;
+    if (fullName && fullName !== nickname) {
       vendorSubText = fullName;
     }
   } else if (isContractorBill && contractorNameFromBill) {
@@ -183,7 +182,7 @@ export default async function BillDetailPage({ params }: BillDetailPageProps) {
     ? text(matchedStore["id_store"] || matchedStore.id || matchedStore["ชื่อร้านค้า"] || rawVendor)
     : rawVendor;
 
-  const vendorLink = rawVendor
+  const vendorLink = rawVendor && !rawVendor.includes(",")
     ? (matchedContractor || isContractorBill)
       ? `/views/contractors/${encodeURIComponent(contractorKey)}`
       : `/views/stores/${encodeURIComponent(storeKey)}`
@@ -238,6 +237,7 @@ export default async function BillDetailPage({ params }: BillDetailPageProps) {
       decodedBillId={decodedBillId}
       project={project}
       contract={contract}
+      stores={storeRows}
       matchedContract={matchedContract}
       contractDisplay={contractDisplay}
       contractLink={contractLink}

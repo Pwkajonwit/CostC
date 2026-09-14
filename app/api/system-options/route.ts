@@ -1,7 +1,8 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { getSystemOptionsFromSupabase, isSupabaseConfigured } from "@/lib/supabase/supabase-db";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 import { FORM_SCHEMAS } from "@/lib/schemas";
+import { ALL_STORE_CATEGORIES, ALL_CONTRACTOR_CATEGORIES, ALL_NEW_CATEGORIES } from "@/lib/cost-codes";
 
 export const dynamic = "force-dynamic";
 
@@ -19,9 +20,10 @@ export async function GET() {
     // Default schema options fallback if empty
     if (Object.keys(options).length === 0) {
       options = {
-        "ประเภท (ผู้รับเหมา)": ["2.ค่าแรง", "3.พนักงาน", "8.อื่นๆ"],
-        "ประเภท (ร้านค้า)": ["1.ค่าของ", "4.น้ำมัน", "5.ซ่อมรถ", "6.เครื่องจักร", "7.เครื่องมือ", "8.อื่นๆ"],
-        "ประเภท (ร้านค้า+เลือกสินค้า)": ["4.น้ำมัน", "5.ซ่อมรถ", "6.เครื่องจักร"],
+        "ประเภท (ผู้รับเหมา)": ALL_CONTRACTOR_CATEGORIES,
+        "ประเภท (ร้านค้า)": ALL_STORE_CATEGORIES,
+        "ประเภท (ร้านค้า+เลือกสินค้า)": ALL_STORE_CATEGORIES,
+        "รายการประเภททั้งหมด": ALL_NEW_CATEGORIES,
         "ประเภทบิล": ["หลัก", "ย่อย"],
         "statusค่าแรง": ["บริษัท", "บุคคลธรรมดา"],
         "สถานะโครงการ": ["กำลังทำอยู่", "เสร็จสิ้นแล้ว", "เร่งด่วน"],

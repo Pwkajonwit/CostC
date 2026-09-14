@@ -9,6 +9,7 @@ import { isVatActive, parseDeductPercent, parseCreditDays } from "@/lib/project-
 import { appendAuditLog, appendRow, getSystemOptions, invalidateTableCache } from "@/lib/db";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 import { getNextBillSequence, mapSupabaseRowToSheetRow } from "@/lib/supabase/supabase-db";
+import { deriveCategoryFromProduct } from "@/lib/cost-codes";
 import type { SheetRow } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -204,7 +205,7 @@ async function readBillRows(request: NextRequest): Promise<{ rows: SheetRow[]; i
       itemRow["ยอดโอน"] = parsedRows[i]["ยอดโอน"] ?? "";
       itemRow["สินค้า"] = parsedRows[i]["สินค้า"] ?? "";
       itemRow["สินค้า/ทำงาน"] = parsedRows[i]["สินค้า/ทำงาน"] || parsedRows[i]["สินค้า"] || "";
-      itemRow["ประเภท"] = parsedRows[i]["ประเภท"] || "1.ค่าของ";
+      itemRow["ประเภท"] = parsedRows[i]["ประเภท"] || (itemRow["สินค้า"] ? deriveCategoryFromProduct(itemRow["สินค้า"]) : "101 เตรียมงาน");
       itemRow["items"] = parsedRows[i]["items"] || "";
       if (allImagesStr) {
         itemRow[billImageField || "รูปถ่ายบิล"] = allImagesStr;
@@ -230,10 +231,16 @@ function ensureBillStatus(row: SheetRow) {
     }
   });
   if (!row["ประเภท"] && !row.category) {
-    if (Number(row["ค่าของ"] || row.material_cost || 0) > 0) row["ประเภท"] = "1.ค่าของ";
-    else if (Number(row["เครื่องมือ"] || row.tool_cost || 0) > 0) row["ประเภท"] = "7.เครื่องมือ";
-    else if (Number(row["อื่นๆ"] || row.other_cost || 0) > 0) row["ประเภท"] = "8.อื่นๆ";
-    else row["ประเภท"] = "1.ค่าของ";
+    if (row["สินค้า"]) {
+      row["ประเภท"] = deriveCategoryFromProduct(row["สินค้า"]);
+    } else if (Number(row["ค่าของ"] || row.material_cost || 0) > 0) row["ประเภท"] = "101 เตรียมงาน";
+    else if (Number(row["เครื่องมือ"] || row.tool_cost || 0) > 0) row["ประเภท"] = "504 เครื่องมือ";
+    else if (Number(row["อื่นๆ"] || row.other_cost || 0) > 0) row["ประเภท"] = "123 ดำเนินการ(อื่นๆ)";
+    else if (Number(row["น้ำมัน"] || row.fuel_cost || 0) > 0) row["ประเภท"] = "501 น้ำมัน";
+    else if (Number(row["ซ่อมรถ"] || row.repair_cost || 0) > 0) row["ประเภท"] = "502 ซ่อมรถ";
+    else if (Number(row["เครื่องจักร"] || row.machine_cost || 0) > 0) row["ประเภท"] = "503 เครื่องจักร";
+    else if (Number(row["ค่าแรง"] || row.labor_cost || 0) > 0) row["ประเภท"] = "201 เตรียมงาน";
+    else row["ประเภท"] = "101 เตรียมงาน";
   }
   return row;
 }
@@ -244,25 +251,46 @@ function ensureBillVendorType(row: SheetRow) {
   const hasLaborCost = Number(row["ค่าแรง"] ?? row.labor_cost ?? 0) > 0;
   const hasLaborStatus = Boolean(row["statusค่าแรง"] ?? row.labor_status);
 
+  if (current === "ร้านค้า") {
+    row["ร้านค้า/ผู้รับเหมา"] = "ร้านค้า";
+    row["ผู้รับเหมา"] = "";
+    if (!row["ร้านค้า"] && row["ร้าน/บุคคล"]) row["ร้านค้า"] = row["ร้าน/บุคคล"];
+    return;
+  }
+
+  if (current === "พนักงาน") {
+    row["ร้านค้า/ผู้รับเหมา"] = "พนักงาน";
+    row["ผู้รับเหมา"] = "";
+    row["ร้านค้า"] = "";
+    return;
+  }
+
+  if (current === "ผู้รับเหมา") {
+    row["ร้านค้า/ผู้รับเหมา"] = "ผู้รับเหมา";
+    row["ร้านค้า"] = "";
+    if (!row["ผู้รับเหมา"] && row["ร้าน/บุคคล"]) row["ผู้รับเหมา"] = row["ร้าน/บุคคล"];
+    return;
+  }
+
+  // Fallback heuristic only when current is not explicitly specified
   if (
-    current === "ผู้รับเหมา" ||
     hasValue(row["ผู้รับเหมา"]) ||
     hasValue(row.contractor_id) ||
-    hasValue(row["รายละเอียดงาน"]) ||
     category.startsWith("2.") ||
     category.includes("ค่าแรง") ||
-    category.includes("จ้าง") ||
     hasLaborCost ||
     hasLaborStatus
   ) {
     row["ร้านค้า/ผู้รับเหมา"] = "ผู้รับเหมา";
+    row["ร้านค้า"] = "";
     if (!row["ผู้รับเหมา"] && row["ร้าน/บุคคล"]) row["ผู้รับเหมา"] = row["ร้าน/บุคคล"];
-    if (!row["ผู้รับเหมา"] && row["ร้านค้า"]) {
-      row["ผู้รับเหมา"] = row["ร้านค้า"];
-      row["ร้านค้า"] = "";
-    }
+  } else if (category.startsWith("3.") || category.includes("พนักงาน")) {
+    row["ร้านค้า/ผู้รับเหมา"] = "พนักงาน";
+    row["ผู้รับเหมา"] = "";
+    row["ร้านค้า"] = "";
   } else {
     row["ร้านค้า/ผู้รับเหมา"] = "ร้านค้า";
+    row["ผู้รับเหมา"] = "";
     if (!row["ร้านค้า"] && row["ร้าน/บุคคล"]) row["ร้านค้า"] = row["ร้าน/บุคคล"];
   }
 }

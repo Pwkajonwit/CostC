@@ -1,9 +1,8 @@
 import { ProjectDetailClient } from "@/components/dashboards/ProjectDetailClient";
-import { isCommittedBill, isPaidBill } from "@/lib/bills/bill-status";
+import { isCommittedBill } from "@/lib/bills/bill-status";
 import { TABLES } from "@/lib/config";
-import { toNumber } from "@/lib/utils/numbers";
 import { getRows } from "@/lib/db";
-import { getCategoryExpense, hydrateProjectSummary, rowsForProject, valueOf } from "@/lib/project-summary";
+import { hydrateProjectSummary, rowsForProject, valueOf } from "@/lib/project-summary";
 import { calculateProjectBudgetControl } from "@/lib/project-budget-control";
 import type { SheetRow } from "@/lib/types";
 import { notFound } from "next/navigation";
@@ -45,17 +44,6 @@ const RELATED_COLUMNS = [
   "สถานะ"
 ];
 
-const EXPENSE_CATEGORIES = [
-  "ค่าของ",
-  "ค่าแรง",
-  "พนักงาน",
-  "น้ำมัน",
-  "ซ่อมรถ",
-  "เครื่องจักร",
-  "เครื่องมือ",
-  "อื่นๆ"
-];
-
 export default async function ProjectDetailPage({ params }: ProjectDetailPageProps) {
   const { projectId } = await params;
   const decodedProjectId = decodeURIComponent(projectId);
@@ -78,10 +66,6 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
   }));
   const { project: hydratedProject, totals } = hydrateProjectSummary(project, relatedRows);
   const budgetControl = calculateProjectBudgetControl(hydratedProject, relatedRows);
-  const paidRows = summaryRows.filter(isPaidBill);
-  const pendingRows = summaryRows.filter((r) => !isPaidBill(r));
-  const expenseBreakdown = buildExpenseBreakdown(paidRows);
-  const pendingBreakdown = buildExpenseBreakdown(pendingRows);
 
   const projectName = displayValue(valueOf(hydratedProject, ["ชื่อ Project"])) || `Project ${decodedProjectId}`;
 
@@ -115,11 +99,8 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
       totals={totals}
       budgetControl={budgetControl}
       summaryRows={summaryRows}
-      expenseBreakdown={expenseBreakdown}
-      pendingBreakdown={pendingBreakdown}
       detailFields={DETAIL_FIELDS}
       relatedColumns={RELATED_COLUMNS}
-      expenseCategories={EXPENSE_CATEGORIES}
     />
   );
 }
@@ -155,13 +136,7 @@ function resolveRequesterName(rawRequester: unknown, peopleRows: SheetRow[]): st
   return str;
 }
 
-function buildExpenseBreakdown(summaryRows: SheetRow[]) {
-  const breakdown: Record<string, number> = {};
-  for (const cat of EXPENSE_CATEGORIES) {
-    breakdown[cat] = getCategoryExpense(summaryRows, cat);
-  }
-  return breakdown;
-}
+
 
 function displayValue(value: unknown) {
   if (value === null || value === undefined) return "";
