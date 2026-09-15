@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 
@@ -86,16 +86,30 @@ export async function POST(req: NextRequest) {
 
       if (members && Array.isArray(members)) {
         matchedMember = members.find((m: any) => {
-          const mPhoneClean = normalizePhone(m.phone || m["เบอร์โทร"] || m["เบอร์โทรศัพท์"]);
+          const mRawPhone = String(m.phone || m["เบอร์โทร"] || m["เบอร์โทรศัพท์"] || m.data?.phone || m.data?.["เบอร์โทร"] || "");
+          const mPhoneClean = normalizePhone(mRawPhone);
           const mIdClean = String(m.id || m["รหัสพนักงาน"] || "").trim().toLowerCase();
           const mNicknameClean = String(m.nickname || m["ชื่อเล่น"] || "").trim().toLowerCase();
           const mFullNameClean = String(m.full_name || m["ชื่อ-นามสกุล"] || "").trim().toLowerCase();
 
+          const phoneMatch = Boolean(
+            inputPhoneClean &&
+            inputPhoneClean.length >= 8 &&
+            mPhoneClean &&
+            mPhoneClean.length >= 8 &&
+            (
+              mPhoneClean === inputPhoneClean ||
+              mPhoneClean.replace(/^0+/, "") === inputPhoneClean.replace(/^0+/, "") ||
+              (mPhoneClean.startsWith("66") ? "0" + mPhoneClean.slice(2) : mPhoneClean) === (inputPhoneClean.startsWith("66") ? "0" + inputPhoneClean.slice(2) : inputPhoneClean)
+            )
+          );
+
           return (
-            (inputPhoneClean && inputPhoneClean.length >= 8 && mPhoneClean && mPhoneClean === inputPhoneClean) ||
+            phoneMatch ||
             mIdClean === rawInputTrimmed ||
             mNicknameClean === rawInputTrimmed ||
-            mFullNameClean === rawInputTrimmed
+            mFullNameClean === rawInputTrimmed ||
+            (rawInputTrimmed.length >= 3 && mFullNameClean.includes(rawInputTrimmed))
           );
         });
       }

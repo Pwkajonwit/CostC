@@ -1,4 +1,4 @@
-﻿import { cookies } from "next/headers";
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 
@@ -6,6 +6,64 @@ export const dynamic = "force-dynamic";
 
 function normalizePhone(p?: string) {
   return String(p || "").replace(/\D/g, "");
+}
+
+async function findMatchingMember(input: string) {
+  const rawInput = String(input || "").trim();
+  if (!rawInput) return null;
+
+  const cleanPhone = normalizePhone(rawInput);
+  const rawLower = rawInput.toLowerCase();
+
+  // Fetch all members from master_members
+  const { data: members, error } = await supabaseAdmin
+    .from("master_members")
+    .select("*");
+
+  if (error || !members || !Array.isArray(members)) {
+    console.warn("findMatchingMember master_members query failed:", error?.message);
+    return null;
+  }
+
+  // 1. First priority: match by clean phone digits (handles dashes, spaces, +66, leading zeros)
+  if (cleanPhone.length >= 8) {
+    const matchedByPhone = members.find((m: any) => {
+      const mRawPhone = String(m.phone || m["เบอร์โทร"] || m["เบอร์โทรศัพท์"] || m.data?.phone || m.data?.["เบอร์โทร"] || "");
+      const mClean = normalizePhone(mRawPhone);
+      if (!mClean || mClean.length < 8) return false;
+
+      // Exact match of digits (e.g. "0933019874" === "0933019874")
+      if (mClean === cleanPhone) return true;
+
+      // Match without leading zeros (e.g. "933019874" === "933019874")
+      if (mClean.replace(/^0+/, "") === cleanPhone.replace(/^0+/, "")) return true;
+
+      // Match international +66 format
+      const mNo66 = mClean.startsWith("66") ? "0" + mClean.slice(2) : mClean;
+      const inputNo66 = cleanPhone.startsWith("66") ? "0" + cleanPhone.slice(2) : cleanPhone;
+      if (mNo66 === inputNo66) return true;
+
+      return false;
+    });
+
+    if (matchedByPhone) return matchedByPhone;
+  }
+
+  // 2. Second priority: match by Employee ID, Nickname, or Full Name
+  const matchedByIdOrName = members.find((m: any) => {
+    const mId = String(m.id || m["รหัสพนักงาน"] || "").trim().toLowerCase();
+    const mNickname = String(m.nickname || m["ชื่อเล่น"] || "").trim().toLowerCase();
+    const mFullName = String(m.full_name || m["ชื่อ-นามสกุล"] || "").trim().toLowerCase();
+
+    if (mId && mId === rawLower) return true;
+    if (mNickname && mNickname === rawLower) return true;
+    if (mFullName && mFullName === rawLower) return true;
+    if (mFullName && rawLower.length >= 3 && mFullName.includes(rawLower)) return true;
+
+    return false;
+  });
+
+  return matchedByIdOrName || null;
 }
 
 function parseMemberPermissions(member: any) {
@@ -149,30 +207,7 @@ export async function POST(request: Request) {
       }
 
       const inputPhoneClean = normalizePhone(phone);
-      const rawInputTrimmed = String(phone).trim();
-
-      let matchedMember: any = null;
-
-      // 1. Search by clean phone
-      if (inputPhoneClean && inputPhoneClean.length >= 8) {
-        const { data } = await supabaseAdmin
-          .from("master_members")
-          .select("*")
-          .eq("phone", inputPhoneClean)
-          .maybeSingle();
-        matchedMember = data;
-      }
-
-      // 2. Fallback search by ID or Nickname
-      if (!matchedMember) {
-        const { data } = await supabaseAdmin
-          .from("master_members")
-          .select("*")
-          .or(`id.ilike.${rawInputTrimmed},nickname.ilike.${rawInputTrimmed}`)
-          .limit(1)
-          .maybeSingle();
-        matchedMember = data;
-      }
+      const matchedMember = await findMatchingMember(phone);
 
       if (matchedMember) {
         // Update LINE User ID and pictureurl in master_members
@@ -249,39 +284,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "กรุณาระบุเบอร์โทรศัพท์หรือรหัสพนักงาน" }, { status: 400 });
     }
 
-    const cleanPhone = normalizePhone(rawInput);
-    let matchedMember: any = null;
-
-    // Search by clean phone digits if length >= 8
-    if (cleanPhone && cleanPhone.length >= 8) {
-      const { data } = await supabaseAdmin
-        .from("master_members")
-        .select("*")
-        .eq("phone", cleanPhone)
-        .maybeSingle();
-      matchedMember = data;
-
-      if (!matchedMember) {
-        const { data: ilikePhone } = await supabaseAdmin
-          .from("master_members")
-          .select("*")
-          .ilike("phone", `%${cleanPhone}%`)
-          .limit(1)
-          .maybeSingle();
-        matchedMember = ilikePhone;
-      }
-    }
-
-    // Fallback: Search by ID or Nickname or Full Name
-    if (!matchedMember) {
-      const { data } = await supabaseAdmin
-        .from("master_members")
-        .select("*")
-        .or(`id.ilike.${rawInput},nickname.ilike.${rawInput},full_name.ilike.${rawInput}`)
-        .limit(1)
-        .maybeSingle();
-      matchedMember = data;
-    }
+    const matchedMember = await findMatchingMember(rawInput);
 
     if (!matchedMember) {
       return NextResponse.json({
