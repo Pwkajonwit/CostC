@@ -12,6 +12,7 @@ import { TopProgressBar } from "@/components/shared/TopProgressBar";
 import { UserPermissionSync } from "@/components/auth/UserPermissionSync";
 import { extractMemberPermissions, findMemberInPeopleRows } from "@/lib/user-permissions";
 import { YearFilterProvider } from "@/lib/context/YearFilterContext";
+import { extractYearFromDate } from "@/lib/utils/dates";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -89,6 +90,28 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     }
   }
 
+  // Lightweight query: fetch only date columns from projects to build year filter options
+  let dataYears: number[] = [];
+  if (currentUser) {
+    try {
+      const { supabaseAdmin } = await import("@/lib/supabase/supabase-admin");
+      const { data: rows } = await supabaseAdmin
+        .from("projects")
+        .select("start_date, created_at")
+        .limit(500);
+      if (rows && rows.length > 0) {
+        const yearSet = new Set<number>();
+        for (const p of rows) {
+          const yr = extractYearFromDate(p.start_date) || extractYearFromDate(p.created_at);
+          if (yr) yearSet.add(yr);
+        }
+        dataYears = Array.from(yearSet).sort((a, b) => b - a);
+      }
+    } catch {
+      // Ignore — falls back to hardcoded range
+    }
+  }
+
   const selectedYear = cookieStore.get("costlab_selected_year")?.value || "";
 
   return (
@@ -101,7 +124,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             {!currentUser ? (
               <LoginScreen />
             ) : (
-              <YearFilterProvider initialYear={selectedYear}>
+              <YearFilterProvider initialYear={selectedYear} dataYears={dataYears}>
                 <AppShell peopleRows={peopleRows} currentUser={currentUser}>
                   <UserPermissionSync currentRole={currentUser.role} employeeId={currentUser.id} />
                   {children}

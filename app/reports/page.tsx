@@ -41,9 +41,11 @@ export default async function ReportsPage() {
   // to avoid serializing 1,100 full rows of metadata into the HTML payload
   const lightStoreRows = storeRows
     .map((s) => ({
+      id_store: String(s["id_store"] || s.id || "").trim(),
       "ชื่อร้านค้า": String(s["ชื่อร้านค้า"] || s.name || "").trim(),
+      "ชื่อเต็ม": String(s["ชื่อเต็ม"] || s.full_name || "").trim(),
     }))
-    .filter((s) => s["ชื่อร้านค้า"]);
+    .filter((s) => s["ชื่อร้านค้า"] || s.id_store);
 
   const lightContractorRows = contractorRows.map((c) => ({
     "id_Contractor": String(c["id_Contractor"] || c.id || c["รหัส"] || c["ID"] || "").trim(),
