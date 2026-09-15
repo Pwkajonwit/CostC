@@ -3589,6 +3589,27 @@ function getRowStringValues(form: FormPayload, row: SheetRow) {
       values[field.name] = rawVal;
     }
   });
+
+  // Preserve any extra budget or custom properties from row and row.data
+  if (row && typeof row === "object") {
+    Object.entries(row).forEach(([k, v]) => {
+      if (k.startsWith("งบไม่เกิน") || k === "คุมงบประเภทงาน") {
+        if (v !== undefined && v !== null && (values[k] === undefined || values[k] === "")) {
+          values[k] = String(v);
+        }
+      }
+    });
+    if (row.data && typeof row.data === "object") {
+      Object.entries(row.data).forEach(([k, v]) => {
+        if (k.startsWith("งบไม่เกิน") || k === "คุมงบประเภทงาน") {
+          if (v !== undefined && v !== null && (values[k] === undefined || values[k] === "")) {
+            values[k] = String(v);
+          }
+        }
+      });
+    }
+  }
+
   return values;
 }
 
@@ -4059,7 +4080,7 @@ function validateVisibleRequiredFields(values: Record<string, string>, form: For
 
 function pruneHiddenConditionalValues(values: Record<string, string>, form: FormPayload) {
   form.schema.forEach(field => {
-    if (field.type === "Hidden" || field.name === "ประเภท") return;
+    if (field.type === "Hidden" || field.name === "ประเภท" || field.name.startsWith("งบไม่เกิน") || field.name === "คุมงบประเภทงาน") return;
     if (isFieldVisible(field, values)) return;
     values[field.name] = "";
   });

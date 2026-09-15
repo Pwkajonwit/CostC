@@ -127,7 +127,7 @@ export function BillWorkflowActions({
     }
   }
 
-  const btnBase = "inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed";
+  const btnBase = "inline-flex items-center justify-center gap-1.5 h-7 sm:h-8 px-2.5 sm:px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-2xs shrink-0";
 
   return (
     <div className="flex items-center gap-1.5 flex-wrap">

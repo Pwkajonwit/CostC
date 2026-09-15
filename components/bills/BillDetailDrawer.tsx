@@ -157,9 +157,9 @@ export function BillDetailDrawer({
     }
   }
 
-  const lineItems = useMemo<Array<{ category?: string; categoryType?: string; amount?: string | number; name?: string; type?: string; storeGroup?: string }>>(() => {
+  const lineItems = useMemo<Array<{ category?: string; categoryType?: string; amount?: string | number; price?: string | number; total?: string | number; name?: string; type?: string; storeGroup?: string }>>(() => {
     if (!bill) return [];
-    const raw = bill.items || (bill.data as any)?.items;
+    const raw = bill.items || (bill.data as any)?.items || (bill as any)["รายการสินค้า"] || (bill as any).line_items;
     if (Array.isArray(raw) && raw.length > 0) return raw;
     if (typeof raw === "string" && raw.trim().startsWith("[")) {
       try {
@@ -169,6 +169,10 @@ export function BillDetailDrawer({
     }
     return [];
   }, [bill]);
+
+  const lineItemsTotal = useMemo(() => {
+    return lineItems.reduce((s, i) => s + toNumber(i.amount ?? i.price ?? i.total), 0);
+  }, [lineItems]);
 
   if (!bill) return null;
 
@@ -364,7 +368,7 @@ export function BillDetailDrawer({
 
                 <div>
                   <span className="text-xs text-slate-400 block">ยอดเงิน:</span>
-                  <span className="text-indigo-600 text-sm block mt-0.5">{money(bill["ยอดเงิน"])}</span>
+                  <span className="text-indigo-600 text-sm block mt-0.5">{money(lineItemsTotal > 0 ? lineItemsTotal : bill["ยอดเงิน"])}</span>
                 </div>
 
                 <div>

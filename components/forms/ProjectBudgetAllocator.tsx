@@ -2,12 +2,16 @@
 
 import { useMemo, useState } from "react";
 import {
-  ChevronDown,
-  ChevronUp,
   PieChart,
   Package,
   Hammer,
-  Layers
+  Search,
+  Filter,
+  CheckCircle2,
+  Layers,
+  Sparkles,
+  Info,
+  RotateCcw
 } from "lucide-react";
 import { money, toNumber } from "@/lib/utils/numbers";
 
@@ -25,9 +29,7 @@ type CategoryItem = {
   icon?: string;
 };
 
-// =========================================================================
 // 1. หมวดค่าของ (Material Cost Code) - 27 หมวดตามบิล (101-123 และ 501-504)
-// =========================================================================
 const MATERIAL_ITEMS: CategoryItem[] = [
   { code: "101", field: "งบไม่เกินเตรียมงาน", label: "101. เตรียมงาน", group: "หมวดงานเตรียมงาน & ดำเนินการ", icon: "🚜" },
   { code: "102", field: "งบไม่เกินหินทราย", label: "102. ดิน/ทราย/หิน", group: "หมวดงานโครงสร้าง", icon: "🪨" },
@@ -58,9 +60,7 @@ const MATERIAL_ITEMS: CategoryItem[] = [
   { code: "504", field: "งบไม่เกินเครื่องมือ", label: "504. เครื่องมือ", group: "หมวดงานยานพาหนะ & เครื่องมือ", icon: "🛠️" },
 ];
 
-// =========================================================================
 // 2. หมวดค่าแรง (Labor Cost Code) - 24 หมวดตามบิล (201-223 + 301 พนักงาน)
-// =========================================================================
 const LABOR_SUB_ITEMS: CategoryItem[] = [
   { code: "201", field: "งบไม่เกินค่าแรง_201", label: "201. เตรียมงาน", group: "หมวดงานเตรียมงาน & ดำเนินการ", icon: "🚜" },
   { code: "202", field: "งบไม่เกินค่าแรง_202", label: "202. ดิน/ทราย/หิน", group: "หมวดงานโครงสร้าง", icon: "🪨" },
@@ -91,23 +91,17 @@ const LABOR_SUB_ITEMS: CategoryItem[] = [
 export function ProjectBudgetAllocator({
   values,
   onChange,
-  defaultExpanded = false
+  defaultExpanded = true
 }: ProjectBudgetAllocatorProps) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
-
-  // States for Material Sub-items (27 items)
-  const [showMaterialSubItems, setShowMaterialSubItems] = useState(false);
-  const [materialSearch, setMaterialSearch] = useState("");
-
-  // States for Labor Sub-items (24 items including staff)
-  const [showLaborSubItems, setShowLaborSubItems] = useState(false);
-  const [laborSearch, setLaborSearch] = useState("");
+  const [activeTab, setActiveTab] = useState<"split" | "material" | "labor">("split");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [onlyAllocated, setOnlyAllocated] = useState(false);
 
   const workAmount = toNumber(values["ยอดงาน"]);
   const budgetCap = toNumber(values["งบไม่เกิน"]);
   const totalProjectBudget = budgetCap > 0 ? budgetCap : (workAmount > 0 ? workAmount : 0);
 
-  // Helper for material item values with legacy fallbacks
+  // Value Extractors
   function getMaterialVal(item: CategoryItem): string {
     if (values[item.field] !== undefined && values[item.field] !== "") {
       return String(values[item.field]);
@@ -127,7 +121,6 @@ export function ProjectBudgetAllocator({
     return "";
   }
 
-  // Helper for labor item values (including 301 staff)
   function getLaborVal(item: CategoryItem): string {
     if (values[item.field] !== undefined && values[item.field] !== "") {
       return String(values[item.field]);
@@ -140,31 +133,38 @@ export function ProjectBudgetAllocator({
     return "";
   }
 
-  // 1. Material Sub-total (27 items)
+  // 1. Material Budget (ช่องกรอก 'งบค่าของ' เป็นหลัก หากไม่ได้กรอกจึงใช้ยอดรวมย่อย)
   const materialSubTotal = useMemo(() => {
     return MATERIAL_ITEMS.reduce((sum, item) => sum + toNumber(getMaterialVal(item)), 0);
   }, [values]);
 
   const rawMaterialCap = toNumber(values["งบไม่เกินค่าของ"]);
-  const materialBudget = Math.max(rawMaterialCap, materialSubTotal);
+  const materialBudget = rawMaterialCap > 0 ? rawMaterialCap : materialSubTotal;
 
-  // 2. Labor Sub-total (24 items including staff)
+  // 2. Labor Budget (ช่องกรอก 'งบค่าแรง' + 'งบพนักงาน' เป็นหลัก หากไม่ได้กรอกจึงใช้ยอดรวมย่อย)
   const laborSubTotal = useMemo(() => {
     return LABOR_SUB_ITEMS.reduce((sum, item) => sum + toNumber(getLaborVal(item)), 0);
   }, [values]);
 
   const rawLaborCap = toNumber(values["งบไม่เกินค่าแรง"]);
-  const staffCap = toNumber(values["งบไม่เกินพนักงาน"]);
-  // Include staff budget in labor budget
-  const laborBudget = Math.max(rawLaborCap, laborSubTotal, (rawLaborCap + staffCap));
+  const rawStaffCap = toNumber(values["งบไม่เกินพนักงาน"]);
+  const overallLaborStaff = rawLaborCap + rawStaffCap;
+  const laborBudget = overallLaborStaff > 0 ? overallLaborStaff : laborSubTotal;
 
-  // Total allocated (2 main groups: ค่าของ + ค่าแรง)
+  // Overall totals
   const totalAllocated = materialBudget + laborBudget;
   const remainingBudget = totalProjectBudget - totalAllocated;
-  const allocatedPercent = totalProjectBudget > 0 ? (totalAllocated / totalProjectBudget) * 100 : 0;
-  const remainingPercent = totalProjectBudget > 0 ? (remainingBudget / totalProjectBudget) * 100 : 0;
 
-  // Counts of items with budgets
+  // Percentages
+  const materialPercent = totalProjectBudget > 0 ? ((materialBudget / totalProjectBudget) * 100).toFixed(1) : "0.0";
+  const laborPercent = totalProjectBudget > 0 ? ((laborBudget / totalProjectBudget) * 100).toFixed(1) : "0.0";
+  const rawLaborPercent = totalProjectBudget > 0 ? ((rawLaborCap / totalProjectBudget) * 100).toFixed(1) : "0.0";
+  const rawMaterialPercent = totalProjectBudget > 0 ? ((rawMaterialCap / totalProjectBudget) * 100).toFixed(1) : "0.0";
+  const staffBudget = toNumber(values["งบไม่เกินพนักงาน"]);
+  const staffPercent = totalProjectBudget > 0 ? ((staffBudget / totalProjectBudget) * 100).toFixed(1) : "0.0";
+  const remainingPercent = totalProjectBudget > 0 ? ((remainingBudget / totalProjectBudget) * 100).toFixed(1) : "0.0";
+
+  // Counts
   const materialItemsWithBudgetCount = useMemo(() => {
     return MATERIAL_ITEMS.filter(item => toNumber(getMaterialVal(item)) > 0).length;
   }, [values]);
@@ -173,455 +173,477 @@ export function ProjectBudgetAllocator({
     return LABOR_SUB_ITEMS.filter(item => toNumber(getLaborVal(item)) > 0).length;
   }, [values]);
 
-  // Filtered lists (Flat by search only, no work group filtering)
-  const filteredMaterialItems = useMemo(() => {
-    const q = materialSearch.toLowerCase().trim();
-    if (!q) return MATERIAL_ITEMS;
-    return MATERIAL_ITEMS.filter(item => item.label.toLowerCase().includes(q) || item.code.includes(q));
-  }, [materialSearch]);
+  // Overall Cap Handlers
+  function handleOverallMaterialChange(val: string) {
+    onChange("งบไม่เกินค่าของ", val);
+  }
 
-  const filteredLaborItems = useMemo(() => {
-    const q = laborSearch.toLowerCase().trim();
-    if (!q) return LABOR_SUB_ITEMS;
-    return LABOR_SUB_ITEMS.filter(item => item.label.toLowerCase().includes(q) || item.code.includes(q));
-  }, [laborSearch]);
+  function handleOverallLaborChange(val: string) {
+    onChange("งบไม่เกินค่าแรง", val);
+  }
 
-  // Handler for Material Sub-item Changes
+  function handleOverallStaffChange(val: string) {
+    onChange("งบไม่เกินพนักงาน", val);
+  }
+
+  // Sub-item Handlers (บันทึกรายข้อย่อยโดยไม่เขียนทับค่างบภาพรวม)
   function handleMaterialItemChange(field: string, val: string) {
     onChange(field, val);
-
-    const nextValNum = toNumber(val);
-    let newSum = 0;
-    MATERIAL_ITEMS.forEach(item => {
-      if (item.field === field) {
-        newSum += nextValNum;
-      } else {
-        newSum += toNumber(getMaterialVal(item));
-      }
-    });
-
-    onChange("งบไม่เกินค่าของ", newSum > 0 ? String(newSum) : "");
   }
 
-  // Handler for Labor Sub-item Changes (including 301 staff)
   function handleLaborItemChange(field: string, val: string) {
     onChange(field, val);
-
-    const nextValNum = toNumber(val);
-    let newSum = 0;
-    LABOR_SUB_ITEMS.forEach(item => {
-      if (item.field === field) {
-        newSum += nextValNum;
-      } else {
-        newSum += toNumber(getLaborVal(item));
-      }
-    });
-
-    onChange("งบไม่เกินค่าแรง", newSum > 0 ? String(newSum) : "");
   }
 
+  // Reset Handlers (รีเซ็ตให้ค่าเป็นไม่ตั้ง/ว่าง)
+  function handleResetMaterialSubItems() {
+    MATERIAL_ITEMS.forEach(item => {
+      onChange(item.field, "");
+    });
+    onChange("งบไม่เกินดิน", "");
+    onChange("งบไม่เกินปูนทรายหิน", "");
+    onChange("งบไม่เกินประตูหน้าต่าง", "");
+    onChange("งบไม่เกินตบแต่งภายใน", "");
+    onChange("งบไม่เกินอื่นๆ", "");
+    onChange("งบไม่เกินวัสดุอื่นๆ", "");
+  }
+
+  function handleResetLaborSubItems() {
+    LABOR_SUB_ITEMS.forEach(item => {
+      onChange(item.field, "");
+    });
+  }
+
+  // Filtering
+  const filteredMaterialItems = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    return MATERIAL_ITEMS.filter(item => {
+      if (onlyAllocated && toNumber(getMaterialVal(item)) <= 0) return false;
+      if (!q) return true;
+      return item.label.toLowerCase().includes(q) || item.code.includes(q);
+    });
+  }, [searchQuery, onlyAllocated, values]);
+
+  const filteredLaborItems = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    return LABOR_SUB_ITEMS.filter(item => {
+      if (onlyAllocated && toNumber(getLaborVal(item)) <= 0) return false;
+      if (!q) return true;
+      return item.label.toLowerCase().includes(q) || item.code.includes(q);
+    });
+  }, [searchQuery, onlyAllocated, values]);
+
   return (
-    <div className="col-span-full bg-slate-50 border border-slate-200 rounded-xl overflow-hidden transition-all shadow-2xs my-2 font-sans">
-      {/* Accordion Toggle Header */}
-      <button
-        type="button"
-        onClick={() => setExpanded(prev => !prev)}
-        className="w-full px-4 py-3 bg-white hover:bg-slate-50 flex items-center justify-between transition border-b border-slate-200/80 cursor-pointer"
-      >
-        <div className="flex items-center gap-2.5">
-          <div className="p-1.5 bg-emerald-100 text-emerald-800 rounded-lg border border-emerald-300">
-            <PieChart size={16} />
+    <div className="col-span-full bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs my-2 font-sans">
+      {/* 1. TOP SUMMARY KPI BAR (กระชับ แถวเดียว พร้อม % สัดส่วน) */}
+      <div className="p-2 sm:p-2.5 bg-slate-50/90 border-b border-slate-200">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+          <div className="bg-white border border-slate-200/90 shadow-2xs px-2.5 py-1.5 rounded-lg text-center">
+            <div className="flex items-center justify-center gap-1 text-[11px] text-slate-500 font-medium">
+              <span>งบโครงการ</span>
+              <span className="text-[10px] font-bold px-1 rounded bg-slate-100 text-slate-600">100%</span>
+            </div>
+            <span className="text-slate-900 font-bold text-xs sm:text-sm block mt-0.5">{money(totalProjectBudget)} บาท</span>
           </div>
-          <div className="text-left">
-            <h4 className="text-xs font-bold text-slate-900 flex items-center gap-2 flex-wrap">
-              <span>จัดสรรงบประมาณโครงการ</span>
-              {totalAllocated > 0 && (
-                <span className="text-[11px] px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-full font-semibold">
-                  จัดสรรแล้ว {money(totalAllocated)} ฿ ({allocatedPercent.toFixed(1)}%)
+
+          <div className="bg-emerald-50/60 border border-emerald-300/80 shadow-2xs px-2.5 py-1.5 rounded-lg text-center">
+            <div className="flex items-center justify-center gap-1 text-[11px] text-emerald-800 font-semibold">
+              <span>1. งบค่าของ</span>
+              <span className="text-[10px] font-bold px-1 rounded bg-emerald-100 text-emerald-800">{rawMaterialPercent}%</span>
+            </div>
+            <span className="text-emerald-950 font-bold text-xs sm:text-sm block mt-0.5">{money(rawMaterialCap > 0 ? rawMaterialCap : materialSubTotal)} บาท</span>
+          </div>
+
+          <div className="bg-indigo-50/60 border border-indigo-300/80 shadow-2xs px-2.5 py-1.5 rounded-lg text-center">
+            <div className="flex items-center justify-center gap-1 text-[11px] text-indigo-800 font-semibold">
+              <span>2. งบค่าแรง & ช่าง</span>
+              <span className="text-[10px] font-bold px-1 rounded bg-indigo-100 text-indigo-800">{laborPercent}%</span>
+            </div>
+            <span className="text-indigo-950 font-bold text-xs sm:text-sm block mt-0.5">{money(laborBudget)} บาท</span>
+          </div>
+
+          <div className={`px-2.5 py-1.5 rounded-lg text-center border shadow-2xs ${
+            remainingBudget < 0
+              ? "bg-rose-50 border-rose-300 text-rose-800"
+              : "bg-white border-slate-200 text-slate-700"
+          }`}>
+            <div className="flex items-center justify-center gap-1 text-[11px] text-slate-500 font-medium">
+              <span>คงเหลือจัดสรร</span>
+              <span className={`text-[10px] font-bold px-1 rounded ${
+                remainingBudget < 0 ? "bg-rose-100 text-rose-800" : "bg-slate-100 text-slate-600"
+              }`}>{remainingPercent}%</span>
+            </div>
+            <span className="font-bold text-xs sm:text-sm block mt-0.5">
+              {remainingBudget < 0 ? `เกิน ${money(Math.abs(remainingBudget))}` : money(remainingBudget)} บาท
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* 2. OVERALL TOTAL BUDGET INPUTS (กำหนดงบภาพรวม แบบกระชับ) */}
+      <div className="p-2.5 sm:p-3 bg-white border-b border-slate-200">
+        <div className="flex items-center gap-1.5 mb-2 text-xs font-bold text-slate-700">
+          <Sparkles size={13} className="text-amber-500" />
+          <span>กำหนดงบภาพรวม:</span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+          {/* ช่องกรอกรวมค่าของภาพรวม */}
+          <div className="bg-emerald-50/20 p-2.5 rounded-xl border border-emerald-300 shadow-2xs space-y-1">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                <Package size={14} className="text-emerald-700" />
+                <span>งบค่าของ</span>
+              </label>
+              <div className="flex items-center gap-1">
+                {materialItemsWithBudgetCount > 0 && (
+                  <span className="text-[10px] px-1.5 py-0.2 bg-emerald-100 text-emerald-800 rounded font-medium">
+                    {materialItemsWithBudgetCount} หมวด
+                  </span>
+                )}
+                <span className="text-[10px] px-1.5 py-0.2 bg-emerald-100 text-emerald-900 rounded font-bold">
+                  {rawMaterialPercent}%
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                value={values["งบไม่เกินค่าของ"] ?? ""}
+                onChange={e => handleOverallMaterialChange(e.target.value)}
+                placeholder="ระบุงบรวมค่าของ (บาท)"
+                className="w-full bg-white border border-emerald-300 focus:border-emerald-600 focus:bg-white rounded-lg px-2.5 py-1 text-sm font-bold text-right text-emerald-950 focus:outline-none shadow-2xs font-mono"
+              />
+              <span className="text-xs font-bold text-emerald-800 whitespace-nowrap">บาท</span>
+            </div>
+          </div>
+
+          {/* ช่องกรอกรวมค่าแรงภาพรวม */}
+          <div className="bg-indigo-50/20 p-2.5 rounded-xl border border-indigo-300 shadow-2xs space-y-1">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                <Hammer size={14} className="text-indigo-700" />
+                <span>งบค่าแรง</span>
+              </label>
+              <div className="flex items-center gap-1">
+                {laborItemsWithBudgetCount > 0 && (
+                  <span className="text-[10px] px-1.5 py-0.2 bg-indigo-100 text-indigo-800 rounded font-medium">
+                    {laborItemsWithBudgetCount} หมวด
+                  </span>
+                )}
+                <span className="text-[10px] px-1.5 py-0.2 bg-indigo-100 text-indigo-900 rounded font-bold">
+                  {rawLaborPercent}%
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                value={values["งบไม่เกินค่าแรง"] ?? ""}
+                onChange={e => handleOverallLaborChange(e.target.value)}
+                placeholder="ระบุงบรวมค่าแรง (บาท)"
+                className="w-full bg-white border border-indigo-300 focus:border-indigo-600 focus:bg-white rounded-lg px-2.5 py-1 text-sm font-bold text-right text-indigo-950 focus:outline-none shadow-2xs font-mono"
+              />
+              <span className="text-xs font-bold text-indigo-800 whitespace-nowrap">บาท</span>
+            </div>
+          </div>
+
+          {/* ช่องกรอกงบพนักงาน */}
+          <div className="bg-slate-50/40 p-2.5 rounded-xl border border-slate-300 shadow-2xs space-y-1 sm:col-span-2 lg:col-span-1">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <span>👥 งบพนักงาน</span>
+              </label>
+              {staffBudget > 0 && (
+                <span className="text-[10px] px-1.5 py-0.2 bg-slate-100 border border-slate-200 text-slate-800 rounded font-bold">
+                  {staffPercent}%
                 </span>
               )}
-            </h4>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 text-xs text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-200 font-medium">
-          <span>{expanded ? "ซ่อนรายละเอียด" : "ตั้งค่างบประมาณ"}</span>
-          {expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
-        </div>
-      </button>
-
-      {/* Expanded Content */}
-      {expanded && (
-        <div className="p-4 space-y-4 bg-slate-50/70">
-          {/* Top Bar: KPI Summary (2 Main Categories) */}
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
-            <div className="shrink-0">
-              <span className="text-xs font-bold text-slate-900">
-                สรุปการจัดสรรงบประมาณ
-              </span>
             </div>
-
-            <div className="flex items-center gap-2 text-xs flex-wrap">
-              <div className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-right">
-                <span className="text-[10px] text-slate-400 block font-medium">งบรวมโครงการ</span>
-                <span className="text-slate-900 font-bold text-xs">{money(totalProjectBudget)} ฿</span>
-              </div>
-              <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1 text-right">
-                <span className="text-[10px] text-emerald-700 block font-medium">1. รวมงบค่าของ (27 หมวด)</span>
-                <span className="text-emerald-900 font-bold text-xs">{money(materialBudget)} ฿</span>
-              </div>
-              <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-2.5 py-1 text-right">
-                <span className="text-[10px] text-indigo-700 block font-medium">2. รวมงบค่าแรง & บุคลากร (24 หมวด)</span>
-                <span className="text-indigo-900 font-bold text-xs">{money(laborBudget)} ฿</span>
-              </div>
-              <div className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-right">
-                <span className="text-[10px] text-slate-400 block font-medium">จัดสรรแล้ว</span>
-                <span className="text-slate-900 font-bold text-xs">
-                  {money(totalAllocated)} ฿ <span className="text-slate-500 font-normal text-[10px]">({allocatedPercent.toFixed(1)}%)</span>
-                </span>
-              </div>
-              <div className={`rounded-lg px-2.5 py-1 text-right border ${remainingBudget < 0 ? "bg-rose-50 border-rose-300 text-rose-700" : "bg-emerald-50/50 border-emerald-200 text-emerald-800"}`}>
-                <span className="text-[10px] block font-medium opacity-80">คงเหลือจัดสรร</span>
-                <span className="font-bold text-xs">
-                  {money(remainingBudget)} ฿ <span className="font-normal text-[10px]">({remainingPercent.toFixed(1)}%)</span>
-                </span>
-              </div>
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                value={values["งบไม่เกินพนักงาน"] ?? ""}
+                onChange={e => handleOverallStaffChange(e.target.value)}
+                placeholder="ระบุงบพนักงาน (บาท)"
+                className="w-full bg-white border border-slate-300 focus:border-slate-500 focus:bg-white rounded-lg px-2.5 py-1 text-sm font-bold text-right text-slate-900 focus:outline-none shadow-2xs font-mono"
+              />
+              <span className="text-xs font-bold text-slate-500 whitespace-nowrap">บาท</span>
             </div>
           </div>
+        </div>
+      </div>
 
-          {/* ======================================================== */}
-          {/* หมวดใหญ่ที่ 1: 📦 หมวดค่าของ (Material Cost Code) 27 รายการ */}
-          {/* ======================================================== */}
-          <div className="bg-white border-2 border-emerald-300 rounded-xl p-4 shadow-2xs space-y-3.5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className="p-2 bg-emerald-100 text-emerald-800 rounded-xl border border-emerald-300 shrink-0">
-                  <Package size={18} />
-                </div>
-                <div className="min-w-0">
-                  <h5 className="text-sm font-bold text-slate-900 flex items-center gap-2 flex-wrap">
-                    <span>1. หมวดค่าของ & เครื่องมือยานพาหนะ</span>
-                    <span className="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full font-semibold">
-                      {MATERIAL_ITEMS.length} หมวดตามบิล
-                    </span>
-                  </h5>
-                </div>
-              </div>
+      {/* 3. FILTER & TAB CONTROLS FOR SUB-ITEMS */}
+      <div className="px-3 sm:px-4 py-2.5 bg-white border-b border-slate-200 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 text-xs">
+        {/* Tab switcher */}
+        <div className="inline-flex items-center p-0.5 bg-slate-100 rounded-lg border border-slate-200">
+          <button
+            type="button"
+            onClick={() => setActiveTab("split")}
+            className={`px-3 py-1.5 rounded-md font-medium transition cursor-pointer flex items-center gap-1.5 ${
+              activeTab === "split"
+                ? "bg-white text-slate-900 shadow-2xs font-bold"
+                : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <Layers size={13} />
+            <span className="hidden sm:inline">ดู 2 ฝั่งคู่</span>
+            <span className="sm:hidden">ทั้งหมด</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("material")}
+            className={`px-3 py-1.5 rounded-md font-medium transition cursor-pointer flex items-center gap-1.5 ${
+              activeTab === "material"
+                ? "bg-emerald-700 text-white shadow-2xs font-bold"
+                : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <Package size={13} />
+            <span>ย่อยค่าของ ({MATERIAL_ITEMS.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("labor")}
+            className={`px-3 py-1.5 rounded-md font-medium transition cursor-pointer flex items-center gap-1.5 ${
+              activeTab === "labor"
+                ? "bg-indigo-700 text-white shadow-2xs font-bold"
+                : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <Hammer size={13} />
+            <span>ย่อยค่าแรง ({LABOR_SUB_ITEMS.length})</span>
+          </button>
+        </div>
 
-              {/* Box แสดงยอดรวมค่าของ */}
-              <div className="flex items-center gap-2.5 bg-emerald-50/90 px-3.5 py-2 rounded-xl border border-emerald-300 shrink-0">
-                <div className="text-right">
-                  <span className="text-xs font-bold text-emerald-950">รวมงบค่าของ:</span>
-                </div>
-                <div className="flex items-center gap-1 w-36">
-                  <input
-                    type="number"
-                    value={rawMaterialCap > 0 ? rawMaterialCap : (materialSubTotal > 0 ? materialSubTotal : "")}
-                    onChange={e => onChange("งบไม่เกินค่าของ", e.target.value)}
-                    placeholder="0.00"
-                    className="w-full bg-white border border-emerald-400 focus:border-emerald-600 rounded-lg px-2.5 py-1 text-sm text-right font-bold text-emerald-950 focus:outline-none shadow-2xs"
-                  />
-                  <span className="text-xs font-bold text-emerald-800">฿</span>
-                </div>
-              </div>
-            </div>
+        {/* Search & Show only allocated toggle */}
+        <div className="flex items-center gap-2 flex-1 max-w-md justify-end">
+          <div className="relative flex-1">
+            <Search size={13} className="absolute left-2.5 top-2.5 text-slate-400 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="ค้นหารหัสหรือชื่อหมวดย่อย..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-300 text-slate-800 pl-8 pr-2.5 py-1.5 rounded-lg text-xs focus:outline-none focus:bg-white focus:border-slate-500 shadow-2xs"
+            />
+          </div>
 
-            {/* Sub-items Toggle Control Bar */}
-            <button
-              type="button"
-              onClick={() => setShowMaterialSubItems(prev => !prev)}
-              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border transition cursor-pointer ${
-                showMaterialSubItems
-                  ? "bg-slate-100/90 hover:bg-slate-200/80 border-slate-300 text-slate-700"
-                  : "bg-emerald-50/60 hover:bg-emerald-100/70 border-dashed border-emerald-300 text-emerald-900 shadow-2xs"
-              }`}
-            >
-              <div className="flex items-center gap-2.5">
-                <div className={`p-1.5 rounded-lg transition ${showMaterialSubItems ? "bg-slate-200 text-slate-700" : "bg-emerald-200 text-emerald-800"}`}>
-                  <Layers size={15} />
-                </div>
-                <div className="text-left">
-                  <span className="text-xs font-bold flex items-center gap-2 flex-wrap">
-                    <span>แจกแจงรายหมวดตามบิล ({MATERIAL_ITEMS.length} หมวด)</span>
-                    {materialItemsWithBudgetCount > 0 && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-600 text-white font-semibold">
-                        กำหนดแล้ว {materialItemsWithBudgetCount} หมวด ({money(materialSubTotal)} ฿)
-                      </span>
-                    )}
-                  </span>
-                </div>
-              </div>
+          <button
+            type="button"
+            onClick={() => setOnlyAllocated(prev => !prev)}
+            className={`px-2.5 py-1.5 rounded-lg border transition text-xs font-medium cursor-pointer whitespace-nowrap flex items-center gap-1 ${
+              onlyAllocated
+                ? "bg-slate-800 text-white border-slate-800 shadow-2xs font-bold"
+                : "bg-white text-slate-600 hover:bg-slate-100 border-slate-300"
+            }`}
+            title="กรองแสดงเฉพาะหมวดที่มีการตั้งงบไว้"
+          >
+            <Filter size={12} />
+            <span>เฉพาะที่มีงบ</span>
+          </button>
+        </div>
+      </div>
 
-              <div className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition shrink-0 ${
-                showMaterialSubItems
-                  ? "bg-white text-slate-700 border-slate-300 shadow-2xs hover:bg-slate-50"
-                  : "bg-emerald-600 text-white border-emerald-700 hover:bg-emerald-700 shadow-2xs"
-              }`}>
-                <span>{showMaterialSubItems ? "ยุบหมวดย่อย" : "ขยายดูรายหมวด"}</span>
-                {showMaterialSubItems ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              </div>
-            </button>
-
-            {/* Grid 27 รายการสินค้า (แสดงเมื่อกดขยาย) */}
-            {showMaterialSubItems && (
-              <div className="space-y-3 pt-1">
-                {/* Search Bar for Material */}
-                <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center justify-between text-xs pb-1">
-                  <span className="text-xs text-slate-500 font-medium">
-                    หมวดค่าของทั้งหมด ({MATERIAL_ITEMS.length} รายการ)
-                  </span>
-
-                  <div className="w-full sm:w-56">
-                    <input
-                      type="text"
-                      value={materialSearch}
-                      onChange={e => setMaterialSearch(e.target.value)}
-                      placeholder="🔍 ค้นหาหมวดค่าของ..."
-                      className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-emerald-500 shadow-2xs"
-                    />
+      {/* 4. SUB-ITEMS TABLES GRID */}
+      <div className="p-3 sm:p-4 bg-slate-50/50">
+        <div className={`grid gap-4 ${
+          activeTab === "split"
+            ? "grid-cols-1 lg:grid-cols-2"
+            : "grid-cols-1"
+        }`}>
+          {/* LEFT TABLE: 📦 ย่อยค่าของ (Material) */}
+          {(activeTab === "split" || activeTab === "material") && (
+            <div className="border border-emerald-200 rounded-xl overflow-hidden bg-white shadow-2xs">
+              <div className="bg-emerald-50 px-3 py-2 border-b border-emerald-200 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <div className="p-1 bg-emerald-200 text-emerald-800 rounded shrink-0">
+                    <Package size={14} />
                   </div>
+                  <span className="font-bold text-xs text-emerald-950 truncate">
+                    ย่อยค่าของ ({filteredMaterialItems.length} รายการ)
+                  </span>
                 </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[11px] font-bold text-emerald-900">
+                    รวม: {money(materialSubTotal)} บาท
+                  </span>
+                  {materialSubTotal > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleResetMaterialSubItems}
+                      className="text-[10.5px] px-2 py-0.5 rounded-md border border-emerald-300 bg-white hover:bg-rose-50 hover:text-rose-700 hover:border-rose-300 text-emerald-800 font-medium flex items-center gap-1 transition cursor-pointer shadow-2xs"
+                      title="รีเซ็ตค่าของย่อยทั้งหมดเป็นค่าว่าง (ไม่ตั้งงบย่อย)"
+                    >
+                      <RotateCcw size={11} />
+                      <span>รีเซ็ตเป็นไม่ตั้ง</span>
+                    </button>
+                  )}
+                </div>
+              </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                  {filteredMaterialItems.map((item) => {
+              {/* Table header */}
+              <div className="grid grid-cols-12 gap-1 px-3 py-1.5 bg-slate-50 border-b border-slate-200 text-[11px] font-semibold text-slate-500">
+                <div className="col-span-6 sm:col-span-7">รหัส & หมวดสินค้า/งาน</div>
+                <div className="col-span-4 sm:col-span-3 text-right">วงเงินงบประมาณ (บาท)</div>
+                <div className="col-span-2 text-right">สัดส่วน</div>
+              </div>
+
+              {/* Table rows */}
+              <div className="divide-y divide-slate-100 max-h-[480px] overflow-y-auto">
+                {filteredMaterialItems.length === 0 ? (
+                  <div className="p-6 text-center text-xs text-slate-400">
+                    ไม่พบหมวดค่าของที่ตรงกับเงื่อนไขค้นหา
+                  </div>
+                ) : (
+                  filteredMaterialItems.map(item => {
                     const val = getMaterialVal(item);
                     const numVal = toNumber(val);
                     const hasVal = numVal > 0;
+                    const percent = totalProjectBudget > 0 ? ((numVal / totalProjectBudget) * 100).toFixed(1) : "0";
 
                     return (
                       <div
                         key={item.code}
-                        className={`p-2.5 rounded-xl border transition-all flex items-center justify-between gap-2 shadow-2xs ${
+                        className={`grid grid-cols-12 gap-1 px-3 py-1.5 items-center transition-colors ${
                           hasVal
-                            ? "bg-emerald-50/80 border-emerald-400 ring-1 ring-emerald-200"
-                            : "bg-slate-50/80 hover:bg-white border-slate-200 hover:border-emerald-300"
+                            ? "bg-emerald-50/50 hover:bg-emerald-50/80"
+                            : "hover:bg-slate-50/80"
                         }`}
                       >
-                        <div className="flex-1 min-w-0 pr-1">
-                          <div className="flex items-center gap-1.5">
-                            {item.icon && <span className="text-sm">{item.icon}</span>}
-                            <span
-                              className={`text-xs block leading-snug break-words ${
-                                hasVal ? "font-bold text-emerald-950" : "font-semibold text-slate-800"
-                              }`}
-                            >
-                              {item.label}
-                            </span>
-                          </div>
-
-                          {hasVal && materialBudget > 0 && (
-                            <span className="text-[10px] text-emerald-700 font-medium block">
-                              {((numVal / materialBudget) * 100).toFixed(1)}% ของค่าของ
-                            </span>
-                          )}
+                        <div className="col-span-6 sm:col-span-7 flex items-center gap-1.5 min-w-0 pr-1">
+                          {item.icon && <span className="text-xs shrink-0">{item.icon}</span>}
+                          <span className={`text-xs truncate ${hasVal ? "font-bold text-emerald-950" : "text-slate-700"}`}>
+                            {item.label}
+                          </span>
                         </div>
 
-                        <div className="flex items-center gap-1 shrink-0 w-28 sm:w-32">
+                        <div className="col-span-4 sm:col-span-3 flex items-center justify-end gap-1">
                           <input
                             type="number"
                             value={val}
                             onChange={e => handleMaterialItemChange(item.field, e.target.value)}
-                            placeholder="0.00"
-                            className={`w-full rounded-lg px-2 py-1.5 text-xs text-right focus:outline-none transition ${
+                            placeholder="0"
+                            className={`w-full text-right px-2 py-1 rounded-md text-xs font-mono focus:outline-none transition ${
                               hasVal
-                                ? "bg-white border border-emerald-400 font-bold text-emerald-950 focus:border-emerald-600 shadow-2xs"
-                                : "bg-white border border-slate-200 text-slate-800 focus:border-emerald-500"
+                                ? "bg-white border border-emerald-400 font-bold text-emerald-950 shadow-2xs focus:border-emerald-600 focus:ring-1 focus:ring-emerald-400"
+                                : "bg-slate-50 border border-slate-200 text-slate-700 hover:bg-white focus:bg-white focus:border-slate-400"
                             }`}
                           />
-                          <span className="text-xs text-slate-400">฿</span>
+                        </div>
+
+                        <div className="col-span-2 text-right">
+                          <span className={`text-[10px] font-mono px-1 py-0.5 rounded ${
+                            hasVal ? "bg-emerald-100 text-emerald-800 font-bold" : "text-slate-400"
+                          }`}>
+                            {hasVal ? `${percent}%` : "-"}
+                          </span>
                         </div>
                       </div>
                     );
-                  })}
-                </div>
-
-                <div className="flex justify-center pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setShowMaterialSubItems(false)}
-                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-600 transition border border-slate-200 cursor-pointer shadow-2xs"
-                  >
-                    <ChevronUp size={13} />
-                    <span>ยุบรายการสินค้าย่อย</span>
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-
-          {/* ======================================================== */}
-          {/* หมวดใหญ่ที่ 2: 👷 หมวดค่าแรง & บุคลากร (Labor Cost Code) */}
-          {/* รวมทั้ง 201-223 และ 301 พนักงาน (24 หมวดตามบิล) */}
-          {/* ======================================================== */}
-          <div className="bg-white border-2 border-indigo-300 rounded-xl p-4 shadow-2xs space-y-3.5">
-            {/* Header: รวมงบค่าแรง */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className="p-2 bg-indigo-100 text-indigo-800 rounded-xl border border-indigo-300 shrink-0">
-                  <Hammer size={18} />
-                </div>
-                <div className="min-w-0">
-                  <h5 className="text-sm font-bold text-slate-900 flex items-center gap-2 flex-wrap">
-                    <span>2. หมวดค่าแรง & บุคลากร (Labor Cost Code)</span>
-                    <span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-full font-semibold">
-                      {LABOR_SUB_ITEMS.length} หมวดตามบิล (รวมพนักงาน)
-                    </span>
-                  </h5>
-                </div>
-              </div>
-
-              {/* Box แสดงยอดรวมค่าแรง */}
-              <div className="flex items-center gap-2.5 bg-indigo-50/90 px-3.5 py-2 rounded-xl border border-indigo-300 shrink-0">
-                <div className="text-right">
-                  <span className="text-xs font-bold text-indigo-950">รวมงบค่าแรง:</span>
-                </div>
-                <div className="flex items-center gap-1 w-36">
-                  <input
-                    type="number"
-                    value={rawLaborCap > 0 ? rawLaborCap : (laborSubTotal > 0 ? laborSubTotal : "")}
-                    onChange={e => onChange("งบไม่เกินค่าแรง", e.target.value)}
-                    placeholder="0.00"
-                    className="w-full bg-white border border-indigo-400 focus:border-indigo-600 rounded-lg px-2.5 py-1 text-sm text-right font-bold text-indigo-950 focus:outline-none shadow-2xs"
-                  />
-                  <span className="text-xs font-bold text-indigo-800">฿</span>
-                </div>
+                  })
+                )}
               </div>
             </div>
+          )}
 
-            {/* Sub-items Toggle Control Bar for Labor */}
-            <button
-              type="button"
-              onClick={() => setShowLaborSubItems(prev => !prev)}
-              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border transition cursor-pointer ${
-                showLaborSubItems
-                  ? "bg-slate-100/90 hover:bg-slate-200/80 border-slate-300 text-slate-700"
-                  : "bg-indigo-50/60 hover:bg-indigo-100/70 border-dashed border-indigo-300 text-indigo-900 shadow-2xs"
-              }`}
-            >
-              <div className="flex items-center gap-2.5">
-                <div className={`p-1.5 rounded-lg transition ${showLaborSubItems ? "bg-slate-200 text-slate-700" : "bg-indigo-200 text-indigo-800"}`}>
-                  <Layers size={15} />
-                </div>
-                <div className="text-left">
-                  <span className="text-xs font-bold flex items-center gap-2 flex-wrap">
-                    <span>แจกแจงรายหมวดตามบิล ({LABOR_SUB_ITEMS.length} หมวด รวมพนักงาน)</span>
-                    {laborItemsWithBudgetCount > 0 && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-600 text-white font-semibold">
-                        กำหนดแล้ว {laborItemsWithBudgetCount} หมวด ({money(laborSubTotal)} ฿)
-                      </span>
-                    )}
-                  </span>
-                </div>
-              </div>
-
-              <div className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition shrink-0 ${
-                showLaborSubItems
-                  ? "bg-white text-slate-700 border-slate-300 shadow-2xs hover:bg-slate-50"
-                  : "bg-indigo-600 text-white border-indigo-700 hover:bg-indigo-700 shadow-2xs"
-              }`}>
-                <span>{showLaborSubItems ? "ยุบหมวดย่อย" : "ขยายดูรายหมวด"}</span>
-                {showLaborSubItems ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              </div>
-            </button>
-
-            {/* Grid 24 รายการค่าแรง (แสดงเมื่อกดขยาย) */}
-            {showLaborSubItems && (
-              <div className="space-y-3 pt-1">
-                {/* Search Bar for Labor */}
-                <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center justify-between text-xs pb-1">
-                  <span className="text-xs text-slate-500 font-medium">
-                    หมวดค่าแรงทั้งหมด ({LABOR_SUB_ITEMS.length} รายการ รวมพนักงาน)
-                  </span>
-
-                  <div className="w-full sm:w-56">
-                    <input
-                      type="text"
-                      value={laborSearch}
-                      onChange={e => setLaborSearch(e.target.value)}
-                      placeholder="🔍 ค้นหาหมวดค่าแรง..."
-                      className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-indigo-500 shadow-2xs"
-                    />
+          {/* RIGHT TABLE: 🔨 ย่อยค่าแรง (Labor) */}
+          {(activeTab === "split" || activeTab === "labor") && (
+            <div className="border border-indigo-200 rounded-xl overflow-hidden bg-white shadow-2xs">
+              <div className="bg-indigo-50 px-3 py-2 border-b border-indigo-200 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <div className="p-1 bg-indigo-200 text-indigo-800 rounded shrink-0">
+                    <Hammer size={14} />
                   </div>
+                  <span className="font-bold text-xs text-indigo-950 truncate">
+                    ย่อยค่าแรง & บุคลากร ({filteredLaborItems.length} รายการ)
+                  </span>
                 </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[11px] font-bold text-indigo-900">
+                    รวม: {money(laborSubTotal)} บาท
+                  </span>
+                  {laborSubTotal > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleResetLaborSubItems}
+                      className="text-[10.5px] px-2 py-0.5 rounded-md border border-indigo-300 bg-white hover:bg-rose-50 hover:text-rose-700 hover:border-rose-300 text-indigo-800 font-medium flex items-center gap-1 transition cursor-pointer shadow-2xs"
+                      title="รีเซ็ตค่าแรงย่อยทั้งหมดเป็นค่าว่าง (ไม่ตั้งงบย่อย)"
+                    >
+                      <RotateCcw size={11} />
+                      <span>รีเซ็ตเป็นไม่ตั้ง</span>
+                    </button>
+                  )}
+                </div>
+              </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                  {filteredLaborItems.map((item) => {
+              {/* Table header */}
+              <div className="grid grid-cols-12 gap-1 px-3 py-1.5 bg-slate-50 border-b border-slate-200 text-[11px] font-semibold text-slate-500">
+                <div className="col-span-6 sm:col-span-7">รหัส & หมวดงานค่าแรง</div>
+                <div className="col-span-4 sm:col-span-3 text-right">วงเงินงบประมาณ (บาท)</div>
+                <div className="col-span-2 text-right">สัดส่วน</div>
+              </div>
+
+              {/* Table rows */}
+              <div className="divide-y divide-slate-100 max-h-[480px] overflow-y-auto">
+                {filteredLaborItems.length === 0 ? (
+                  <div className="p-6 text-center text-xs text-slate-400">
+                    ไม่พบหมวดค่าแรงที่ตรงกับเงื่อนไขค้นหา
+                  </div>
+                ) : (
+                  filteredLaborItems.map(item => {
                     const val = getLaborVal(item);
                     const numVal = toNumber(val);
                     const hasVal = numVal > 0;
-                    const isStaff = item.code === "301";
+                    const percent = totalProjectBudget > 0 ? ((numVal / totalProjectBudget) * 100).toFixed(1) : "0";
 
                     return (
                       <div
                         key={item.code}
-                        className={`p-2.5 rounded-xl border transition-all flex items-center justify-between gap-2 shadow-2xs ${
+                        className={`grid grid-cols-12 gap-1 px-3 py-1.5 items-center transition-colors ${
                           hasVal
-                            ? isStaff
-                              ? "bg-purple-50/90 border-purple-400 ring-1 ring-purple-200"
-                              : "bg-indigo-50/80 border-indigo-400 ring-1 ring-indigo-200"
-                            : isStaff
-                              ? "bg-purple-50/40 hover:bg-white border-purple-200 hover:border-purple-400"
-                              : "bg-slate-50/80 hover:bg-white border-slate-200 hover:border-indigo-300"
+                            ? "bg-indigo-50/50 hover:bg-indigo-50/80"
+                            : "hover:bg-slate-50/80"
                         }`}
                       >
-                        <div className="flex-1 min-w-0 pr-1">
-                          <div className="flex items-center gap-1.5">
-                            {item.icon && <span className="text-sm">{item.icon}</span>}
-                            <span
-                              className={`text-xs block leading-snug break-words ${
-                                hasVal
-                                  ? isStaff ? "font-bold text-purple-950" : "font-bold text-indigo-950"
-                                  : isStaff ? "font-bold text-purple-900" : "font-semibold text-slate-800"
-                              }`}
-                            >
-                              {item.label}
-                            </span>
-                          </div>
-
-                          {hasVal && laborBudget > 0 && (
-                            <span className={`text-[10px] font-medium block ${isStaff ? "text-purple-700" : "text-indigo-700"}`}>
-                              {((numVal / laborBudget) * 100).toFixed(1)}% ของค่าแรง
-                            </span>
-                          )}
+                        <div className="col-span-6 sm:col-span-7 flex items-center gap-1.5 min-w-0 pr-1">
+                          {item.icon && <span className="text-xs shrink-0">{item.icon}</span>}
+                          <span className={`text-xs truncate ${hasVal ? "font-bold text-indigo-950" : "text-slate-700"}`}>
+                            {item.label}
+                          </span>
                         </div>
 
-                        <div className="flex items-center gap-1 shrink-0 w-28 sm:w-32">
+                        <div className="col-span-4 sm:col-span-3 flex items-center justify-end gap-1">
                           <input
                             type="number"
                             value={val}
                             onChange={e => handleLaborItemChange(item.field, e.target.value)}
-                            placeholder="0.00"
-                            className={`w-full rounded-lg px-2 py-1.5 text-xs text-right focus:outline-none transition ${
+                            placeholder="0"
+                            className={`w-full text-right px-2 py-1 rounded-md text-xs font-mono focus:outline-none transition ${
                               hasVal
-                                ? isStaff
-                                  ? "bg-white border border-purple-400 font-bold text-purple-950 focus:border-purple-600 shadow-2xs"
-                                  : "bg-white border border-indigo-400 font-bold text-indigo-950 focus:border-indigo-600 shadow-2xs"
-                                : "bg-white border border-slate-200 text-slate-800 focus:border-indigo-500"
+                                ? "bg-white border border-indigo-400 font-bold text-indigo-950 shadow-2xs focus:border-indigo-600 focus:ring-1 focus:ring-indigo-400"
+                                : "bg-slate-50 border border-slate-200 text-slate-700 hover:bg-white focus:bg-white focus:border-slate-400"
                             }`}
                           />
-                          <span className="text-xs text-slate-400">฿</span>
+                        </div>
+
+                        <div className="col-span-2 text-right">
+                          <span className={`text-[10px] font-mono px-1 py-0.5 rounded ${
+                            hasVal ? "bg-indigo-100 text-indigo-800 font-bold" : "text-slate-400"
+                          }`}>
+                            {hasVal ? `${percent}%` : "-"}
+                          </span>
                         </div>
                       </div>
                     );
-                  })}
-                </div>
-
-                <div className="flex justify-center pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setShowLaborSubItems(false)}
-                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-600 transition border border-slate-200 cursor-pointer shadow-2xs"
-                  >
-                    <ChevronUp size={13} />
-                    <span>ยุบรายการหมวดย่อยค่าแรง</span>
-                  </button>
-                </div>
+                  })
+                )}
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

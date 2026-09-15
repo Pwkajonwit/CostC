@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { BillImageThumbnail } from "@/components/bills/BillImageThumbnail";
 import { BillWorkflowActions } from "@/components/bills/BillWorkflowActions";
-import { getCostCodeBadgeStyle } from "@/lib/cost-codes";
+import { getCostCodeBadgeStyle, getExpenseFieldForCategory } from "@/lib/cost-codes";
 import { DataTable } from "@/components/tables/DataTable";
 import dynamic from "next/dynamic";
 
@@ -139,7 +139,24 @@ export function BillDetailClient({
   const projectId = text(currentBill["ID Project"]);
   const projectName = text(currentBill["ชื่อ Project"]) || "ไม่ระบุโครงการ";
   const imageValue = currentBill["รูปถ่ายบิล"];
-  const total = toNumber(currentBill["ยอดเงิน"]);
+
+  const lineItems = useMemo<Array<{ category?: string; categoryType?: string; amount?: string | number; name?: string; type?: string; price?: string | number; total?: string | number; storeGroup?: string }>>(() => {
+    const raw = currentBill.items || (currentBill.data as any)?.items || (currentBill as any)["รายการสินค้า"] || (currentBill as any).line_items;
+    if (Array.isArray(raw) && raw.length > 0) return raw;
+    if (typeof raw === "string" && raw.trim().startsWith("[")) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {}
+    }
+    return [];
+  }, [currentBill]);
+
+  const lineItemsTotal = useMemo(() => {
+    return lineItems.reduce((s, i) => s + toNumber(i.amount ?? i.price ?? i.total), 0);
+  }, [lineItems]);
+
+  const total = lineItemsTotal > 0 ? lineItemsTotal : toNumber(currentBill["ยอดเงิน"]);
   const status = text(currentBill["สถานะ"]) || "รอตั้งเบิก";
   const isApproved = status === "อนุมัติ";
   const isPaid = status === "เบิกแล้ว";
@@ -157,9 +174,10 @@ export function BillDetailClient({
     : 0;
 
   const rawTransfer = toNumber(currentBill["ยอดโอน"] || currentBill.transfer_amount);
-  const transferAmount = hasDeduct
-    ? (rawTransfer > 0 ? rawTransfer : (total - deductAmount))
-    : (rawTransfer > 0 ? rawTransfer : total);
+  const calculatedTransfer = hasDeduct ? (total - deductAmount) : total;
+  const transferAmount = (lineItemsTotal > 0 || !rawTransfer)
+    ? calculatedTransfer
+    : (rawTransfer > 0 ? rawTransfer : calculatedTransfer);
 
   const creditDays = parseCreditDays(currentBill["เครดิต"]);
   const creditDisplay = text(currentBill["เครดิต"]) || (creditDays > 0 ? `${creditDays} วัน` : "เงินสด");
@@ -202,30 +220,49 @@ export function BillDetailClient({
   const expenseBreakdown = useMemo(() => {
     const items: Array<{ label: string; value: unknown; extra?: string; isAmount?: boolean }> = [];
 
-    if (hasValue(currentBill["ค่าของ"])) items.push({ label: "ค่าของ (วัสดุก่อสร้าง)", value: currentBill["ค่าของ"], isAmount: true });
-    if (hasValue(currentBill["ค่าแรง"])) items.push({ label: "ค่าแรง", value: currentBill["ค่าแรง"], isAmount: true, extra: laborStatus ? `สถานะ: ${laborStatus}` : undefined });
-    if (hasValue(currentBill["พนักงาน"])) items.push({ label: "ค่าแรงพนักงาน", value: currentBill["พนักงาน"], isAmount: true, extra: staffName ? `ชื่อ: ${staffName}` : undefined });
-    if (hasValue(currentBill["น้ำมัน"])) items.push({ label: "ค่าน้ำมัน", value: currentBill["น้ำมัน"], isAmount: true });
-    if (hasValue(currentBill["ซ่อมรถ"])) items.push({ label: "ค่าซ่อมรถ", value: currentBill["ซ่อมรถ"], isAmount: true, extra: carPlate ? `ทะเบียน: ${carPlate}` : undefined });
-    if (hasValue(currentBill["เครื่องจักร"])) items.push({ label: "ค่าเครื่องจักร", value: currentBill["เครื่องจักร"], isAmount: true });
-    if (hasValue(currentBill["เครื่องมือ"])) items.push({ label: "ค่าเครื่องมือ", value: currentBill["เครื่องมือ"], isAmount: true, extra: toolName ? `ชื่อ: ${toolName}` : undefined });
-    if (hasValue(currentBill["อื่นๆ"])) items.push({ label: "ค่าใช้จ่ายอื่นๆ", value: currentBill["อื่นๆ"], isAmount: true, extra: itemName ? `รายการ: ${itemName}` : undefined });
+    const catSums: Record<string, number> = {};
+    if (lineItems.length > 0) {
+      lineItems.forEach(i => {
+        const field = getExpenseFieldForCategory(i.categoryType || i.category || i.type || "");
+        catSums[field] = (catSums[field] || 0) + toNumber(i.amount ?? i.price ?? i.total);
+      });
+    }
+
+    const getVal = (col: string) => {
+      const direct = toNumber(currentBill[col]);
+      if (direct > 0) return direct;
+      if (catSums[col] && catSums[col] > 0) return catSums[col];
+      return "";
+    };
+
+    const matVal = getVal("ค่าของ");
+    if (hasValue(matVal)) items.push({ label: "ค่าของ (วัสดุก่อสร้าง)", value: matVal, isAmount: true });
+
+    const laborVal = getVal("ค่าแรง");
+    if (hasValue(laborVal)) items.push({ label: "ค่าแรง", value: laborVal, isAmount: true, extra: laborStatus ? `สถานะ: ${laborStatus}` : undefined });
+
+    const staffVal = getVal("พนักงาน");
+    if (hasValue(staffVal)) items.push({ label: "ค่าแรงพนักงาน", value: staffVal, isAmount: true, extra: staffName ? `ชื่อ: ${staffName}` : undefined });
+
+    const fuelVal = getVal("น้ำมัน");
+    if (hasValue(fuelVal)) items.push({ label: "ค่าน้ำมัน", value: fuelVal, isAmount: true });
+
+    const carVal = getVal("ซ่อมรถ");
+    if (hasValue(carVal)) items.push({ label: "ค่าซ่อมรถ", value: carVal, isAmount: true, extra: carPlate ? `ทะเบียน: ${carPlate}` : undefined });
+
+    const machineVal = getVal("เครื่องจักร");
+    if (hasValue(machineVal)) items.push({ label: "ค่าเครื่องจักร", value: machineVal, isAmount: true });
+
+    const toolVal = getVal("เครื่องมือ");
+    if (hasValue(toolVal)) items.push({ label: "ค่าเครื่องมือ", value: toolVal, isAmount: true, extra: toolName ? `ชื่อ: ${toolName}` : undefined });
+
+    const otherVal = getVal("อื่นๆ");
+    if (hasValue(otherVal)) items.push({ label: "ค่าใช้จ่ายอื่นๆ", value: otherVal, isAmount: true, extra: itemName ? `รายการ: ${itemName}` : undefined });
+
     if (hasValue(currentBill["ค่าแรงคงเหลือ"])) items.push({ label: "ค่าแรงคงเหลือของสัญญา", value: currentBill["ค่าแรงคงเหลือ"], isAmount: true });
 
     return items;
-  }, [currentBill, laborStatus, itemName, toolName, carPlate, staffName]);
-
-  const lineItems = useMemo<Array<{ category?: string; categoryType?: string; amount?: string | number; name?: string; type?: string; price?: string | number; total?: string | number; storeGroup?: string }>>(() => {
-    const raw = currentBill.items || (currentBill.data as any)?.items;
-    if (Array.isArray(raw) && raw.length > 0) return raw;
-    if (typeof raw === "string" && raw.trim().startsWith("[")) {
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      } catch {}
-    }
-    return [];
-  }, [currentBill]);
+  }, [currentBill, lineItems, laborStatus, itemName, toolName, carPlate, staffName]);
 
   return (
     <div className="w-full flex flex-col gap-3 p-3 sm:p-4 max-w-[1400px] mx-auto font-sans text-sm text-slate-900">
@@ -267,11 +304,11 @@ export function BillDetailClient({
           )}
         </div>
 
-        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+        <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
           {contractLink && (
             <Link
               href={contractLink}
-              className="flex items-center gap-1.5 px-3 py-1 text-xs font-bold text-amber-950 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-md transition cursor-pointer"
+              className="inline-flex items-center justify-center gap-1.5 h-7 sm:h-8 px-2.5 sm:px-3 text-xs font-semibold text-amber-950 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-lg transition cursor-pointer shadow-2xs shrink-0"
               title={`เปิดดูสัญญา ${contractDisplay}`}
             >
               <Wrench size={13} className="text-amber-700 shrink-0" />
@@ -282,7 +319,7 @@ export function BillDetailClient({
           <button
             type="button"
             onClick={() => setIsDocModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold text-slate-900 bg-white hover:bg-slate-100 border border-slate-300 rounded-md transition cursor-pointer"
+            className="inline-flex items-center justify-center gap-1.5 h-7 sm:h-8 px-2.5 sm:px-3 text-xs font-semibold text-slate-800 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition cursor-pointer shadow-2xs shrink-0"
             title="พิมพ์เอกสารสัญญาจ้าง / ใบสำคัญจ่าย / 50 ทวิ"
           >
             <FileText size={13} className="text-emerald-700 shrink-0" />
@@ -712,42 +749,44 @@ export function BillDetailClient({
             );
           })()}
 
-          {/* Section 2: รายการค่าใช้จ่าย (Expense Breakdown) */}
-          <div className="border border-slate-300 rounded-xl bg-white overflow-hidden">
-            <div className="px-3.5 py-2 border-b border-slate-300 bg-slate-100 flex items-center justify-between">
-              <div className="flex items-center gap-1.5 font-bold text-xs text-slate-900">
-                <Layers size={14} className="text-slate-700" />
-                <span>แจกแจงรายการค่าใช้จ่าย</span>
+          {/* Section 2: รายการค่าใช้จ่าย (Expense Breakdown) - แสดงเฉพาะกรณีที่ไม่มีรายการสินค้าแยกย่อย lineItems */}
+          {lineItems.length === 0 && (
+            <div className="border border-slate-300 rounded-xl bg-white overflow-hidden">
+              <div className="px-3.5 py-2 border-b border-slate-300 bg-slate-100 flex items-center justify-between">
+                <div className="flex items-center gap-1.5 font-bold text-xs text-slate-900">
+                  <Layers size={14} className="text-slate-700" />
+                  <span>แจกแจงรายการค่าใช้จ่าย</span>
+                </div>
+                <span className="text-xs font-black text-slate-950">{money(total)} ฿</span>
               </div>
-              <span className="text-xs font-black text-slate-950">{money(total)} ฿</span>
-            </div>
 
-            {expenseBreakdown.length > 0 ? (
-              <table className="w-full text-xs">
-                <tbody className="divide-y divide-slate-200">
-                  {expenseBreakdown.map((item, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50 transition">
-                      <td className="px-3.5 py-2 text-slate-800 font-semibold w-[45%]">
-                        <div>{item.label}</div>
-                        {item.extra && <div className="text-[11px] text-slate-600 font-normal mt-0.5">{item.extra}</div>}
-                      </td>
-                      <td className="px-3.5 py-2 text-right font-bold text-slate-950">
-                        {item.isAmount ? `${money(item.value)} ฿` : String(item.value)}
-                      </td>
+              {expenseBreakdown.length > 0 ? (
+                <table className="w-full text-xs">
+                  <tbody className="divide-y divide-slate-200">
+                    {expenseBreakdown.map((item, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50 transition">
+                        <td className="px-3.5 py-2 text-slate-800 font-semibold w-[45%]">
+                          <div>{item.label}</div>
+                          {item.extra && <div className="text-[11px] text-slate-600 font-normal mt-0.5">{item.extra}</div>}
+                        </td>
+                        <td className="px-3.5 py-2 text-right font-bold text-slate-950">
+                          {item.isAmount ? `${money(item.value)} ฿` : String(item.value)}
+                        </td>
+                      </tr>
+                    ))}
+                    <tr className="bg-slate-100 font-black border-t-2 border-slate-300">
+                      <td className="px-3.5 py-2 text-slate-950 text-xs">ยอดเงินรวมทั้งสิ้น</td>
+                      <td className="px-3.5 py-2 text-right text-slate-950 text-sm font-black">{money(total)} ฿</td>
                     </tr>
-                  ))}
-                  <tr className="bg-slate-100 font-black border-t-2 border-slate-300">
-                    <td className="px-3.5 py-2 text-slate-950 text-xs">ยอดเงินรวมทั้งสิ้น</td>
-                    <td className="px-3.5 py-2 text-right text-slate-950 text-sm font-black">{money(total)} ฿</td>
-                  </tr>
-                </tbody>
-              </table>
-            ) : (
-              <div className="p-3 text-center text-slate-600 text-xs font-medium">
-                ยอดเงินรวม {money(total)} ฿ (ไม่มีการแจกแจงหมวดย่อยเพิ่มเติม)
-              </div>
-            )}
-          </div>
+                  </tbody>
+                </table>
+              ) : (
+                <div className="p-3 text-center text-slate-600 text-xs font-medium">
+                  ยอดเงินรวม {money(total)} ฿ (ไม่มีการแจกแจงหมวดย่อยเพิ่มเติม)
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Section 3: ภาษี & เงื่อนไขการชำระเงิน */}
           <div className="border border-slate-300 rounded-xl bg-white overflow-hidden">

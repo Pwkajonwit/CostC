@@ -9,6 +9,7 @@ import type { SheetRow } from "@/lib/types";
 import { formatDateDisplay, normalizeDateToIso, parseDateStrict } from "@/lib/utils/dates";
 import { useRealtimeSync } from "@/lib/use-realtime-sync";
 import { getCostCodeBadgeStyle } from "@/lib/cost-codes";
+import { isVatActive, isDeductActive, parseDeductPercent } from "@/lib/project-summary";
 import { useYearFilter } from "@/lib/context/YearFilterContext";
 
 export type WithdrawFilters = {
@@ -30,6 +31,44 @@ type WithdrawDashboardClientProps = {
 const ALL_COLUMNS = ["ลำดับ", "ID Project", "ชื่อ Project", "ร้าน/บุคคล", "สินค้า/ทำงาน", "บิล", "ประเภท", "ยอดเงิน", "ยอดโอน", "ผู้เบิก", "ว/ด/ป", "จัดการ"];
 const PAGE_SIZE_OPTIONS = [20, 50, 100, 200];
 let cachedStores: SheetRow[] | null = null;
+
+function getBillRowAmount(row: SheetRow): number {
+  if (!row) return 0;
+  const raw = (row as any).items || (row as any).data?.items || (row as any)["รายการสินค้า"] || (row as any).line_items;
+  if (Array.isArray(raw) && raw.length > 0) {
+    const s = raw.reduce((sum: number, item: any) => sum + toNumber(item?.amount ?? item?.price ?? item?.total), 0);
+    if (s > 0) return s;
+  }
+  if (typeof raw === "string" && raw.trim().startsWith("[")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const s = parsed.reduce((sum: number, item: any) => sum + toNumber(item?.amount ?? item?.price ?? item?.total), 0);
+        if (s > 0) return s;
+      }
+    } catch {}
+  }
+  return toNumber(row["ยอดเงิน"]);
+}
+
+function getBillRowTransfer(row: SheetRow): number {
+  if (!row) return 0;
+  const amt = getBillRowAmount(row);
+  const isDeduct = isDeductActive(row["หัก"] || (row as any).withholding_tax);
+  const rate = parseDeductPercent(row["หัก"] || (row as any).withholding_tax);
+  const hasVat = isVatActive(row.vat ?? row["vat"] ?? (row as any)["VAT"]);
+  const deductAmt = isDeduct
+    ? (hasVat ? (amt / 1.07) * (rate / 100) : (amt * rate) / 100)
+    : 0;
+  const rawTransfer = toNumber(row["ยอดโอน"] || (row as any).transfer_amount);
+  const calculatedTransfer = isDeduct ? (amt - deductAmt) : amt;
+  const items = (row as any).items || (row as any).data?.items || (row as any)["รายการสินค้า"] || (row as any).line_items;
+  const hasMultiItems = (Array.isArray(items) && items.length > 0) || (typeof items === "string" && items.startsWith("["));
+  if (hasMultiItems || !rawTransfer) {
+    return calculatedTransfer;
+  }
+  return rawTransfer > 0 ? rawTransfer : calculatedTransfer;
+}
 
 export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], initialFilters = {}, isAdmin = false, stores }: WithdrawDashboardClientProps) {
   const router = useRouter();
@@ -198,9 +237,9 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
   const visibleRows = displayRows.slice(pageStart, pageStart + pageSize);
   const visibleStart = visibleRows.length ? pageStart + 1 : 0;
   const visibleEnd = pageStart + visibleRows.length;
-  const amount = displayRows.reduce((sum, row) => sum + toNumber(row["ยอดเงิน"]), 0);
+  const amount = displayRows.reduce((sum, row) => sum + getBillRowAmount(row), 0);
   // ยอดโอน = รวมเฉพาะแถวที่อนุมัติแล้ว
-  const transfer = displayRows.reduce((sum, row) => sum + (normalizedStatus(row["สถานะ"]) === "อนุมัติ" ? toNumber(row["ยอดโอน"]) : 0), 0);
+  const transfer = displayRows.reduce((sum, row) => sum + (normalizedStatus(row["สถานะ"]) === "อนุมัติ" ? getBillRowTransfer(row) : 0), 0);
 
   useEffect(() => {
     setPage(1);
@@ -936,8 +975,8 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
 
                   {/* Right Amount & Status Action */}
                   <div className="text-right shrink-0 flex flex-col items-end gap-1" onClick={(e) => e.stopPropagation()}>
-                    <span className="text-xs sm:text-sm text-slate-900">
-                      {money(row["ยอดเงิน"])} <span className="text-xs font-normal text-slate-500">฿</span>
+                    <span className="text-xs sm:text-sm text-slate-900 font-mono font-medium">
+                      {money(getBillRowAmount(row))} <span className="text-xs font-normal text-slate-500">฿</span>
                     </span>
 
                     {status === "ตั้งเบิก" ? (
@@ -1209,6 +1248,10 @@ function WithdrawTable({
                           <span>ตั้งเบิก</span>
                         </button>
                       )
+                    ) : column === "ยอดเงิน" ? (
+                      money(getBillRowAmount(row))
+                    ) : column === "ยอดโอน" ? (
+                      money(getBillRowTransfer(row))
                     ) : (
                       formatWithdrawCell(column, row[column], requesterNames, formatVendorDisplay)
                     )}

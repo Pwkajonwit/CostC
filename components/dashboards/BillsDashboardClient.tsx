@@ -80,6 +80,25 @@ function resolveMatchingRequesterKey(
   return empId || name || "";
 }
 
+function getBillRowAmount(row: SheetRow): number {
+  if (!row) return 0;
+  const raw = (row as any).items || (row as any).data?.items || (row as any)["รายการสินค้า"] || (row as any).line_items;
+  if (Array.isArray(raw) && raw.length > 0) {
+    const s = raw.reduce((sum: number, item: any) => sum + toNumber(item?.amount ?? item?.price ?? item?.total), 0);
+    if (s > 0) return s;
+  }
+  if (typeof raw === "string" && raw.trim().startsWith("[")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const s = parsed.reduce((sum: number, item: any) => sum + toNumber(item?.amount ?? item?.price ?? item?.total), 0);
+        if (s > 0) return s;
+      }
+    } catch {}
+  }
+  return toNumber(row["ยอดเงิน"]);
+}
+
 export function BillsDashboardClient({
   columns,
   initialRows,
@@ -358,7 +377,7 @@ export function BillsDashboardClient({
     let app = 0;
     for (let i = 0; i < filteredRows.length; i++) {
       const row = filteredRows[i];
-      const amt = toNumber(row["ยอดเงิน"]);
+      const amt = getBillRowAmount(row);
       tot += amt;
       const st = normalizeBillStatus(row["สถานะ"]);
       if (st === "อนุมัติ" || st === "เบิกแล้ว") {
@@ -861,7 +880,7 @@ export function BillsDashboardClient({
                     {/* 3. Right Amount & Status Badge */}
                     <div className="text-right shrink-0 flex flex-col items-end gap-1">
                       <span className="text-xs sm:text-sm text-slate-900">
-                        {money(row["ยอดเงิน"])} <span className="text-xs font-normal text-slate-500">฿</span>
+                        {money(getBillRowAmount(row))} <span className="text-xs font-normal text-slate-500">฿</span>
                       </span>
                       <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs ${
                         isApproved
@@ -934,7 +953,7 @@ export function BillsDashboardClient({
                             </span>
                           ) : "-"}
                         </td>
-                        <td className="py-2 px-3 text-right text-slate-900 border-r border-slate-100">{money(row["ยอดเงิน"])}</td>
+                        <td className="py-2 px-3 text-right text-slate-900 border-r border-slate-100 font-mono font-medium">{money(getBillRowAmount(row))}</td>
                         <td className="py-2 px-3 text-center text-xs text-slate-500 border-r border-slate-100">{conditions || "-"}</td>
                         <td className="py-2 px-3 text-center text-slate-700 border-r border-slate-100">{requesterName}</td>
                         <td className="py-2 px-3 text-center font-medium text-slate-600 border-r border-slate-100 whitespace-nowrap">{formatDateDisplay(row["ว/ด/ป"])}</td>
