@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   BarChart2,
@@ -55,6 +55,11 @@ import {
   isToolCost,
   isOtherExpense
 } from "@/lib/cost-codes";
+import {
+  ALLOCATED_BUDGET_ITEMS,
+  extractBillItems,
+  matchesBudgetItem,
+} from "@/lib/project-budget-control";
 import { useYearFilter } from "@/lib/context/YearFilterContext";
 import { formatDateThai, THAI_MONTHS_SHORT } from "@/lib/utils/dates";
 
@@ -63,6 +68,7 @@ type ProjectAnalyticsDashboardClientProps = {
   initialProjectRows: SheetRow[];
   initialStoreRows?: SheetRow[];
   initialContractorRows?: SheetRow[];
+  initialContractWorkRows?: SheetRow[];
   initialPeopleRows: SheetRow[];
 };
 
@@ -110,6 +116,9 @@ const PALETTE = [
 export function ProjectAnalyticsDashboardClient({
   initialDataRows,
   initialProjectRows,
+  initialStoreRows = [],
+  initialContractorRows = [],
+  initialContractWorkRows = [],
   initialPeopleRows,
 }: ProjectAnalyticsDashboardClientProps) {
   const { filterRowsByYear, filterProjectsByYear } = useYearFilter();
@@ -168,6 +177,102 @@ export function ProjectAnalyticsDashboardClient({
     return peopleMap[val.toLowerCase()] || val;
   }
 
+  // Store Map for resolving store codes (e.g. ST163 -> ปตท.ปทุมธานี(น้ำมัน))
+  const storeMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    (initialStoreRows || []).forEach((s) => {
+      const code = String(s["id_store"] || s.id || "").trim().toLowerCase();
+      const shortName = String(s["ชื่อร้านค้า"] || s.name || "").trim();
+      const fullName = String(s["ชื่อเต็ม"] || s.full_name || "").trim();
+      const name = shortName || fullName;
+      if (code && name) map[code] = name;
+      if (shortName) map[shortName.toLowerCase()] = shortName;
+      if (fullName) map[fullName.toLowerCase()] = shortName || fullName;
+    });
+    return map;
+  }, [initialStoreRows]);
+
+  // Contractor Map for resolving contractor codes
+  const contractorMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    (initialContractorRows || []).forEach((c) => {
+      const code = String(c["id_Contractor"] || c.id || "").trim().toLowerCase();
+      const nickname = String(c["ชื่อเล่น"] || "").trim();
+      const fullName = String(c["ชื่อ-นามสกุล"] || c.name || "").trim();
+      const name = nickname || fullName;
+      if (code && name) map[code] = name;
+      if (nickname) map[nickname.toLowerCase()] = nickname;
+      if (fullName) map[fullName.toLowerCase()] = nickname || fullName;
+    });
+    return map;
+  }, [initialContractorRows]);
+
+  // Contract Work Map for resolving contract work codes
+  const contractWorkMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    (initialContractWorkRows || []).forEach((cw) => {
+      const code = String(cw["id_Conwork"] || cw.id || "").trim().toLowerCase();
+      const name = String(cw["ผู้รับเหมา"] || cw["ชื่อเล่น"] || "").trim();
+      if (code && name) map[code] = name;
+    });
+    return map;
+  }, [initialContractWorkRows]);
+
+  // Resolve raw vendor token into readable name
+  const resolveVendorToken = useCallback((token: string): string => {
+    const trimmed = (token || "").trim();
+    if (!trimmed || trimmed === "-") return "";
+    const lower = trimmed.toLowerCase();
+
+    if (storeMap[lower]) return storeMap[lower];
+    if (contractorMap[lower]) return contractorMap[lower];
+    if (contractWorkMap[lower]) return contractWorkMap[lower];
+    if (peopleMap[lower]) return peopleMap[lower];
+
+    if (trimmed.includes(",")) {
+      return trimmed
+        .split(",")
+        .map((t) => resolveVendorToken(t))
+        .filter(Boolean)
+        .join(", ");
+    }
+
+    return trimmed;
+  }, [storeMap, contractorMap, contractWorkMap, peopleMap]);
+
+  // Get formatted vendor/subcontractor display name for a bill row
+  const getVendorDisplayName = useCallback((r: SheetRow): string => {
+    const storeName = String(r["ชื่อร้านค้า"] || r.store_name || "").trim();
+    if (storeName && !storeName.match(/^ST\d+$/i)) return storeName;
+
+    const contractorName = String(r["ชื่อผู้รับเหมา"] || r.contractor_name || "").trim();
+    if (contractorName && !contractorName.match(/^(C|CW|P)\d+$/i)) return contractorName;
+
+    const storeKey = String(r["ร้านค้า"] || r.store_id || "").trim();
+    const contractorKey = String(r["ผู้รับเหมา"] || r.contractor_id || "").trim();
+    const vendorOrPerson = String(r["ร้าน/บุคคล"] || r.vendor_or_person || "").trim();
+
+    if (storeKey) {
+      const resolved = resolveVendorToken(storeKey);
+      if (resolved && resolved !== storeKey) return resolved;
+    }
+
+    if (contractorKey) {
+      const resolved = resolveVendorToken(contractorKey);
+      if (resolved && resolved !== contractorKey) return resolved;
+    }
+
+    if (vendorOrPerson) {
+      const resolved = resolveVendorToken(vendorOrPerson);
+      if (resolved && resolved !== vendorOrPerson) return resolved;
+      if (vendorOrPerson !== "-") return vendorOrPerson;
+    }
+
+    if (storeKey) return resolveVendorToken(storeKey);
+    if (contractorKey) return resolveVendorToken(contractorKey);
+    return "-";
+  }, [resolveVendorToken]);
+
   // Hydrate Project Rows
   // Filter bills and projects by selected year first
   const yearFilteredDataRows = useMemo(() => filterRowsByYear(dataRows), [dataRows, filterRowsByYear]);
@@ -206,17 +311,45 @@ export function ProjectAnalyticsDashboardClient({
       rows = filterBillsByProject(rows, selectedProjectId);
     }
     if (selectedCategory !== "all") {
-      rows = rows.filter((r) => getRowCategory(r).includes(selectedCategory));
+      if (selectedCategory === "group_mat") {
+        rows = rows.filter((r) => {
+          const items = extractBillItems([r]);
+          return items.some((item) => {
+            const def = ALLOCATED_BUDGET_ITEMS.find((d) => matchesBudgetItem(item, d));
+            return def?.group === "ค่าของ (Material Cost Code)" || isMaterialCost(item.categoryType) || isMaterialCost(item.itemName);
+          });
+        });
+      } else if (selectedCategory === "group_lab") {
+        rows = rows.filter((r) => {
+          const items = extractBillItems([r]);
+          return items.some((item) => {
+            const def = ALLOCATED_BUDGET_ITEMS.find((d) => matchesBudgetItem(item, d));
+            return def?.group === "ค่าแรง (Labor Cost Code)" || isLaborCost(item.categoryType) || isLaborCost(item.itemName) || isStaffCost(item.categoryType);
+          });
+        });
+      } else {
+        const targetDef = ALLOCATED_BUDGET_ITEMS.find((d) => d.code === selectedCategory);
+        if (targetDef) {
+          rows = rows.filter((r) => {
+            const items = extractBillItems([r]);
+            return items.some((item) => matchesBudgetItem(item, targetDef));
+          });
+        } else {
+          rows = rows.filter((r) => getRowCategory(r).includes(selectedCategory));
+        }
+      }
     }
     if (debouncedSearch.trim()) {
       const q = debouncedSearch.toLowerCase().trim();
       rows = rows.filter((r) => {
         const reqName = getRequesterDisplayName(r["ผู้เบิก"]);
+        const vendorName = getVendorDisplayName(r);
         return (
           String(r["ID Project"] || "").toLowerCase().includes(q) ||
           String(r["ร้าน/บุคคล"] || "").toLowerCase().includes(q) ||
           String(r["ร้านค้า"] || "").toLowerCase().includes(q) ||
           String(r["ผู้รับเหมา"] || "").toLowerCase().includes(q) ||
+          vendorName.toLowerCase().includes(q) ||
           String(r["สินค้า/ทำงาน"] || "").toLowerCase().includes(q) ||
           String(r["รายละเอียดงาน"] || "").toLowerCase().includes(q) ||
           String(r["ประเภท"] || "").toLowerCase().includes(q) ||
@@ -226,7 +359,7 @@ export function ProjectAnalyticsDashboardClient({
       });
     }
     return rows;
-  }, [dataRows, selectedProjectId, selectedCategory, debouncedSearch, peopleMap]);
+  }, [dataRows, selectedProjectId, selectedCategory, debouncedSearch, peopleMap, getVendorDisplayName]);
 
   // Summary Metrics
   const summaryMetrics = useMemo(() => {
@@ -248,9 +381,18 @@ export function ProjectAnalyticsDashboardClient({
 
     const cashFlow = computeCashFlowBreakdown(filteredDataRows);
 
-    const materialSpent = filteredDataRows.filter(r => getRowCategory(r).includes("ค่าของ")).reduce((sum, r) => sum + getRowAmount(r), 0);
-    const laborSpent = filteredDataRows.filter(r => getRowCategory(r).includes("ค่าแรง")).reduce((sum, r) => sum + getRowAmount(r), 0);
-    const otherSpent = totalSpent - (materialSpent + laborSpent);
+    const parsedItems = extractBillItems(filteredDataRows.filter(isPaidBill));
+    let materialSpent = 0;
+    let laborSpent = 0;
+    for (const item of parsedItems) {
+      const def = ALLOCATED_BUDGET_ITEMS.find((d) => matchesBudgetItem(item, d));
+      if (def?.group === "ค่าของ (Material Cost Code)" || isMaterialCost(item.categoryType) || isMaterialCost(item.itemName)) {
+        materialSpent += item.amount;
+      } else if (def?.group === "ค่าแรง (Labor Cost Code)" || isLaborCost(item.categoryType) || isLaborCost(item.itemName) || isStaffCost(item.categoryType)) {
+        laborSpent += item.amount;
+      }
+    }
+    const otherSpent = Math.max(0, totalSpent - (materialSpent + laborSpent));
 
     return {
       totalRevenue,
@@ -290,9 +432,18 @@ export function ProjectAnalyticsDashboardClient({
       const remaining = budgetCap - spent;
       const burnRate = budgetCap > 0 ? (spent / budgetCap) * 100 : 0;
 
-      const mat = paidRows.filter(r => isMaterialCost(getRowCategory(r))).reduce((sum, r) => sum + getRowAmount(r), 0);
-      const lab = paidRows.filter(r => isLaborCost(getRowCategory(r))).reduce((sum, r) => sum + getRowAmount(r), 0);
-      const oth = spent - (mat + lab);
+      const paidItems = extractBillItems(paidRows);
+      let mat = 0;
+      let lab = 0;
+      for (const item of paidItems) {
+        const def = ALLOCATED_BUDGET_ITEMS.find((d) => matchesBudgetItem(item, d));
+        if (def?.group === "ค่าของ (Material Cost Code)" || isMaterialCost(item.categoryType) || isMaterialCost(item.itemName)) {
+          mat += item.amount;
+        } else if (def?.group === "ค่าแรง (Labor Cost Code)" || isLaborCost(item.categoryType) || isLaborCost(item.itemName) || isStaffCost(item.categoryType)) {
+          lab += item.amount;
+        }
+      }
+      const oth = Math.max(0, spent - (mat + lab));
 
       return {
         id,
@@ -583,14 +734,25 @@ export function ProjectAnalyticsDashboardClient({
             <select
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
-              className="bg-white border border-slate-300 text-xs font-normal text-slate-900 px-2.5 py-1.5 rounded-lg focus:outline-none focus:border-emerald-600 max-w-[190px] cursor-pointer"
+              className="bg-white border border-slate-300 text-xs font-normal text-slate-900 px-2.5 py-1.5 rounded-lg focus:outline-none focus:border-emerald-600 max-w-[220px] cursor-pointer truncate"
             >
-              <option value="all">ทุกหมวดหมู่ต้นทุน (8 หมวด)</option>
-              {Object.keys(CATEGORY_COLORS).map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
+              <option value="all">ทุกรายการควบคุมงบ (51 รายการ)</option>
+              <option value="group_mat">📦 ค่าของทั้งหมด (27 รายการ)</option>
+              <option value="group_lab">👷 ค่าแรง & พนักงานทั้งหมด (24 รายการ)</option>
+              <optgroup label="📦 หมวดค่าของ (Material - 27 รายการ)">
+                {ALLOCATED_BUDGET_ITEMS.filter((i) => i.group === "ค่าของ (Material Cost Code)").map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.label}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="👷 หมวดค่าแรง & พนักงาน (Labor - 24 รายการ)">
+                {ALLOCATED_BUDGET_ITEMS.filter((i) => i.group === "ค่าแรง (Labor Cost Code)").map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.label}
+                  </option>
+                ))}
+              </optgroup>
             </select>
           </div>
         </div>
@@ -923,7 +1085,7 @@ export function ProjectAnalyticsDashboardClient({
               <span>ตารางเมตริกซ์ควบคุมงบรายหมวดหมู่ (Project Budget Control Matrix)</span>
             </h2>
             <p className="text-xs text-slate-500 font-normal mt-0.5">
-              ควบคุมและจัดสรรงบประมาณย่อยใน 8 หมวดหมู่ต้นทุนหลักแยกตามรายโครงการ
+              ควบคุมและจัดสรรงบประมาณย่อยใน 51 รายการต้นทุน (ค่าของ 27 รายการ, ค่าแรง 24 รายการ) แยกตามรายโครงการ
             </p>
           </div>
 
@@ -931,6 +1093,7 @@ export function ProjectAnalyticsDashboardClient({
             projectRows={hydratedProjects}
             dataRows={yearFilteredDataRows}
             selectedProjectId={selectedProjectId}
+            onSelectProject={setSelectedProjectId}
           />
         </div>
       )}
@@ -954,37 +1117,68 @@ export function ProjectAnalyticsDashboardClient({
               </button>
             </div>
 
-            <div className="overflow-auto p-4 flex-1">
+            <div className="overflow-auto px-4 pb-4 flex-1">
               <table className="w-full text-left text-xs border-collapse font-sans">
-                <thead className="sticky top-0 bg-slate-100 text-slate-800 font-semibold border-b border-slate-200">
+                <thead className="sticky top-0 z-10 bg-slate-100 text-slate-800 font-semibold border-b border-slate-200 shadow-sm">
                   <tr>
                     <th className="py-2.5 px-3 border-r border-slate-200 text-center">ลำดับ</th>
                     <th className="py-2.5 px-3 border-r border-slate-200">ผู้เบิก</th>
                     <th className="py-2.5 px-3 border-r border-slate-200">ร้านค้า/ผู้รับเหมา</th>
                     <th className="py-2.5 px-3 border-r border-slate-200">รายละเอียดงาน</th>
-                    <th className="py-2.5 px-3 border-r border-slate-200">ประเภท</th>
+                    <th className="py-2.5 px-3 border-r border-slate-200">หมวดควบคุมงบ</th>
                     <th className="py-2.5 px-3 text-right border-r border-slate-200">ยอดเงิน</th>
                     <th className="py-2.5 px-3 text-right border-r border-slate-200 text-emerald-900 bg-emerald-50">โอนจริง</th>
                     <th className="py-2.5 px-3 text-center">ว/ด/ป</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs">
-                  {drilldownModal.rows.map((r, i) => (
-                    <tr key={i} className="hover:bg-slate-50 transition">
-                      <td className="py-2 px-3 text-center text-slate-500">{r["ลำดับ"] || i + 1}</td>
-                      <td className="py-2 px-3 font-medium text-slate-900">{getRequesterDisplayName(r["ผู้เบิก"])}</td>
-                      <td className="py-2 px-3 text-slate-900">
-                        {r["ร้านค้า"] || r["ผู้รับเหมา"] || r["ร้าน/บุคคล"] || "-"}
-                      </td>
-                      <td className="py-2 px-3 text-slate-700">{r["รายละเอียดงาน"] || r["สินค้า/ทำงาน"] || "-"}</td>
-                      <td className="py-2 px-3 font-medium text-emerald-700">{getRowCategory(r) || "-"}</td>
-                      <td className="py-2 px-3 text-right font-mono text-slate-800">{money(getRowAmount(r))}</td>
-                      <td className="py-2 px-3 text-right font-mono font-medium text-emerald-700 bg-emerald-50/50">
-                        {money(getRowTransferAmount(r))}
-                      </td>
-                      <td className="py-2 px-3 text-center text-slate-600 whitespace-nowrap">{formatDateThai(r["ว/ด/ป"] || r["วันที่"])}</td>
-                    </tr>
-                  ))}
+                  {drilldownModal.rows.map((r, i) => {
+                    const billItems = extractBillItems([r]);
+                    const matchedDefs = billItems
+                      .map((item) => {
+                        const def = ALLOCATED_BUDGET_ITEMS.find((d) => matchesBudgetItem(item, d));
+                        return def;
+                      })
+                      .filter((d): d is typeof ALLOCATED_BUDGET_ITEMS[number] => !!d);
+                    const uniqueDefs = Array.from(new Map(matchedDefs.map((d) => [d.code, d])).values());
+                    const rawCat = getRowCategory(r);
+
+                    return (
+                      <tr key={i} className="hover:bg-slate-50 transition">
+                        <td className="py-2 px-3 text-center text-slate-500">{r["ลำดับ"] || i + 1}</td>
+                        <td className="py-2 px-3 font-medium text-slate-900">{getRequesterDisplayName(r["ผู้เบิก"])}</td>
+                        <td className="py-2 px-3 text-slate-900 font-medium">
+                          {getVendorDisplayName(r)}
+                        </td>
+                        <td className="py-2 px-3 text-slate-700">{r["รายละเอียดงาน"] || r["สินค้า/ทำงาน"] || "-"}</td>
+                        <td className="py-2 px-3">
+                          {uniqueDefs.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {uniqueDefs.map((d) => (
+                                <span
+                                  key={d.code}
+                                  className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium border ${
+                                    d.group === "ค่าของ (Material Cost Code)"
+                                      ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                      : "bg-indigo-50 text-indigo-800 border-indigo-200"
+                                  }`}
+                                >
+                                  <span>[{d.code}] {d.label.replace(/^\d+\.\s*/, "")}</span>
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-slate-500">{rawCat || "-"}</span>
+                          )}
+                        </td>
+                        <td className="py-2 px-3 text-right font-mono text-slate-800">{money(getRowAmount(r))}</td>
+                        <td className="py-2 px-3 text-right font-mono font-medium text-emerald-700 bg-emerald-50/50">
+                          {money(getRowTransferAmount(r))}
+                        </td>
+                        <td className="py-2 px-3 text-center text-slate-600 whitespace-nowrap">{formatDateThai(r["ว/ด/ป"] || r["วันที่"])}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
