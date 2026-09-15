@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 import { LINE_CONFIG } from "@/lib/line/config";
 import { cached } from "@/lib/utils/cache";
+import { getCostCodeBudgetField } from "@/lib/cost-codes";
 
 const LINE_API_BASE = "https://api.line.me/v2/bot/message";
 
@@ -384,6 +385,93 @@ export function isSubBillRecord(b: Record<string, any> | undefined | null): bool
   return false;
 }
 
+export function extractBillLineItems(b: Record<string, any>): Array<{ category?: string; categoryType?: string; amount?: string | number; name?: string; type?: string; price?: string | number; total?: string | number }> {
+  if (!b) return [];
+  const rawItems = b.items || b.data?.items || b["รายการสินค้า"] || b.line_items;
+  if (Array.isArray(rawItems) && rawItems.length > 0) {
+    return rawItems.filter(Boolean);
+  }
+  if (typeof rawItems === "string" && rawItems.trim().startsWith("[")) {
+    try {
+      const parsed = JSON.parse(rawItems);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed.filter(Boolean);
+    } catch {}
+  }
+  return [];
+}
+
+export function getBillFlexGrossAmount(b: Record<string, any>): number {
+  if (!b) return 0;
+  const items = extractBillLineItems(b);
+  if (items.length > 0) {
+    const sum = items.reduce((s, i) => s + Number(i.amount ?? i.price ?? i.total ?? 0), 0);
+    if (sum > 0) return sum;
+  }
+  const raw = b["ยอดเงิน"] ?? b.data?.["ยอดเงิน"] ?? b.amount ?? b.data?.amount ?? b.total ?? b.total_amount ?? 0;
+  return typeof raw === "number" ? raw : Number(String(raw).replace(/,/g, "").trim()) || 0;
+}
+
+export function resolveBillDeductionInfo(b: Record<string, any>): { hasDeduct: boolean; deductAmt: number; deductPercent: string } {
+  const rawD = String(b["หัก"] || b.deduct_percent || b.deduct || b.data?.["หัก"] || b.data?.deduct_percent || "").trim();
+  const rawDLower = rawD.toLowerCase();
+  const isActive = Boolean(
+    rawD &&
+    rawD !== "-" &&
+    rawD !== "0" &&
+    rawD !== "0%" &&
+    rawDLower !== "ไม่มี" &&
+    !rawDLower.includes("ไม่มีการหักภาษี") &&
+    !rawDLower.includes("ไม่มีหัก") &&
+    rawDLower !== "false" &&
+    rawDLower !== "no"
+  );
+
+  const gross = getBillFlexGrossAmount(b);
+  if (!isActive) {
+    return { hasDeduct: false, deductAmt: 0, deductPercent: "" };
+  }
+
+  const cleanD = rawD.replace(/หัก|\s|%/g, "").trim();
+  const numRate = Number(cleanD);
+  const rawCustom = Number(b["จำนวนหัก"] || b.deduct_amount || b.data?.["จำนวนหัก"] || b.data?.deduct_amount || 0);
+
+  let deductAmt = 0;
+  let deductPercent = "";
+
+  // Check if VAT is active
+  let hasVat = false;
+  const rawVat = b.vat ?? b["vat"] ?? b["VAT"] ?? b["Vat"] ?? b["ภาษี"] ?? b["ภาษีมูลค่าเพิ่ม"] ??
+    b.data?.vat ?? b.data?.["vat"] ?? b.data?.["VAT"] ?? b.data?.["Vat"] ?? b.data?.["ภาษี"] ?? b.data?.["ภาษีมูลค่าเพิ่ม"];
+  if (rawVat !== null && rawVat !== undefined) {
+    const str = String(rawVat).trim().toLowerCase();
+    if (str && str !== "-" && str !== "0" && str !== "0%" && str !== "0.00" && str !== "ไม่มี" && !str.includes("ไม่มี") && str !== "false" && str !== "no") {
+      hasVat = true;
+    }
+  }
+
+  if (rawCustom > 0) {
+    deductAmt = rawCustom;
+    deductPercent = gross > 0 ? String(Math.round((deductAmt / gross) * 100)) : (numRate > 0 ? String(numRate) : "");
+  } else if (numRate > 0 && gross > 0) {
+    deductPercent = String(numRate);
+    deductAmt = hasVat
+      ? Math.round(((gross / 1.07) * numRate) / 100 * 100) / 100
+      : Math.round((gross * numRate) / 100 * 100) / 100;
+  } else {
+    const sheet3Percent = Number(b["3เปอร์"] || b.data?.["3เปอร์"] || 0);
+    if (sheet3Percent > 0) {
+      deductAmt = sheet3Percent;
+      deductPercent = gross > 0 ? String(Math.round((deductAmt / gross) * 100)) : "3";
+    }
+  }
+
+  return {
+    hasDeduct: deductAmt > 0 || isActive,
+    deductAmt,
+    deductPercent
+  };
+}
+
 export function createBillNotificationFlex(bill: {
   id?: string | number;
   bill_no?: string | number;
@@ -407,22 +495,12 @@ export function createBillNotificationFlex(bill: {
   account_name?: string;
   data?: any;
 }, bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>, peopleMap?: Map<string, string> | Record<string, string>, carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>): Record<string, any> {
-  const rawAmount = bill.amount ?? (bill as any)["ยอดเงิน"] ?? (bill as any).total ?? 0;
+  const lineItems = extractBillLineItems(bill as any);
+  const rawAmount = getBillFlexGrossAmount(bill as any);
   const formattedAmount = Number(rawAmount || 0).toLocaleString("th-TH", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-
-  const rawItems = bill.items || bill.data?.items || (bill as any)["รายการสินค้า"] || (bill as any).line_items;
-  let lineItems: Array<{ category?: string; categoryType?: string; amount?: string | number; name?: string; type?: string; price?: string | number; total?: string | number }> = [];
-  if (Array.isArray(rawItems) && rawItems.length > 0) {
-    lineItems = rawItems.filter(Boolean);
-  } else if (typeof rawItems === "string" && rawItems.trim().startsWith("[")) {
-    try {
-      const parsed = JSON.parse(rawItems);
-      if (Array.isArray(parsed) && parsed.length > 0) lineItems = parsed.filter(Boolean);
-    } catch {}
-  }
 
   const bankInfo = resolveBankInfo(bill, bankInfoMap);
   const isSubBill = isSubBillRecord(bill);
@@ -3176,7 +3254,170 @@ export type ProjectBudgetLookupInfo = {
 };
 
 export const PRODUCT_BUDGET_FIELD_MAP: Record<string, string> = {
-  // Current Master Data Options (Dropdown values)
+  // 100 Material Cost Codes (101-123)
+  "101": "งบไม่เกินเตรียมงาน",
+  "101 เตรียมงาน": "งบไม่เกินเตรียมงาน",
+  "101. เตรียมงาน": "งบไม่เกินเตรียมงาน",
+  "เตรียมงาน": "งบไม่เกินเตรียมงาน",
+
+  "102": "งบไม่เกินหินทราย",
+  "102 ดิน/ทราย/หิน": "งบไม่เกินหินทราย",
+  "102. ดิน/ทราย/หิน": "งบไม่เกินหินทราย",
+  "ดิน/ทราย/หิน": "งบไม่เกินหินทราย",
+  "หินทราย": "งบไม่เกินหินทราย",
+  "ดิน": "งบไม่เกินดิน",
+
+  "103": "งบไม่เกินเสาเข็ม",
+  "103 เสาเข็ม": "งบไม่เกินเสาเข็ม",
+  "103. เสาเข็ม": "งบไม่เกินเสาเข็ม",
+  "เสาเข็ม": "งบไม่เกินเสาเข็ม",
+  "เข็มเจาะ": "งบไม่เกินเสาเข็ม",
+  "เข็มตอก": "งบไม่เกินเสาเข็ม",
+
+  "104": "งบไม่เกินเหล็กเส้น",
+  "104 เหล็กเส้น": "งบไม่เกินเหล็กเส้น",
+  "104. เหล็กเส้น": "งบไม่เกินเหล็กเส้น",
+  "เหล็กเส้น": "งบไม่เกินเหล็กเส้น",
+  "เหล็กเส้น/รูปพรรณ": "งบไม่เกินเหล็กเส้น",
+
+  "105": "งบไม่เกินไม้แบบ",
+  "105 ไม้แบบค้ำยัน": "งบไม่เกินไม้แบบ",
+  "105. ไม้แบบค้ำยัน": "งบไม่เกินไม้แบบ",
+  "ไม้แบบค้ำยัน": "งบไม่เกินไม้แบบ",
+  "ไม้แบบ": "งบไม่เกินไม้แบบ",
+  "ไม้อัด": "งบไม่เกินไม้แบบ",
+  "ไม้แบบ/ไม้อัด": "งบไม่เกินไม้แบบ",
+
+  "106": "งบไม่เกินคอนกรีต",
+  "106 คอนกรีตผสมเสร็จ": "งบไม่เกินคอนกรีต",
+  "106. คอนกรีตผสมเสร็จ": "งบไม่เกินคอนกรีต",
+  "คอนกรีตผสมเสร็จ": "งบไม่เกินคอนกรีต",
+  "คอนกรีต": "งบไม่เกินคอนกรีต",
+
+  "107": "งบไม่เกินรูปพรรณ",
+  "107 เหล็กรูปพรรณ": "งบไม่เกินรูปพรรณ",
+  "107. เหล็กรูปพรรณ": "งบไม่เกินรูปพรรณ",
+  "เหล็กรูปพรรณ": "งบไม่เกินรูปพรรณ",
+  "รูปพรรณ": "งบไม่เกินรูปพรรณ",
+
+  "108": "งบไม่เกินวัสดุมุง",
+  "108 วัสดุหลังคา": "งบไม่เกินวัสดุมุง",
+  "108. วัสดุหลังคา": "งบไม่เกินวัสดุมุง",
+  "วัสดุหลังคา": "งบไม่เกินวัสดุมุง",
+  "วัสดุมุง": "งบไม่เกินวัสดุมุง",
+  "หลังคา": "งบไม่เกินวัสดุมุง",
+
+  "109": "งบไม่เกินก่อฉาบ",
+  "109 ก่อฉาบ": "งบไม่เกินก่อฉาบ",
+  "109. ก่อฉาบ": "งบไม่เกินก่อฉาบ",
+  "ก่อฉาบ": "งบไม่เกินก่อฉาบ",
+  "ปูน/ทราย/หิน": "งบไม่เกินปูนทรายหิน",
+  "ปูนทรายหิน": "งบไม่เกินปูนทรายหิน",
+
+  "110": "งบไม่เกินฝ้าผนัง",
+  "110 ฝ้าเพดาน": "งบไม่เกินฝ้าผนัง",
+  "110. ฝ้าเพดาน": "งบไม่เกินฝ้าผนัง",
+  "ฝ้าเพดาน": "งบไม่เกินฝ้าผนัง",
+  "ฝ้าผนัง": "งบไม่เกินฝ้าผนัง",
+
+  "111": "งบไม่เกินปูพื้น",
+  "111 ผิวพื้นผนัง": "งบไม่เกินปูพื้น",
+  "111. ผิวพื้นผนัง": "งบไม่เกินปูพื้น",
+  "ผิวพื้นผนัง": "งบไม่เกินปูพื้น",
+  "ปูพื้น": "งบไม่เกินปูพื้น",
+
+  "112": "งบไม่เกินกระจก",
+  "112 ประตูหน้าต่าง": "งบไม่เกินกระจก",
+  "112. ประตูหน้าต่าง": "งบไม่เกินกระจก",
+  "ประตูหน้าต่าง": "งบไม่เกินกระจก",
+  "กระจก": "งบไม่เกินกระจก",
+
+  "113": "งบไม่เกินสีเคมี",
+  "113 ทาสี": "งบไม่เกินสีเคมี",
+  "113. ทาสี": "งบไม่เกินสีเคมี",
+  "ทาสี": "งบไม่เกินสีเคมี",
+  "สีเคมี": "งบไม่เกินสีเคมี",
+
+  "114": "งบไม่เกินสุขภัณฑ์",
+  "114 สุขภัณฑ์": "งบไม่เกินสุขภัณฑ์",
+  "114. สุขภัณฑ์": "งบไม่เกินสุขภัณฑ์",
+  "สุขภัณฑ์": "งบไม่เกินสุขภัณฑ์",
+
+  "115": "งบไม่เกินประปา",
+  "115 ระบบประปา": "งบไม่เกินประปา",
+  "115. ระบบประปา": "งบไม่เกินประปา",
+  "ระบบประปา": "งบไม่เกินประปา",
+  "ประปา": "งบไม่เกินประปา",
+
+  "116": "งบไม่เกินไฟฟ้า",
+  "116 ระบบไฟฟ้า": "งบไม่เกินไฟฟ้า",
+  "116. ระบบไฟฟ้า": "งบไม่เกินไฟฟ้า",
+  "ระบบไฟฟ้า": "งบไม่เกินไฟฟ้า",
+  "ไฟฟ้า": "งบไม่เกินไฟฟ้า",
+
+  "117": "งบไม่เกินแอร์",
+  "117 ระบบปรับอากาศ": "งบไม่เกินแอร์",
+  "117. ระบบปรับอากาศ": "งบไม่เกินแอร์",
+  "ระบบปรับอากาศ": "งบไม่เกินแอร์",
+  "แอร์": "งบไม่เกินแอร์",
+
+  "118": "งบไม่เกินบิวอิน",
+  "118 ตบแต่งภายใน": "งบไม่เกินบิวอิน",
+  "118. ตบแต่งภายใน": "งบไม่เกินบิวอิน",
+  "ตบแต่งภายใน": "งบไม่เกินบิวอิน",
+  "บิวอิน": "งบไม่เกินบิวอิน",
+
+  "119": "งบไม่เกินเฟอร์นิเจอร์",
+  "119 เฟอร์นิเจอร์": "งบไม่เกินเฟอร์นิเจอร์",
+  "119. เฟอร์นิเจอร์": "งบไม่เกินเฟอร์นิเจอร์",
+  "เฟอร์นิเจอร์": "งบไม่เกินเฟอร์นิเจอร์",
+
+  "120": "งบไม่เกินภูมิทัศน์",
+  "120 ภูมิทัศน์": "งบไม่เกินภูมิทัศน์",
+  "120. ภูมิทัศน์": "งบไม่เกินภูมิทัศน์",
+  "ภูมิทัศน์": "งบไม่เกินภูมิทัศน์",
+
+  "121": "งบไม่เกินแก้ไขเก็บงาน",
+  "121 แก้ไขเก็บงาน": "งบไม่เกินแก้ไขเก็บงาน",
+  "121. แก้ไขเก็บงาน": "งบไม่เกินแก้ไขเก็บงาน",
+  "แก้ไขเก็บงาน": "งบไม่เกินแก้ไขเก็บงาน",
+
+  "122": "งบไม่เกินตั้งนั่งร้าน",
+  "122 ตั้งนั่งร้าน": "งบไม่เกินตั้งนั่งร้าน",
+  "122. ตั้งนั่งร้าน": "งบไม่เกินตั้งนั่งร้าน",
+  "ตั้งนั่งร้าน": "งบไม่เกินตั้งนั่งร้าน",
+
+  "123": "งบไม่เกินดำเนินการ",
+  "123 ดำเนินการ(อื่นๆ)": "งบไม่เกินดำเนินการ",
+  "123. ดำเนินการ(อื่นๆ)": "งบไม่เกินดำเนินการ",
+  "200 ดำเนินการ(อื่นๆ)": "งบไม่เกินดำเนินการ",
+  "ดำเนินการ(อื่นๆ)": "งบไม่เกินดำเนินการ",
+  "ดำเนินการ": "งบไม่เกินดำเนินการ",
+  "อื่นๆ(วัสดุ)": "งบไม่เกินวัสดุอื่นๆ",
+  "วัสดุอื่นๆ": "งบไม่เกินวัสดุอื่นๆ",
+
+  // 500 Equipment / Vehicle Cost Codes
+  "501": "งบไม่เกินน้ำมัน",
+  "501 น้ำมัน": "งบไม่เกินน้ำมัน",
+  "501. น้ำมัน": "งบไม่เกินน้ำมัน",
+  "น้ำมัน": "งบไม่เกินน้ำมัน",
+
+  "502": "งบไม่เกินซ่อมรถ",
+  "502 ซ่อมรถ": "งบไม่เกินซ่อมรถ",
+  "502. ซ่อมรถ": "งบไม่เกินซ่อมรถ",
+  "ซ่อมรถ": "งบไม่เกินซ่อมรถ",
+
+  "503": "งบไม่เกินเครื่องจักร",
+  "503 เครื่องจักร": "งบไม่เกินเครื่องจักร",
+  "503. เครื่องจักร": "งบไม่เกินเครื่องจักร",
+  "เครื่องจักร": "งบไม่เกินเครื่องจักร",
+
+  "504": "งบไม่เกินเครื่องมือ",
+  "504 เครื่องมือ": "งบไม่เกินเครื่องมือ",
+  "504. เครื่องมือ": "งบไม่เกินเครื่องมือ",
+  "เครื่องมือ": "งบไม่เกินเครื่องมือ",
+
+  // Legacy format
   "1 ปูน/ทราย/หิน": "งบไม่เกินปูนทรายหิน",
   "2 เหล็กเส้น/รูปพรรณ": "งบไม่เกินเหล็กเส้น",
   "3 คอนกรีตผสมเสร็จ": "งบไม่เกินคอนกรีต",
@@ -3195,52 +3436,8 @@ export const PRODUCT_BUDGET_FIELD_MAP: Record<string, string> = {
   "16 ดิน": "งบไม่เกินดิน",
   "17 หินทราย": "งบไม่เกินหินทราย",
   "18 เตรียมงาน": "งบไม่เกินเตรียมงาน",
-  "101 น้ำมัน": "งบไม่เกินน้ำมัน",
   "102 ค่าขนส่ง": "งบไม่เกินค่าขนส่ง",
-  "103 เครื่องจักร": "งบไม่เกินเครื่องจักร",
-  "104 ซ่อมรถ": "งบไม่เกินซ่อมรถ",
-  "105 เครื่องมือ": "งบไม่เกินเครื่องมือ",
-  "200 ดำเนินการ(อื่นๆ)": "งบไม่เกินดำเนินการ",
   "ค่าขนส่ง": "งบไม่เกินค่าขนส่ง",
-  "ดำเนินการ(อื่นๆ)": "งบไม่เกินดำเนินการ",
-  "ซ่อมรถ": "งบไม่เกินซ่อมรถ",
-
-  // Clean names
-  "ปูน/ทราย/หิน": "งบไม่เกินปูนทรายหิน",
-  "ปูนทรายหิน": "งบไม่เกินปูนทรายหิน",
-  "เหล็กเส้น": "งบไม่เกินเหล็กเส้น",
-  "เหล็กรูปพรรณ": "งบไม่เกินรูปพรรณ",
-  "รูปพรรณ": "งบไม่เกินรูปพรรณ",
-  "เหล็กเส้น/รูปพรรณ": "งบไม่เกินเหล็กเส้น",
-  "คอนกรีต": "งบไม่เกินคอนกรีต",
-  "คอนกรีตผสมเสร็จ": "งบไม่เกินคอนกรีต",
-  "ไม้แบบ": "งบไม่เกินไม้แบบ",
-  "ไม้อัด": "งบไม่เกินไม้แบบ",
-  "ไม้แบบ/ไม้อัด": "งบไม่เกินไม้แบบ",
-  "วัสดุมุง": "งบไม่เกินวัสดุมุง",
-  "ฝ้าผนัง": "งบไม่เกินฝ้าผนัง",
-  "ปูพื้น": "งบไม่เกินปูพื้น",
-  "กระจก": "งบไม่เกินกระจก",
-  "ไฟฟ้า": "งบไม่เกินไฟฟ้า",
-  "ประปา": "งบไม่เกินประปา",
-  "อื่นๆ(วัสดุ)": "งบไม่เกินวัสดุอื่นๆ",
-  "วัสดุอื่นๆ": "งบไม่เกินวัสดุอื่นๆ",
-  "สีเคมี": "งบไม่เกินสีเคมี",
-  "สุขภัณฑ์": "งบไม่เกินสุขภัณฑ์",
-  "บิวอิน": "งบไม่เกินบิวอิน",
-  "แอร์": "งบไม่เกินแอร์",
-  "ดิน": "งบไม่เกินดิน",
-  "หินทราย": "งบไม่เกินหินทราย",
-  "เตรียมงาน": "งบไม่เกินเตรียมงาน",
-  "น้ำมัน": "งบไม่เกินน้ำมัน",
-  "เครื่องจักร": "งบไม่เกินเครื่องจักร",
-  "เครื่องมือ": "งบไม่เกินเครื่องมือ",
-
-  // Legacy format
-  "1 เหล็กเส้น": "งบไม่เกินเหล็กเส้น",
-  "2 เหล็กรูปพรรณ": "งบไม่เกินรูปพรรณ",
-  "3 คอนกรีต": "งบไม่เกินคอนกรีต",
-  "4 ไม้แบบ": "งบไม่เกินไม้แบบ",
 };
 
 export function resolveProductBudgetField(raw: string): string {
@@ -3251,23 +3448,32 @@ export function resolveProductBudgetField(raw: string): string {
   const cleaned = trimmed.replace(/^\d+[\.\s\-]+/, "").trim();
   if (PRODUCT_BUDGET_FIELD_MAP[cleaned]) return PRODUCT_BUDGET_FIELD_MAP[cleaned];
 
+  // Try cost-code helper
+  const fromCostCode = getCostCodeBudgetField(trimmed) || getCostCodeBudgetField(cleaned);
+  if (fromCostCode && fromCostCode !== "งบไม่เกินค่าของ") return fromCostCode;
+
   // Keyword matching
+  if (trimmed.includes("เสาเข็ม") || trimmed.includes("เข็ม")) return "งบไม่เกินเสาเข็ม";
   if (trimmed.includes("เหล็กเส้น")) return "งบไม่เกินเหล็กเส้น";
   if (trimmed.includes("รูปพรรณ")) return "งบไม่เกินรูปพรรณ";
   if (trimmed.includes("คอนกรีต")) return "งบไม่เกินคอนกรีต";
   if (trimmed.includes("หินทราย")) return "งบไม่เกินหินทราย";
   if (trimmed.includes("ปูน") || trimmed.includes("ทราย") || trimmed.includes("หิน")) return "งบไม่เกินปูนทรายหิน";
-  if (trimmed.includes("ไม้แบบ") || trimmed.includes("ไม้อัด")) return "งบไม่เกินไม้แบบ";
+  if (trimmed.includes("ไม้แบบ") || trimmed.includes("ไม้อัด") || trimmed.includes("ค้ำยัน")) return "งบไม่เกินไม้แบบ";
   if (trimmed.includes("วัสดุมุง") || trimmed.includes("หลังคา")) return "งบไม่เกินวัสดุมุง";
-  if (trimmed.includes("ฝ้า") || trimmed.includes("ผนัง")) return "งบไม่เกินฝ้าผนัง";
-  if (trimmed.includes("ปูพื้น") || trimmed.includes("กระเบื้อง")) return "งบไม่เกินปูพื้น";
-  if (trimmed.includes("กระจก") || trimmed.includes("อลูมิเนียม")) return "งบไม่เกินกระจก";
+  if (trimmed.includes("ฝ้า") || trimmed.includes("ผนัง") || trimmed.includes("เพดาน")) return "งบไม่เกินฝ้าผนัง";
+  if (trimmed.includes("ปูพื้น") || trimmed.includes("กระเบื้อง") || trimmed.includes("ผิวพื้น")) return "งบไม่เกินปูพื้น";
+  if (trimmed.includes("กระจก") || trimmed.includes("อลูมิเนียม") || trimmed.includes("ประตู") || trimmed.includes("หน้าต่าง")) return "งบไม่เกินกระจก";
   if (trimmed.includes("ไฟฟ้า")) return "งบไม่เกินไฟฟ้า";
   if (trimmed.includes("ประปา")) return "งบไม่เกินประปา";
   if (trimmed.includes("สี") || trimmed.includes("เคมี")) return "งบไม่เกินสีเคมี";
   if (trimmed.includes("สุขภัณฑ์")) return "งบไม่เกินสุขภัณฑ์";
-  if (trimmed.includes("บิวอิน") || trimmed.includes("บิ้วอิน")) return "งบไม่เกินบิวอิน";
-  if (trimmed.includes("แอร์")) return "งบไม่เกินแอร์";
+  if (trimmed.includes("บิวอิน") || trimmed.includes("บิ้วอิน") || trimmed.includes("ตบแต่ง")) return "งบไม่เกินบิวอิน";
+  if (trimmed.includes("เฟอร์นิเจอร์")) return "งบไม่เกินเฟอร์นิเจอร์";
+  if (trimmed.includes("ภูมิทัศน์")) return "งบไม่เกินภูมิทัศน์";
+  if (trimmed.includes("แก้ไขเก็บงาน") || trimmed.includes("เก็บงาน")) return "งบไม่เกินแก้ไขเก็บงาน";
+  if (trimmed.includes("ตั้งนั่งร้าน") || trimmed.includes("นั่งร้าน")) return "งบไม่เกินตั้งนั่งร้าน";
+  if (trimmed.includes("แอร์") || trimmed.includes("ปรับอากาศ")) return "งบไม่เกินแอร์";
   if (trimmed.includes("ดิน")) return "งบไม่เกินดิน";
   if (trimmed.includes("เตรียมงาน")) return "งบไม่เกินเตรียมงาน";
   if (trimmed.includes("น้ำมัน")) return "งบไม่เกินน้ำมัน";
@@ -3284,11 +3490,31 @@ export function resolveProductBudgetField(raw: string): string {
 export function getBudgetCapForField(field: string, allBudgets?: Record<string, number>): { cap: number; actualField: string } {
   if (!field || !allBudgets) return { cap: 0, actualField: "" };
   if (Number(allBudgets[field] || 0) > 0) return { cap: Number(allBudgets[field]), actualField: field };
+
+  // Compatibility aliases
+  if (field === "งบไม่เกินเสาเข็ม" && Number(allBudgets["งบไม่เกินปูนทรายหิน"] || 0) > 0) {
+    return { cap: Number(allBudgets["งบไม่เกินปูนทรายหิน"]), actualField: "งบไม่เกินปูนทรายหิน" };
+  }
+  if (field === "งบไม่เกินก่อฉาบ" && Number(allBudgets["งบไม่เกินปูนทรายหิน"] || 0) > 0) {
+    return { cap: Number(allBudgets["งบไม่เกินปูนทรายหิน"]), actualField: "งบไม่เกินปูนทรายหิน" };
+  }
+  if (field === "งบไม่เกินหินทราย" && Number(allBudgets["งบไม่เกินดิน"] || 0) > 0) {
+    return { cap: Number(allBudgets["งบไม่เกินดิน"]), actualField: "งบไม่เกินดิน" };
+  }
   if (field === "งบไม่เกินรูปพรรณ" && Number(allBudgets["งบไม่เกินเหล็กเส้น"] || 0) > 0) {
     return { cap: Number(allBudgets["งบไม่เกินเหล็กเส้น"]), actualField: "งบไม่เกินเหล็กเส้น" };
   }
   if (field === "งบไม่เกินเหล็กเส้น" && Number(allBudgets["งบไม่เกินรูปพรรณ"] || 0) > 0) {
     return { cap: Number(allBudgets["งบไม่เกินรูปพรรณ"]), actualField: "งบไม่เกินรูปพรรณ" };
+  }
+  if (field === "งบไม่เกินกระจก" && Number(allBudgets["งบไม่เกินประตูหน้าต่าง"] || 0) > 0) {
+    return { cap: Number(allBudgets["งบไม่เกินประตูหน้าต่าง"]), actualField: "งบไม่เกินประตูหน้าต่าง" };
+  }
+  if (field === "งบไม่เกินบิวอิน" && Number(allBudgets["งบไม่เกินเฟอร์นิเจอร์"] || 0) > 0) {
+    return { cap: Number(allBudgets["งบไม่เกินเฟอร์นิเจอร์"]), actualField: "งบไม่เกินเฟอร์นิเจอร์" };
+  }
+  if (field === "งบไม่เกินเฟอร์นิเจอร์" && Number(allBudgets["งบไม่เกินบิวอิน"] || 0) > 0) {
+    return { cap: Number(allBudgets["งบไม่เกินบิวอิน"]), actualField: "งบไม่เกินบิวอิน" };
   }
   return { cap: 0, actualField: field };
 }
@@ -4091,63 +4317,19 @@ export function createMultiBillFlex(
 
   const mode = options.mode || "search";
 
-  // Helper to reliably check if a bill has active deduction (ignores spreadsheet formulas when deduction is not requested)
-  function resolveBillDeductionInfo(b: Record<string, any>): { hasDeduct: boolean; deductAmt: number; deductPercent: string } {
-    const rawD = String(b["หัก"] || b.deduct_percent || b.deduct || b.data?.["หัก"] || b.data?.deduct_percent || "").trim();
-    const rawDLower = rawD.toLowerCase();
-    const isActive = Boolean(
-      rawD &&
-      rawD !== "-" &&
-      rawD !== "0" &&
-      rawD !== "0%" &&
-      rawDLower !== "ไม่มี" &&
-      !rawDLower.includes("ไม่มีการหักภาษี") &&
-      !rawDLower.includes("ไม่มีหัก") &&
-      rawDLower !== "false" &&
-      rawDLower !== "no"
-    );
-
-    const gross = Number(b["ยอดเงิน"] || b.amount || 0);
-    if (!isActive) {
-      return { hasDeduct: false, deductAmt: 0, deductPercent: "" };
-    }
-
-    const cleanD = rawD.replace(/หัก|\s|%/g, "").trim();
-    const numRate = Number(cleanD);
-    const rawCustom = Number(b["จำนวนหัก"] || b.deduct_amount || 0);
-
-    let deductAmt = 0;
-    let deductPercent = "";
-
-    if (rawCustom > 0) {
-      deductAmt = rawCustom;
-      deductPercent = gross > 0 ? String(Math.round((deductAmt / gross) * 100)) : (numRate > 0 ? String(numRate) : "");
-    } else if (numRate > 0 && gross > 0) {
-      deductPercent = String(numRate);
-      deductAmt = Math.round((gross * numRate) / 100 * 100) / 100;
-    } else {
-      const sheet3Percent = Number(b["3เปอร์"] || 0);
-      if (sheet3Percent > 0) {
-        deductAmt = sheet3Percent;
-        deductPercent = gross > 0 ? String(Math.round((deductAmt / gross) * 100)) : "3";
-      }
-    }
-
-    return {
-      hasDeduct: deductAmt > 0 || isActive,
-      deductAmt,
-      deductPercent
-    };
-  }
-
-  const totalGrossAmount = bills.reduce((sum, b) => sum + Number(b["ยอดเงิน"] || b.amount || 0), 0);
+  const totalGrossAmount = bills.reduce((sum, b) => sum + getBillFlexGrossAmount(b), 0);
   const totalNetTransfer = bills.reduce((sum, b) => {
-    const gross = Number(b["ยอดเงิน"] || b.amount || 0);
+    const gross = getBillFlexGrossAmount(b);
     const dInfo = resolveBillDeductionInfo(b);
-    const net = Number(b["ยอดโอน"] || b.net_amount || 0);
-    if (net > 0 && dInfo.hasDeduct) return sum + net;
-    if (dInfo.hasDeduct && dInfo.deductAmt > 0) return sum + (gross - dInfo.deductAmt);
-    return sum + (net > 0 && !dInfo.hasDeduct ? net : gross);
+    const rawNet = Number(b["ยอดโอน"] || b.net_amount || b.data?.["ยอดโอน"] || b.data?.net_amount || 0);
+    const items = extractBillLineItems(b);
+    if (dInfo.hasDeduct && dInfo.deductAmt > 0) {
+      return sum + (gross - dInfo.deductAmt);
+    }
+    if (items.length > 0 || !rawNet) {
+      return sum + gross;
+    }
+    return sum + (rawNet > 0 ? rawNet : gross);
   }, 0);
 
   const hasAnyDeduction = bills.some(b => {
@@ -4170,7 +4352,7 @@ export function createMultiBillFlex(
   const firstBillTypeTag = allBillTypes.length === 1
     ? `[${allBillTypes[0]}]`
     : (allBillTypes.length > 1 ? "[บิลหลัก+ย่อย]" : "");
-  const sheetRowIds = bills.map(b => String(b._sheetRow || b.id || b["ลำดับ"] || b.bill_no || "").trim()).filter(Boolean);
+  const sheetRowIds = bills.map(b => String(b.id || b["ลำดับ"] || b._sheetRow || b.bill_no || "").trim()).filter(Boolean);
   const sheetRowStr = sheetRowIds.join(",");
 
   // Helper to extract image URLs from a bill object
@@ -4243,15 +4425,16 @@ export function createMultiBillFlex(
 
     // 2. Bill Items List
     const itemsContents = pageBills.map((b, idx) => {
-      const bId = String(b._sheetRow || b.id || b["ลำดับ"] || startNum + idx);
-      const grossAmt = Number(b["ยอดเงิน"] || b.amount || 0);
+      const bId = String(b.id || b["ลำดับ"] || b._sheetRow || startNum + idx);
+      const grossAmt = getBillFlexGrossAmount(b);
       const dInfo = resolveBillDeductionInfo(b);
       const deductAmt = dInfo.deductAmt;
       const hasDeduct = dInfo.hasDeduct;
-      const rawNet = Number(b["ยอดโอน"] || b.net_amount || 0);
+      const rawNet = Number(b["ยอดโอน"] || b.net_amount || b.data?.["ยอดโอน"] || b.data?.net_amount || 0);
+      const lineItems = extractBillLineItems(b);
       const netTransferAmt = hasDeduct
-        ? (rawNet > 0 ? rawNet : (deductAmt > 0 ? grossAmt - deductAmt : grossAmt))
-        : (rawNet > 0 ? rawNet : grossAmt);
+        ? (deductAmt > 0 ? grossAmt - deductAmt : (rawNet > 0 ? rawNet : grossAmt))
+        : (lineItems.length > 0 || !rawNet ? grossAmt : (rawNet > 0 ? rawNet : grossAmt));
 
       const cleanPercent = dInfo.deductPercent;
       const percentLabel = cleanPercent ? `หัก ${cleanPercent}%` : "หัก ณ ที่จ่าย";
@@ -4554,16 +4737,6 @@ export function createMultiBillFlex(
 
       const productName = b["สินค้า"] || b.product || "";
       const categoryName = b["ประเภท"] || b.category || "";
-      const rawItems = b.items || b.data?.items || b["รายการสินค้า"] || b.line_items;
-      let lineItems: Array<{ category?: string; categoryType?: string; amount?: string | number; name?: string; type?: string; price?: string | number; total?: string | number }> = [];
-      if (Array.isArray(rawItems) && rawItems.length > 0) {
-        lineItems = rawItems.filter(Boolean);
-      } else if (typeof rawItems === "string" && rawItems.trim().startsWith("[")) {
-        try {
-          const parsed = JSON.parse(rawItems);
-          if (Array.isArray(parsed) && parsed.length > 0) lineItems = parsed.filter(Boolean);
-        } catch {}
-      }
 
       const textDetailsBox: Record<string, any> = {
         type: "box",
@@ -5352,28 +5525,13 @@ export function createDailyTransferSummaryFlex(
     const map = new Map<string, DailyTransferGroup>();
 
     for (const b of bills) {
-      const grossAmt = Number(b["ยอดเงิน"] || b.amount || 0);
-      const rawD = String(b["หัก"] || b.deduct_percent || "").trim();
-      const rawDLower = rawD.toLowerCase();
-      const isDeduct = Boolean(
-        rawD &&
-        rawD !== "-" &&
-        rawD !== "0" &&
-        rawD !== "0%" &&
-        rawDLower !== "ไม่มี" &&
-        !rawDLower.includes("ไม่มี") &&
-        rawDLower !== "false" &&
-        rawDLower !== "no"
-      );
-      let deductAmt = 0;
-      if (isDeduct) {
-        deductAmt = Number(b["จำนวนหัก"] || b["3เปอร์"] || b.deduct_amount || 0);
-        if (!deductAmt && rawD && Number(rawD.replace(/หัก|\s|%/g, "")) > 0 && grossAmt > 0) {
-          deductAmt = Math.round((grossAmt * Number(rawD.replace(/หัก|\s|%/g, ""))) / 100 * 100) / 100;
-        }
-      }
-      const rawNet = Number(b["ยอดโอน"] || b.net_amount || 0);
-      const netTransferAmt = rawNet > 0 && (isDeduct || rawNet === grossAmt) ? rawNet : (deductAmt > 0 ? grossAmt - deductAmt : grossAmt);
+      const grossAmt = getBillFlexGrossAmount(b);
+      const dInfo = resolveBillDeductionInfo(b);
+      const lineItems = extractBillLineItems(b);
+      const rawNet = Number(b["ยอดโอน"] || b.net_amount || b.data?.["ยอดโอน"] || b.data?.net_amount || 0);
+      const netTransferAmt = dInfo.hasDeduct
+        ? (dInfo.deductAmt > 0 ? grossAmt - dInfo.deductAmt : (rawNet > 0 ? rawNet : grossAmt))
+        : (lineItems.length > 0 || !rawNet ? grossAmt : (rawNet > 0 ? rawNet : grossAmt));
 
       let payeeName = "";
       let bankName = "";

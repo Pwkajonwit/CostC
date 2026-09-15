@@ -39,13 +39,40 @@ export function sumColumns(rows: SheetRow[], columns: string[]) {
   return total;
 }
 
+export function parseBillItems(row: SheetRow | null | undefined): Array<{
+  category?: string;
+  categoryType?: string;
+  amount?: string | number;
+  price?: string | number;
+  total?: string | number;
+  name?: string;
+  type?: string;
+  storeGroup?: string;
+  detail?: string;
+}> {
+  if (!row) return [];
+  const raw = (row as any).items || (row as any).data?.items || (row as any)["รายการสินค้า"] || (row as any).line_items;
+  if (Array.isArray(raw) && raw.length > 0) return raw;
+  if (typeof raw === "string" && raw.trim().startsWith("[")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    } catch {}
+  }
+  return [];
+}
+
 export function hydrateDataRows(rows: SheetRow[]) {
   const result = new Array(rows.length);
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const output = { ...row };
+    const items = parseBillItems(output);
+    const itemsSum = items.reduce((s, item) => s + toNumber(item.amount ?? item.price ?? item.total), 0);
     
-    if (!hasValue(output["ยอดเงิน"])) {
+    if (itemsSum > 0) {
+      output["ยอดเงิน"] = itemsSum;
+    } else if (!hasValue(output["ยอดเงิน"])) {
       let sum = 0;
       for (let j = 0; j < AMOUNT_COLUMNS.length; j++) {
         const val = output[AMOUNT_COLUMNS[j]];
@@ -71,7 +98,10 @@ export function hydrateDataRows(rows: SheetRow[]) {
 }
 
 export function computeBillAmount(row: SheetRow) {
-  return sumColumns([row], AMOUNT_COLUMNS);
+  const items = parseBillItems(row);
+  const itemsSum = items.reduce((s, i) => s + toNumber(i.amount ?? i.price ?? i.total), 0);
+  const colSum = sumColumns([row], AMOUNT_COLUMNS);
+  return itemsSum > 0 ? itemsSum : colSum;
 }
 
 export function computeBillTransferAmount(row: SheetRow) {
@@ -85,6 +115,18 @@ export function rowsForProject(dataRows: SheetRow[], projectId: RowValue | undef
 
 export function getCategoryExpense(rows: SheetRow[], cat: string): number {
   return rows.reduce((sum, row) => {
+    const items = parseBillItems(row);
+    if (items.length > 0) {
+      const itemCatSum = items.reduce((iSum, item) => {
+        const catStr = String(item.categoryType || item.category || item.type || "").trim();
+        if (catStr.includes(cat) || (cat === "ค่าของ" && (catStr.startsWith("1") || catStr.includes("ค่าของ"))) || (cat === "น้ำมัน" && (catStr.startsWith("501") || catStr.includes("น้ำมัน")))) {
+          return iSum + toNumber(item.amount ?? item.price ?? item.total);
+        }
+        return iSum;
+      }, 0);
+      if (itemCatSum > 0) return sum + itemCatSum;
+    }
+
     const directAmt = toNumber(row[cat]);
     if (directAmt > 0) return sum + directAmt;
 

@@ -953,11 +953,17 @@ export async function handleLineCommand(
         if (isSubBatch && !checkIsSubBill(b)) return false;
         if (isMainBatch && checkIsSubBill(b)) return false;
 
-        const bId = String(b.id || b["ลำดับ"] || b._sheetRow || "").trim();
+        const bId = String(b.id || "").trim();
+        const bSeq = String(b["ลำดับ"] || "").trim();
+        const bSheet = String(b._sheetRow || "").trim();
 
         // Exact match by Bill ID takes absolute priority for single/multi bill ID actions
         if (isExplicitIdList) {
-          return targetIdList.includes(bId);
+          return (
+            (bId !== "" && targetIdList.includes(bId)) ||
+            (bSeq !== "" && targetIdList.includes(bSeq)) ||
+            (bSheet !== "" && targetIdList.includes(bSheet))
+          );
         }
 
         if (!target || target === "ทั้งหมด" || target === "หลัก" || target === "ย่อย") return true;

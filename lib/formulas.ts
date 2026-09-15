@@ -1,6 +1,7 @@
 import { TABLES } from "@/lib/config";
 import { isCommittedBill } from "@/lib/bills/bill-status";
-import { computeBillAmount, computeBillDeductMultiplier, computeBillTransferAmount, isVatActive, isDeductActive, parseDeductPercent } from "@/lib/project-summary";
+import { computeBillAmount, computeBillDeductMultiplier, computeBillTransferAmount, isVatActive, isDeductActive, parseDeductPercent, parseBillItems } from "@/lib/project-summary";
+import { getExpenseFieldForCategory } from "@/lib/cost-codes";
 import { getRows } from "@/lib/db";
 import type { SheetRow } from "@/lib/types";
 import { getTodayDateIso } from "@/lib/utils/dates";
@@ -430,6 +431,23 @@ function applyBillFormulasFast(
     if (contract) {
       row["รายละเอียดงาน"] = contract["รายละเอียดงาน"] || row["รายละเอียดงาน"] || "";
       row["ค่าแรงคงเหลือ"] = contract["ค่าแรงคงเหลือ"] || "";
+    }
+  }
+
+  const items = parseBillItems(row);
+  if (items.length > 0) {
+    const catSums: Record<string, number> = {};
+    for (const item of items) {
+      const catName = String(item.categoryType || item.category || item.type || "").trim();
+      const field = getExpenseFieldForCategory(catName);
+      const amt = toNumber(item.amount ?? item.price ?? item.total);
+      catSums[field] = (catSums[field] || 0) + amt;
+    }
+    const catKeys = ["ค่าของ", "ค่าแรง", "พนักงาน", "น้ำมัน", "ซ่อมรถ", "เครื่องจักร", "เครื่องมือ", "อื่นๆ"];
+    for (const k of catKeys) {
+      if (catSums[k] !== undefined && catSums[k] > 0) {
+        row[k] = catSums[k];
+      }
     }
   }
 

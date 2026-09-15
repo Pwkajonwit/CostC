@@ -82,13 +82,87 @@ const PRODUCT_BUDGET_MAP: Record<string, string> = {
   "4 ไม้แบบ": "งบไม่เกินไม้แบบ",
 };
 
+const LABOR_SUB_BUDGET_MAP: Record<string, string> = {
+  "201": "งบไม่เกินค่าแรง_201",
+  "202": "งบไม่เกินค่าแรง_202",
+  "203": "งบไม่เกินค่าแรง_203",
+  "204": "งบไม่เกินค่าแรง_204",
+  "205": "งบไม่เกินค่าแรง_205",
+  "206": "งบไม่เกินค่าแรง_206",
+  "207": "งบไม่เกินค่าแรง_207",
+  "208": "งบไม่เกินค่าแรง_208",
+  "209": "งบไม่เกินค่าแรง_209",
+  "210": "งบไม่เกินค่าแรง_210",
+  "211": "งบไม่เกินค่าแรง_211",
+  "212": "งบไม่เกินค่าแรง_212",
+  "213": "งบไม่เกินค่าแรง_213",
+  "214": "งบไม่เกินค่าแรง_214",
+  "215": "งบไม่เกินค่าแรง_215",
+  "216": "งบไม่เกินค่าแรง_216",
+  "217": "งบไม่เกินค่าแรง_217",
+  "218": "งบไม่เกินค่าแรง_218",
+  "219": "งบไม่เกินค่าแรง_219",
+  "220": "งบไม่เกินค่าแรง_220",
+  "221": "งบไม่เกินค่าแรง_221",
+  "222": "งบไม่เกินค่าแรง_222",
+  "223": "งบไม่เกินค่าแรง_223",
+  "301": "งบไม่เกินพนักงาน",
+};
+
+const MATERIAL_SUB_BUDGET_MAP: Record<string, string> = {
+  "101": "งบไม่เกินเตรียมงาน",
+  "102": "งบไม่เกินหินทราย",
+  "103": "งบไม่เกินเสาเข็ม",
+  "104": "งบไม่เกินเหล็กเส้น",
+  "105": "งบไม่เกินไม้แบบ",
+  "106": "งบไม่เกินคอนกรีต",
+  "107": "งบไม่เกินรูปพรรณ",
+  "108": "งบไม่เกินวัสดุมุง",
+  "109": "งบไม่เกินก่อฉาบ",
+  "110": "งบไม่เกินฝ้าผนัง",
+  "111": "งบไม่เกินปูพื้น",
+  "112": "งบไม่เกินกระจก",
+  "113": "งบไม่เกินสีเคมี",
+  "114": "งบไม่เกินสุขภัณฑ์",
+  "115": "งบไม่เกินประปา",
+  "116": "งบไม่เกินไฟฟ้า",
+  "117": "งบไม่เกินแอร์",
+  "118": "งบไม่เกินบิวอิน",
+  "119": "งบไม่เกินเฟอร์นิเจอร์",
+  "120": "งบไม่เกินภูมิทัศน์",
+  "121": "งบไม่เกินแก้ไขเก็บงาน",
+  "122": "งบไม่เกินตั้งนั่งร้าน",
+  "123": "งบไม่เกินดำเนินการ",
+  "501": "งบไม่เกินน้ำมัน",
+  "502": "งบไม่เกินซ่อมรถ",
+  "503": "งบไม่เกินเครื่องจักร",
+  "504": "งบไม่เกินเครื่องมือ",
+};
+
+export function getProjectBudgetVal(proj: SheetRow, fieldName: string): number {
+  if (!proj || !fieldName) return 0;
+  const direct = toNumber(proj[fieldName]);
+  if (direct > 0) return direct;
+  if (proj.data && typeof proj.data === "object") {
+    const fromData = toNumber((proj.data as any)[fieldName]);
+    if (fromData > 0) return fromData;
+  }
+  return 0;
+}
+
 function getCategoryBudgetField(cat: string): string {
   if (isFuelCost(cat)) return "งบไม่เกินน้ำมัน";
   if (isRepairCost(cat)) return "งบไม่เกินซ่อมรถ";
   if (isMachineCost(cat)) return "งบไม่เกินเครื่องจักร";
   if (isToolCost(cat)) return "งบไม่เกินเครื่องมือ";
   if (isStaffCost(cat)) return "งบไม่เกินพนักงาน";
-  if (isLaborCost(cat)) return "งบไม่เกินค่าแรง";
+  if (isLaborCost(cat)) {
+    const codeMatch = cat.match(/^(20[1-9]|21[0-9]|22[0-3])/);
+    if (codeMatch && LABOR_SUB_BUDGET_MAP[codeMatch[1]]) {
+      return LABOR_SUB_BUDGET_MAP[codeMatch[1]];
+    }
+    return "งบไม่เกินค่าแรง";
+  }
   if (isOtherExpense(cat)) return "งบไม่เกินอื่นๆ";
   if (isMaterialCost(cat)) return "งบไม่เกินค่าของ";
   return "";
@@ -164,6 +238,7 @@ export function checkCategoryBudgetCap(
   project: SheetRow,
   existingBills: SheetRow[] = []
 ): CategoryBudgetCheckResult {
+  const vendorType = String(row["ร้านค้า/ผู้รับเหมา"] || "").trim();
   const productVal = String(row["สินค้า"] || "").trim();
   const categoryVal = String(row["ประเภท"] || "").trim();
 
@@ -171,91 +246,81 @@ export function checkCategoryBudgetCap(
   let categoryLabel = "";
   let isProductLevel = false;
 
-  // A. หากผู้ใช้เลือกหมวดที่ไม่ใช่ค่าของ (เช่น เครื่องมือ, อื่นๆ, น้ำมัน, ซ่อมรถ, เครื่องจักร, ค่าแรง, พนักงาน)
-  // ให้คุมงบตามหมวดนั้นทันที โดยไม่ไปเช็กสินค้า (เพราะสินค้าเป็นของหมวดค่าของ)
-  const isNonMaterialCategory = Boolean(categoryVal && !isMaterialCost(categoryVal));
+  // 1. หมวดค่าแรง / ผู้รับเหมา (201 - 223)
+  const isLabor = isLaborCost(categoryVal) || vendorType === "ผู้รับเหมา";
+  if (isLabor) {
+    const codeMatch = categoryVal.match(/^(20[1-9]|21[0-9]|22[0-3])/);
+    const subCode = codeMatch ? codeMatch[1] : "";
+    const specificField = subCode ? LABOR_SUB_BUDGET_MAP[subCode] : "";
 
-  const directBudgetField = getCategoryBudgetField(categoryVal);
-  if (isNonMaterialCategory && directBudgetField) {
-    const fieldName = directBudgetField;
-    let limit = toNumber(project?.[fieldName]);
-    if (limit <= 0 && fieldName === "งบไม่เกินอื่นๆ") {
-      limit = toNumber(project?.["งบไม่เกินดำเนินการ"]);
-    } else if (limit <= 0 && fieldName === "งบไม่เกินดำเนินการ") {
-      limit = toNumber(project?.["งบไม่เกินอื่นๆ"]);
-    } else if (limit <= 0 && fieldName === "งบไม่เกินซ่อมรถ") {
-      // หากโครงการไม่ได้ตั้งงบซ่อมรถ ให้ถอยกลับมาคุมที่ "งบไม่เกินค่าของ (ภาพรวม)" เป็นอันดับแรก หรือน้ำมัน/ดำเนินการ
-      if (toNumber(project?.["งบไม่เกินค่าของ"]) > 0) {
-        targetBudgetField = "งบไม่เกินค่าของ";
-        categoryLabel = "ค่าของ (ภาพรวม)";
-        isProductLevel = false;
-      } else {
-        limit = toNumber(project?.["งบไม่เกินน้ำมัน"] || project?.["งบไม่เกินดำเนินการ"]);
-      }
-    }
-    if (!targetBudgetField && limit > 0) {
-      targetBudgetField = fieldName;
-      categoryLabel = categoryVal;
+    if (specificField && getProjectBudgetVal(project, specificField) > 0) {
+      targetBudgetField = specificField;
+      categoryLabel = categoryVal || `201 เตรียมงาน`;
+      isProductLevel = false;
+    } else if (getProjectBudgetVal(project, "งบไม่เกินค่าแรง") > 0) {
+      targetBudgetField = "งบไม่เกินค่าแรง";
+      categoryLabel = categoryVal ? `${categoryVal} (คุมงบรวมค่าแรง)` : "ค่าแรง (ภาพรวม)";
       isProductLevel = false;
     }
   }
 
-  // หากยังไม่มีวงเงินเฉพาะ ให้ตรวจสอบรายสินค้า หรือถอยกลับมาคุมงบภาพรวมค่าของ
+  // 2. หมวดพนักงาน (301)
+  if (!targetBudgetField && (isStaffCost(categoryVal) || vendorType === "พนักงาน")) {
+    if (getProjectBudgetVal(project, "งบไม่เกินพนักงาน") > 0) {
+      targetBudgetField = "งบไม่เกินพนักงาน";
+      categoryLabel = categoryVal || "พนักงาน / ช่างประจำไซต์";
+      isProductLevel = false;
+    } else if (getProjectBudgetVal(project, "งบไม่เกินค่าแรง") > 0) {
+      targetBudgetField = "งบไม่เกินค่าแรง";
+      categoryLabel = "ค่าแรง & บุคลากร (ภาพรวม)";
+      isProductLevel = false;
+    }
+  }
+
+  // 3. หมวดค่าของ & วัสดุ & เครื่องมือ (101 - 123, 501 - 504)
   if (!targetBudgetField) {
-    // B. ตรวจสอบงบประมาณเฉพาะรายสินค้าก่อน (หากมีการระบุสินค้า)
-    if (productVal) {
-      let matchedField = PRODUCT_BUDGET_MAP[productVal];
-      if (!matchedField) {
-        const cleanProd = productVal.replace(/^\d+\s*/, "").trim();
-        matchedField = PRODUCT_BUDGET_MAP[cleanProd];
-      }
-      if (!matchedField) {
-        matchedField = getCostCodeBudgetField(productVal);
-      }
+    const rawCode = (productVal.match(/^(1[0-2][0-9]|50[1-4])/) || categoryVal.match(/^(1[0-2][0-9]|50[1-4])/))?.[1] || "";
+    let specificMaterialField = rawCode ? MATERIAL_SUB_BUDGET_MAP[rawCode] : "";
+    if (!specificMaterialField && productVal) {
+      specificMaterialField = PRODUCT_BUDGET_MAP[productVal] || PRODUCT_BUDGET_MAP[productVal.replace(/^\d+\s*/, "").trim()] || getCostCodeBudgetField(productVal);
+    }
 
-      let fieldLimit = matchedField ? toNumber(project[matchedField]) : 0;
-      if (fieldLimit <= 0 && (matchedField === "งบไม่เกินเสาเข็ม" || matchedField === "งบไม่เกินก่อฉาบ")) {
-        if (toNumber(project["งบไม่เกินปูนทรายหิน"]) > 0) {
-          matchedField = "งบไม่เกินปูนทรายหิน";
-          fieldLimit = toNumber(project["งบไม่เกินปูนทรายหิน"]);
-        }
+    if (specificMaterialField && getProjectBudgetVal(project, specificMaterialField) > 0) {
+      targetBudgetField = specificMaterialField;
+      categoryLabel = productVal || categoryVal || specificMaterialField;
+      isProductLevel = true;
+    } else if (isFuelCost(categoryVal)) {
+      if (getProjectBudgetVal(project, "งบไม่เกินน้ำมัน") > 0) {
+        targetBudgetField = "งบไม่เกินน้ำมัน";
+        categoryLabel = "501. น้ำมัน";
       }
-      if (fieldLimit <= 0 && matchedField === "งบไม่เกินแก้ไขเก็บงาน") {
-        if (toNumber(project["งบไม่เกินวัสดุอื่นๆ"]) > 0) {
-          matchedField = "งบไม่เกินวัสดุอื่นๆ";
-          fieldLimit = toNumber(project["งบไม่เกินวัสดุอื่นๆ"]);
-        }
+    } else if (isRepairCost(categoryVal)) {
+      if (getProjectBudgetVal(project, "งบไม่เกินซ่อมรถ") > 0) {
+        targetBudgetField = "งบไม่เกินซ่อมรถ";
+        categoryLabel = "502. ซ่อมรถ";
       }
-      if (fieldLimit <= 0 && (matchedField === "งบไม่เกินเฟอร์นิเจอร์" || matchedField === "งบไม่เกินตั้งนั่งร้าน")) {
-        if (toNumber(project["งบไม่เกินบิวอิน"]) > 0) {
-          matchedField = "งบไม่เกินบิวอิน";
-          fieldLimit = toNumber(project["งบไม่เกินบิวอิน"]);
-        }
+    } else if (isMachineCost(categoryVal)) {
+      if (getProjectBudgetVal(project, "งบไม่เกินเครื่องจักร") > 0) {
+        targetBudgetField = "งบไม่เกินเครื่องจักร";
+        categoryLabel = "503. เครื่องจักร";
       }
-
-      if (matchedField && fieldLimit > 0) {
-        targetBudgetField = matchedField;
-        categoryLabel = matchedField;
-        isProductLevel = true;
+    } else if (isToolCost(categoryVal)) {
+      if (getProjectBudgetVal(project, "งบไม่เกินเครื่องมือ") > 0) {
+        targetBudgetField = "งบไม่เกินเครื่องมือ";
+        categoryLabel = "504. เครื่องมือ";
+      }
+    } else if (isOtherExpense(categoryVal)) {
+      if (getProjectBudgetVal(project, "งบไม่เกินดำเนินการ") > 0 || getProjectBudgetVal(project, "งบไม่เกินอื่นๆ") > 0) {
+        targetBudgetField = getProjectBudgetVal(project, "งบไม่เกินดำเนินการ") > 0 ? "งบไม่เกินดำเนินการ" : "งบไม่เกินอื่นๆ";
+        categoryLabel = categoryVal || "ดำเนินการ(อื่นๆ)";
       }
     }
 
-    // C. หากไม่ได้ระบุงบเฉพาะสินค้านั้น หรือหมวดไซต์งานไม่ได้ตั้งงบแยก -> Fallback ถอยกลับมาคุมงบภาพรวม ค่าของ
-    const isMaterialOrSite =
-      !categoryVal ||
-      isMaterialCost(categoryVal) ||
-      isFuelCost(categoryVal) ||
-      isRepairCost(categoryVal) ||
-      isMachineCost(categoryVal) ||
-      isToolCost(categoryVal) ||
-      Boolean(productVal);
-
-    if (!targetBudgetField && isMaterialOrSite) {
-      if (toNumber(project["งบไม่เกินค่าของ"]) > 0) {
-        targetBudgetField = "งบไม่เกินค่าของ";
-        categoryLabel = "ค่าของ (ภาพรวม)";
-        isProductLevel = false;
-      }
+    // Fallback สู่ภาพรวมค่าของ
+    if (!targetBudgetField && getProjectBudgetVal(project, "งบไม่เกินค่าของ") > 0) {
+      targetBudgetField = "งบไม่เกินค่าของ";
+      categoryLabel = productVal ? `${productVal} (คุมงบรวมค่าของ)` : "ค่าของ (ภาพรวม)";
+      isProductLevel = false;
     }
   }
 
@@ -277,31 +342,7 @@ export function checkCategoryBudgetCap(
 
   if (!targetBudgetField) return defaultResult;
 
-  let budgetLimit = toNumber(project[targetBudgetField]);
-  if (budgetLimit <= 0) {
-    if (targetBudgetField === "งบไม่เกินอื่นๆ") {
-      budgetLimit = toNumber(project["งบไม่เกินดำเนินการ"]);
-    } else if (targetBudgetField === "งบไม่เกินดำเนินการ") {
-      budgetLimit = toNumber(project["งบไม่เกินอื่นๆ"]);
-    } else if (targetBudgetField === "งบไม่เกินเสาเข็ม" || targetBudgetField === "งบไม่เกินก่อฉาบ") {
-      budgetLimit = toNumber(project["งบไม่เกินปูนทรายหิน"]);
-      if (budgetLimit > 0) targetBudgetField = "งบไม่เกินปูนทรายหิน";
-    } else if (targetBudgetField === "งบไม่เกินแก้ไขเก็บงาน") {
-      budgetLimit = toNumber(project["งบไม่เกินวัสดุอื่นๆ"]);
-      if (budgetLimit > 0) targetBudgetField = "งบไม่เกินวัสดุอื่นๆ";
-    } else if (targetBudgetField === "งบไม่เกินเฟอร์นิเจอร์" || targetBudgetField === "งบไม่เกินตั้งนั่งร้าน") {
-      budgetLimit = toNumber(project["งบไม่เกินบิวอิน"]);
-      if (budgetLimit > 0) targetBudgetField = "งบไม่เกินบิวอิน";
-    } else if (targetBudgetField === "งบไม่เกินซ่อมรถ") {
-      if (toNumber(project["งบไม่เกินค่าของ"]) > 0) {
-        budgetLimit = toNumber(project["งบไม่เกินค่าของ"]);
-        targetBudgetField = "งบไม่เกินค่าของ";
-        categoryLabel = "ค่าของ (ภาพรวม)";
-      } else {
-        budgetLimit = toNumber(project["งบไม่เกินน้ำมัน"] || project["งบไม่เกินดำเนินการ"]);
-      }
-    }
-  }
+  let budgetLimit = getProjectBudgetVal(project, targetBudgetField);
   if (budgetLimit <= 0) return defaultResult;
 
   const currentProjectId = String(project["ID Project"] || "").trim();
@@ -333,12 +374,20 @@ export function checkCategoryBudgetCap(
     }
 
     if (bLineItems.length > 0) {
-      if (isProductLevel) {
+      if (targetBudgetField.startsWith("งบไม่เกินค่าแรง_")) {
+        const subCode = targetBudgetField.replace("งบไม่เกินค่าแรง_", "");
+        for (const it of bLineItems) {
+          const itType = String(it.categoryType || it.type || it.category || "").trim();
+          if (itType.startsWith(subCode) || itType.includes(subCode)) {
+            accumulatedAmount += toNumber(it.amount ?? it.price ?? it.total ?? 0);
+          }
+        }
+      } else if (isProductLevel) {
         for (const it of bLineItems) {
           const itCat = String(it.category || it.name || "").trim();
           const itClean = itCat.replace(/^\d+[\.\s\-]+/, "").trim();
           const targetClean = productVal.replace(/^\d+[\.\s\-]+/, "").trim();
-          const itField = PRODUCT_BUDGET_MAP[itCat] || PRODUCT_BUDGET_MAP[itClean];
+          const itField = PRODUCT_BUDGET_MAP[itCat] || PRODUCT_BUDGET_MAP[itClean] || getCostCodeBudgetField(itCat);
           if (itCat === productVal || itClean === targetClean || (itField && itField === targetBudgetField)) {
             accumulatedAmount += toNumber(it.amount ?? it.price ?? it.total ?? 0);
           }
@@ -346,7 +395,11 @@ export function checkCategoryBudgetCap(
       } else {
         for (const it of bLineItems) {
           const itType = String(it.categoryType || it.type || "").trim();
-          if (getCategoryBudgetField(itType) === targetBudgetField || (!itType && targetBudgetField === "งบไม่เกินค่าของ")) {
+          if (targetBudgetField === "งบไม่เกินค่าแรง") {
+            if (isLaborCost(itType) || toNumber(it.amount) > 0) {
+              accumulatedAmount += toNumber(it.amount ?? it.price ?? it.total ?? 0);
+            }
+          } else if (getCategoryBudgetField(itType) === targetBudgetField || (!itType && targetBudgetField === "งบไม่เกินค่าของ")) {
             accumulatedAmount += toNumber(it.amount ?? it.price ?? it.total ?? 0);
           }
         }
@@ -356,15 +409,20 @@ export function checkCategoryBudgetCap(
       const bCat = String(b["ประเภท"] || "").trim();
 
       let isMatch = false;
-      if (isProductLevel) {
+      if (targetBudgetField.startsWith("งบไม่เกินค่าแรง_")) {
+        const subCode = targetBudgetField.replace("งบไม่เกินค่าแรง_", "");
+        isMatch = Boolean(bCat.startsWith(subCode) || bCat.includes(subCode) || bProd.startsWith(subCode));
+      } else if (isProductLevel) {
+        const rawCode = (productVal.match(/^(1[0-2][0-9]|50[1-4])/) || categoryVal.match(/^(1[0-2][0-9]|50[1-4])/))?.[1] || "";
         isMatch = Boolean(
-          productVal && (
+          (productVal && (
             bProd === productVal ||
             bProd.replace(/^\d+\s*/, "").trim() === productVal.replace(/^\d+\s*/, "").trim()
-          )
+          )) ||
+          (rawCode && (bProd.startsWith(rawCode) || bCat.startsWith(rawCode)))
         );
       } else if (targetBudgetField === "งบไม่เกินค่าของ") {
-        const hasSeparateRepairBudget = toNumber(project["งบไม่เกินซ่อมรถ"]) > 0;
+        const hasSeparateRepairBudget = getProjectBudgetVal(project, "งบไม่เกินซ่อมรถ") > 0;
         const isExcludedFromMaterial = Boolean(
           isFuelCost(bCat) || (hasSeparateRepairBudget && isRepairCost(bCat)) || isMachineCost(bCat) || isToolCost(bCat) || isOtherExpense(bCat) ||
           toNumber(b["น้ำมัน"]) > 0 || (hasSeparateRepairBudget && toNumber(b["ซ่อมรถ"]) > 0) || toNumber(b["เครื่องจักร"]) > 0 || toNumber(b["เครื่องมือ"]) > 0 || toNumber(b["อื่นๆ"]) > 0 ||
@@ -378,9 +436,9 @@ export function checkCategoryBudgetCap(
           (!hasSeparateRepairBudget && (isRepairCost(bCat) || toNumber(b["ซ่อมรถ"]) > 0 || (bProd && isCarRepairProduct(bProd))))
         );
       } else if (targetBudgetField === "งบไม่เกินค่าแรง") {
-        isMatch = Boolean(isLaborCost(bCat) || toNumber(b["ค่าแรง"]) > 0);
+        isMatch = Boolean(isLaborCost(bCat) || toNumber(b["ค่าแรง"]) > 0 || b["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา");
       } else if (targetBudgetField === "งบไม่เกินพนักงาน") {
-        isMatch = Boolean(isStaffCost(bCat) || toNumber(b["พนักงาน"]) > 0);
+        isMatch = Boolean(isStaffCost(bCat) || toNumber(b["พนักงาน"]) > 0 || b["ร้านค้า/ผู้รับเหมา"] === "พนักงาน");
       } else if (targetBudgetField === "งบไม่เกินน้ำมัน") {
         isMatch = Boolean(isFuelCost(bCat) || toNumber(b["น้ำมัน"]) > 0 || (bProd && isFuelProduct(bProd)));
       } else if (targetBudgetField === "งบไม่เกินซ่อมรถ") {
