@@ -29,14 +29,17 @@ const COOKIE_NAME = "costlab_selected_year";
 
 export function YearFilterProvider({
   children,
-  initialYear
+  initialYear,
+  dataYears,
 }: {
   children: React.ReactNode;
   initialYear?: string;
+  /** Array of CE years (e.g. [2025, 2026]) extracted from actual project/bill data */
+  dataYears?: number[];
 }) {
   const currentEnYear = new Date().getFullYear(); // e.g. 2026
 
-  // Generate dynamic list of years: Current + 1, Current, and previous 4 years
+  // Generate dynamic list of years based on actual data years, or fall back to hardcoded range
   const availableYears: YearOption[] = useMemo(() => {
     const list: YearOption[] = [
       {
@@ -48,10 +51,24 @@ export function YearFilterProvider({
       }
     ];
 
-    const startYear = currentEnYear + 1; // e.g. 2027
-    const endYear = currentEnYear - 4;   // e.g. 2022
+    let yearSet: Set<number>;
 
-    for (let y = startYear; y >= endYear; y--) {
+    if (dataYears && dataYears.length > 0) {
+      // Use actual data years + always include the current year
+      yearSet = new Set(dataYears);
+      yearSet.add(currentEnYear);
+    } else {
+      // Fallback: Current + 1, Current, and previous 4 years
+      yearSet = new Set<number>();
+      for (let y = currentEnYear + 1; y >= currentEnYear - 4; y--) {
+        yearSet.add(y);
+      }
+    }
+
+    // Sort descending
+    const sortedYears = Array.from(yearSet).sort((a, b) => b - a);
+
+    for (const y of sortedYears) {
       const th = y + 543;
       list.push({
         value: String(y),
@@ -63,7 +80,7 @@ export function YearFilterProvider({
     }
 
     return list;
-  }, [currentEnYear]);
+  }, [currentEnYear, dataYears]);
 
   // Determine initial selected year
   const defaultYear = String(currentEnYear);
