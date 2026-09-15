@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sendFlexMessage, createBillNotificationFlex, getBankInfoMap, getPeopleMap, getCarsMap } from "@/lib/line/line";
+import { sendFlexMessage, createBillNotificationFlex, getBankInfoMap, getPeopleMap, getCarsMap, getBillFlexGrossAmount } from "@/lib/line/line";
 
 export async function POST(req: NextRequest) {
   try {
@@ -28,10 +28,11 @@ export async function POST(req: NextRequest) {
       getPeopleMap(),
       getCarsMap()
     ]);
+    const billGross = getBillFlexGrossAmount(bill);
     const flex = createBillNotificationFlex(bill, bankInfoMap, peopleMap, carsMap);
     const success = await sendFlexMessage(
       targetGroup,
-      `🧾 รายการแจ้งเตือนการเบิกเงิน: ฿${Number(bill.amount || 0).toLocaleString("th-TH")}`,
+      `🧾 รายการแจ้งเตือนการเบิกเงิน: ฿${billGross.toLocaleString("th-TH")}`,
       flex
     );
 

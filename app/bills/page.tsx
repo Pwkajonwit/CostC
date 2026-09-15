@@ -1,6 +1,7 @@
 import { TABLES } from "@/lib/config";
 import { BillsDashboardClient } from "@/components/dashboards/BillsDashboardClient";
 import { hydrateBillRows } from "@/lib/formulas";
+import { hydrateDataRows } from "@/lib/project-summary";
 import { getRows } from "@/lib/db";
 import { cookies } from "next/headers";
 import { formatBillConditions } from "@/lib/bills/bill-status";
@@ -45,11 +46,13 @@ export default async function BillsPage({ searchParams }: BillsPageProps) {
   const authEmpId = cookieStore.get("auth_employee_id")?.value || "";
   const authName = cookieStore.get("auth_name")?.value || "";
 
-  const [allRows, peopleRows, storeRows] = await Promise.all([
+  const [rawRows, peopleRows, storeRows] = await Promise.all([
     safeRows(TABLES.DATA),
     safeRows(TABLES.PEOPLE),
     safeRows(TABLES.STORE),
   ]);
+
+  const allRows = hydrateDataRows(rawRows);
 
   const matchedUser = findMemberInPeopleRows(peopleRows, authEmpId);
   const userPerms = matchedUser ? extractMemberPermissions(matchedUser) : null;

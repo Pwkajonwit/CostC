@@ -7,7 +7,7 @@ import { PRIMARY_VIEWS, TABLE_KEYS, TABLES, VIEW_COLUMNS } from "@/lib/config";
 import { uploadTableImage } from "@/lib/utils/drive";
 import { applyBillFormulas, applyContractFormulas, applyProjectFormulas } from "@/lib/formulas";
 import { getFormSchema } from "@/lib/schemas";
-import { isVatActive, isDeductActive, parseDeductPercent, parseCreditDays } from "@/lib/project-summary";
+import { isVatActive, isDeductActive, parseDeductPercent, parseCreditDays, parseBillItems } from "@/lib/project-summary";
 import { appendAuditLog, appendRow, bulkAppendRows, deleteRows, getRows, getSystemOptions, invalidateTableCache, updateRow } from "@/lib/db";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 import { getNextBillSequence, syncContractWorkPaidAmount } from "@/lib/supabase/supabase-db";
@@ -647,11 +647,16 @@ function actorFromRequest(request: NextRequest) {
 
 function sanitizeBySchema(row: SheetRow, tableName: string) {
   const schema = getFormSchema(tableName);
+  const items = (tableName === TABLES.DATA || tableName === "Data" || tableName === "bills") ? parseBillItems(row) : [];
+  const hasMultiItems = items.length > 0;
+  const amountCols = ["ค่าของ", "ค่าแรง", "พนักงาน", "น้ำมัน", "ซ่อมรถ", "เครื่องจักร", "เครื่องมือ", "อื่นๆ"];
+
   schema.forEach(field => {
     if (field.name === "สินค้า" && typeof row[field.name] === "string") {
       row[field.name] = (row[field.name] as string).replace(/^\d+\s*/, "");
     }
     if (field.type === "Hidden") return;
+    if (hasMultiItems && amountCols.includes(field.name) && hasRowValue(row[field.name])) return;
     if (isFieldVisible(field, row)) return;
     row[field.name] = "";
   });

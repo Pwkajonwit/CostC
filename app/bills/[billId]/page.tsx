@@ -28,8 +28,16 @@ export default async function BillDetailPage({ params }: BillDetailPageProps) {
     getRows(TABLES.COMPANY).catch(() => []),
   ]);
 
-  const bill = rawDataRows.find((row) => billKey(row) === decodedBillId || String(row._sheetRow || "") === decodedBillId || String(row.id || "") === decodedBillId);
-  if (!bill) notFound();
+  const rawBill = rawDataRows.find((row) => billKey(row) === decodedBillId || String(row._sheetRow || "") === decodedBillId || String(row.id || "") === decodedBillId);
+  if (!rawBill) notFound();
+
+  const [bill] = await hydrateBillRows([rawBill], {
+    projects: rawProjectRows,
+    stores: storeRows,
+    contracts: rawContractRows,
+    contractors: contractorRows,
+    people: peopleRows,
+  });
 
   const documentData = await getBillDocumentData(bill, {
     projects: rawProjectRows,

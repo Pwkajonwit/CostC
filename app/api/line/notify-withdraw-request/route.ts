@@ -13,7 +13,8 @@ import {
   createWithdrawOwnerFlex,
   createWithdrawApproverFlex,
   createWithdrawCompletedRequesterFlex,
-  createDailyTransferSummaryFlex
+  createDailyTransferSummaryFlex,
+  getBillFlexGrossAmount
 } from "@/lib/line/line";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 
@@ -55,7 +56,7 @@ export async function POST(req: NextRequest) {
       getCarsMap()
     ]);
     const targetRole = body.targetRole || "requester";
-    const totalAmount = bills.reduce((sum: number, b: any) => sum + Number(b["ยอดเงิน"] || b.amount || 0), 0);
+    const totalAmount = bills.reduce((sum: number, b: any) => sum + getBillFlexGrossAmount(b), 0);
     const amountStr = totalAmount.toLocaleString("th-TH");
 
     if (targetRole === "transfer_summary") {

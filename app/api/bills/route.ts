@@ -5,7 +5,7 @@ import { validateBillRelations } from "@/lib/bills/bill-validation";
 import { uploadBillImage } from "@/lib/utils/drive";
 import { applyBillFormulas } from "@/lib/formulas";
 import { getFormSchema } from "@/lib/schemas";
-import { isVatActive, parseDeductPercent, parseCreditDays } from "@/lib/project-summary";
+import { isVatActive, parseDeductPercent, parseCreditDays, parseBillItems } from "@/lib/project-summary";
 import { appendAuditLog, appendRow, getSystemOptions, invalidateTableCache } from "@/lib/db";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 import { getNextBillSequence, mapSupabaseRowToSheetRow } from "@/lib/supabase/supabase-db";
@@ -306,11 +306,16 @@ function ensureBillVendorType(row: SheetRow) {
 
 function sanitizeBySchema(row: SheetRow, tableName: string) {
   const schema = getFormSchema(tableName);
+  const items = (tableName === TABLES.DATA || tableName === "Data" || tableName === "bills") ? parseBillItems(row) : [];
+  const hasMultiItems = items.length > 0;
+  const amountCols = ["ค่าของ", "ค่าแรง", "พนักงาน", "น้ำมัน", "ซ่อมรถ", "เครื่องจักร", "เครื่องมือ", "อื่นๆ"];
+
   schema.forEach(field => {
     if (field.name === "สินค้า" && typeof row[field.name] === "string") {
       row[field.name] = (row[field.name] as string).replace(/^\d+\s*/, "");
     }
     if (field.type === "Hidden") return;
+    if (hasMultiItems && amountCols.includes(field.name) && hasValue(row[field.name])) return;
     if (isFieldVisible(field, row)) return;
     row[field.name] = "";
   });
