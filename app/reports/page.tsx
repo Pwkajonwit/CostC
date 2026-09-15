@@ -1,0 +1,66 @@
+import { TABLES } from "@/lib/config";
+import { getRows } from "@/lib/db";
+import { isCommittedBill } from "@/lib/bills/bill-status";
+import { ReportsDashboardClient } from "@/components/dashboards/ReportsDashboardClient";
+
+import { cookies } from "next/headers";
+import { getRowYear } from "@/lib/utils/dates";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+export default async function ReportsPage() {
+  const [dataRows, projectRows, storeRows, contractorRows, contractWorkRows, peopleRows] = await Promise.all([
+    getRows(TABLES.DATA),
+    getRows(TABLES.PROJECT),
+    getRows(TABLES.STORE),
+    getRows(TABLES.CONTRACTOR),
+    getRows(TABLES.CONTRACT_WORK),
+    getRows(TABLES.PEOPLE),
+  ]);
+
+  const cookieStore = await cookies();
+  const selectedYear = cookieStore.get("costlab_selected_year")?.value;
+
+  const validDataRows = dataRows.filter(isCommittedBill);
+  const yearFilteredDataRows = (!selectedYear || selectedYear === "all")
+    ? validDataRows
+    : validDataRows.filter((r) => {
+        const yr = getRowYear(r);
+        return !yr || String(yr) === String(selectedYear);
+      });
+
+  const yearFilteredContractWorks = (!selectedYear || selectedYear === "all")
+    ? contractWorkRows
+    : contractWorkRows.filter((r) => {
+        const yr = getRowYear(r);
+        return !yr || String(yr) === String(selectedYear);
+      });
+
+  // Trim storeRows and contractorRows to only fields needed for dropdowns and name resolution
+  // to avoid serializing 1,100 full rows of metadata into the HTML payload
+  const lightStoreRows = storeRows
+    .map((s) => ({
+      "ชื่อร้านค้า": String(s["ชื่อร้านค้า"] || s.name || "").trim(),
+    }))
+    .filter((s) => s["ชื่อร้านค้า"]);
+
+  const lightContractorRows = contractorRows.map((c) => ({
+    "id_Contractor": String(c["id_Contractor"] || c.id || c["รหัส"] || c["ID"] || "").trim(),
+    "ชื่อเล่น": String(c["ชื่อเล่น"] || "").trim(),
+    "ชื่อ-นามสกุล": String(c["ชื่อ-นามสกุล"] || "").trim(),
+    "รายละเอียดงาน": String(c["รายละเอียดงาน"] || "").trim(),
+  }));
+
+  return (
+    <ReportsDashboardClient
+      initialDataRows={yearFilteredDataRows}
+      initialProjectRows={projectRows}
+      initialStoreRows={lightStoreRows}
+      initialContractorRows={lightContractorRows}
+      initialContractWorkRows={yearFilteredContractWorks}
+      initialPeopleRows={peopleRows}
+    />
+  );
+}
+
