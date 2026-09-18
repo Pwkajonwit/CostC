@@ -259,7 +259,8 @@ export function checkCategoryBudgetCap(
       isProductLevel = false;
     } else if (getProjectBudgetVal(project, "งบไม่เกินค่าแรง") > 0) {
       targetBudgetField = "งบไม่เกินค่าแรง";
-      categoryLabel = categoryVal ? `${categoryVal} (คุมงบรวมค่าแรง)` : "ค่าแรง (ภาพรวม)";
+      const isOverall = !categoryVal || categoryVal.includes("ทั้งหมด") || categoryVal.includes("ภาพรวม") || categoryVal === "2.ค่าแรง" || categoryVal === "ค่าแรง";
+      categoryLabel = isOverall ? "งบค่าแรงทั้งหมด" : `${categoryVal} (คุมงบรวมค่าแรง)`;
       isProductLevel = false;
     }
   }
@@ -373,6 +374,9 @@ export function checkCategoryBudgetCap(
       } catch {}
     }
 
+    const bVendorType = String(b["ร้านค้า/ผู้รับเหมา"] || b.vendor_type || "").trim();
+    const bIsContractor = bVendorType === "ผู้รับเหมา" || Boolean(b["ผู้รับเหมา"]) || Boolean(b.contractor_id);
+
     if (bLineItems.length > 0) {
       if (targetBudgetField.startsWith("งบไม่เกินค่าแรง_")) {
         const subCode = targetBudgetField.replace("งบไม่เกินค่าแรง_", "");
@@ -384,22 +388,30 @@ export function checkCategoryBudgetCap(
         }
       } else if (isProductLevel) {
         for (const it of bLineItems) {
+          const itType = String(it.categoryType || it.type || "").trim();
+          if (bIsContractor || isLaborCost(itType)) continue;
+
           const itCat = String(it.category || it.name || "").trim();
           const itClean = itCat.replace(/^\d+[\.\s\-]+/, "").trim();
           const targetClean = productVal.replace(/^\d+[\.\s\-]+/, "").trim();
           const itField = PRODUCT_BUDGET_MAP[itCat] || PRODUCT_BUDGET_MAP[itClean] || getCostCodeBudgetField(itCat);
-          if (itCat === productVal || itClean === targetClean || (itField && itField === targetBudgetField)) {
+          if (itCat === productVal || (itClean && itClean === targetClean) || (itField && itField === targetBudgetField)) {
             accumulatedAmount += toNumber(it.amount ?? it.price ?? it.total ?? 0);
           }
         }
       } else {
         for (const it of bLineItems) {
           const itType = String(it.categoryType || it.type || "").trim();
+          const itCat = String(it.category || "").trim();
           if (targetBudgetField === "งบไม่เกินค่าแรง") {
-            if (isLaborCost(itType) || toNumber(it.amount) > 0) {
+            if (bIsContractor || isLaborCost(itType) || isLaborCost(itCat)) {
               accumulatedAmount += toNumber(it.amount ?? it.price ?? it.total ?? 0);
             }
-          } else if (getCategoryBudgetField(itType) === targetBudgetField || (!itType && targetBudgetField === "งบไม่เกินค่าของ")) {
+          } else if (targetBudgetField === "งบไม่เกินค่าของ") {
+            if (!bIsContractor && (isMaterialCost(itType) || isMaterialCost(itCat) || (!itType && !isLaborCost(itCat)))) {
+              accumulatedAmount += toNumber(it.amount ?? it.price ?? it.total ?? 0);
+            }
+          } else if (getCategoryBudgetField(itType) === targetBudgetField || getCategoryBudgetField(itCat) === targetBudgetField) {
             accumulatedAmount += toNumber(it.amount ?? it.price ?? it.total ?? 0);
           }
         }
@@ -409,22 +421,27 @@ export function checkCategoryBudgetCap(
       const bCat = String(b["ประเภท"] || "").trim();
 
       let isMatch = false;
+      let matchedAmt = 0;
       if (targetBudgetField.startsWith("งบไม่เกินค่าแรง_")) {
         const subCode = targetBudgetField.replace("งบไม่เกินค่าแรง_", "");
         isMatch = Boolean(bCat.startsWith(subCode) || bCat.includes(subCode) || bProd.startsWith(subCode));
+        if (isMatch) matchedAmt = toNumber(b["ค่าแรง"] || b["ยอดเงิน"] || 0);
       } else if (isProductLevel) {
-        const rawCode = (productVal.match(/^(1[0-2][0-9]|50[1-4])/) || categoryVal.match(/^(1[0-2][0-9]|50[1-4])/))?.[1] || "";
-        isMatch = Boolean(
-          (productVal && (
-            bProd === productVal ||
-            bProd.replace(/^\d+\s*/, "").trim() === productVal.replace(/^\d+\s*/, "").trim()
-          )) ||
-          (rawCode && (bProd.startsWith(rawCode) || bCat.startsWith(rawCode)))
-        );
+        if (!bIsContractor && !isLaborCost(bCat)) {
+          const rawCode = (productVal.match(/^(1[0-2][0-9]|50[1-4])/) || categoryVal.match(/^(1[0-2][0-9]|50[1-4])/))?.[1] || "";
+          isMatch = Boolean(
+            (productVal && (
+              bProd === productVal ||
+              bProd.replace(/^\d+\s*/, "").trim() === productVal.replace(/^\d+\s*/, "").trim()
+            )) ||
+            (rawCode && (bProd.startsWith(rawCode) || bCat.startsWith(rawCode)))
+          );
+          if (isMatch) matchedAmt = toNumber(b["ค่าของ"] || b["ยอดเงิน"] || 0);
+        }
       } else if (targetBudgetField === "งบไม่เกินค่าของ") {
         const hasSeparateRepairBudget = getProjectBudgetVal(project, "งบไม่เกินซ่อมรถ") > 0;
         const isExcludedFromMaterial = Boolean(
-          isFuelCost(bCat) || (hasSeparateRepairBudget && isRepairCost(bCat)) || isMachineCost(bCat) || isToolCost(bCat) || isOtherExpense(bCat) ||
+          bIsContractor || isFuelCost(bCat) || (hasSeparateRepairBudget && isRepairCost(bCat)) || isMachineCost(bCat) || isToolCost(bCat) || isOtherExpense(bCat) ||
           toNumber(b["น้ำมัน"]) > 0 || (hasSeparateRepairBudget && toNumber(b["ซ่อมรถ"]) > 0) || toNumber(b["เครื่องจักร"]) > 0 || toNumber(b["เครื่องมือ"]) > 0 || toNumber(b["อื่นๆ"]) > 0 ||
           (bProd && (
             isFuelProduct(bProd) || isMachineProduct(bProd) || (hasSeparateRepairBudget && isCarRepairProduct(bProd)) || isToolProduct(bProd) ||
@@ -435,30 +452,44 @@ export function checkCategoryBudgetCap(
           isMaterialCost(bCat) || (!bCat && bProd) || toNumber(b["ค่าของ"]) > 0 ||
           (!hasSeparateRepairBudget && (isRepairCost(bCat) || toNumber(b["ซ่อมรถ"]) > 0 || (bProd && isCarRepairProduct(bProd))))
         );
+        if (isMatch) {
+          matchedAmt = toNumber(b["ค่าของ"]) > 0 ? toNumber(b["ค่าของ"]) : getBillRowAmount(b);
+        }
       } else if (targetBudgetField === "งบไม่เกินค่าแรง") {
-        isMatch = Boolean(isLaborCost(bCat) || toNumber(b["ค่าแรง"]) > 0 || b["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา");
+        isMatch = Boolean(bIsContractor || isLaborCost(bCat) || toNumber(b["ค่าแรง"]) > 0);
+        if (isMatch) {
+          matchedAmt = toNumber(b["ค่าแรง"]) > 0 ? toNumber(b["ค่าแรง"]) : (bIsContractor ? toNumber(b["ยอดเงิน"] || 0) : 0);
+        }
       } else if (targetBudgetField === "งบไม่เกินพนักงาน") {
-        isMatch = Boolean(isStaffCost(bCat) || toNumber(b["พนักงาน"]) > 0 || b["ร้านค้า/ผู้รับเหมา"] === "พนักงาน");
+        isMatch = Boolean(isStaffCost(bCat) || toNumber(b["พนักงาน"]) > 0 || bVendorType === "พนักงาน");
+        if (isMatch) {
+          matchedAmt = toNumber(b["พนักงาน"]) > 0 ? toNumber(b["พนักงาน"]) : toNumber(b["ยอดเงิน"] || 0);
+        }
       } else if (targetBudgetField === "งบไม่เกินน้ำมัน") {
         isMatch = Boolean(isFuelCost(bCat) || toNumber(b["น้ำมัน"]) > 0 || (bProd && isFuelProduct(bProd)));
+        if (isMatch) matchedAmt = toNumber(b["น้ำมัน"]) > 0 ? toNumber(b["น้ำมัน"]) : toNumber(b["ยอดเงิน"] || 0);
       } else if (targetBudgetField === "งบไม่เกินซ่อมรถ") {
         isMatch = Boolean(isRepairCost(bCat) || toNumber(b["ซ่อมรถ"]) > 0 || (bProd && isCarRepairProduct(bProd)));
+        if (isMatch) matchedAmt = toNumber(b["ซ่อมรถ"]) > 0 ? toNumber(b["ซ่อมรถ"]) : toNumber(b["ยอดเงิน"] || 0);
       } else if (targetBudgetField === "งบไม่เกินเครื่องจักร") {
         isMatch = Boolean(isMachineCost(bCat) || toNumber(b["เครื่องจักร"]) > 0 || (bProd && isMachineProduct(bProd)));
+        if (isMatch) matchedAmt = toNumber(b["เครื่องจักร"]) > 0 ? toNumber(b["เครื่องจักร"]) : toNumber(b["ยอดเงิน"] || 0);
       } else if (targetBudgetField === "งบไม่เกินเครื่องมือ") {
         isMatch = Boolean(isToolCost(bCat) || toNumber(b["เครื่องมือ"]) > 0 || (bProd && isToolProduct(bProd)) || (b["ชื่อเครื่องมือ"] && String(b["ชื่อเครื่องมือ"]).trim() !== ""));
+        if (isMatch) matchedAmt = toNumber(b["เครื่องมือ"]) > 0 ? toNumber(b["เครื่องมือ"]) : toNumber(b["ยอดเงิน"] || 0);
       } else if (targetBudgetField === "งบไม่เกินอื่นๆ" || targetBudgetField === "งบไม่เกินดำเนินการ") {
         isMatch = Boolean(
           isOtherExpense(bCat) || toNumber(b["อื่นๆ"]) > 0 ||
           (bProd && (bProd === "200 ดำเนินการ(อื่นๆ)" || bProd.includes("ดำเนินการ") || bProd.startsWith("200") || bProd.startsWith("123") || bProd.startsWith("223")))
         );
+        if (isMatch) matchedAmt = toNumber(b["อื่นๆ"]) > 0 ? toNumber(b["อื่นๆ"]) : toNumber(b["ยอดเงิน"] || 0);
       } else {
         isMatch = Boolean(categoryVal && (bCat === categoryVal || bCat.replace(/^\d+\.\s*/, "") === categoryVal.replace(/^\d+\.\s*/, "")));
+        if (isMatch) matchedAmt = getBillRowAmount(b);
       }
 
       if (isMatch) {
-        const amt = getBillRowAmount(b);
-        accumulatedAmount += amt;
+        accumulatedAmount += matchedAmt;
       }
     }
   }

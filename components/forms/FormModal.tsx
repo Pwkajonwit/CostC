@@ -236,8 +236,10 @@ function MultiLineItemsBuilder({
   values?: Record<string, string>;
   existingBills?: SheetRow[];
 }) {
-  const isSubBill = String(values?.["บิล"] || "").includes("ย่อย");
+  const isContractor = values?.["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา";
+  const isSubBill = !isContractor && String(values?.["บิล"] || "").includes("ย่อย");
   const totalSum = items.reduce((s, i) => s + (Number(i.amount) || 0), 0);
+  const [showNoteMap, setShowNoteMap] = useState<Record<string, boolean>>({});
 
   const matchedProject = useMemo(() => {
     return projectRows.find(p => {
@@ -297,9 +299,9 @@ function MultiLineItemsBuilder({
 
   function renderItemRow(item: MultiLineItem, idx: number, canDelete: boolean) {
     let itemBudget: ReturnType<typeof checkCategoryBudgetCap> | null = null;
-    if (matchedProject && (item.category || item.categoryType)) {
-      const prod = String(item.category || "").trim();
-      const type = String(item.categoryType || item.category || "101 เตรียมงาน").trim();
+    const prod = String(item.category || "").trim();
+    if (matchedProject && prod) {
+      const type = String(item.categoryType || prod || (isContractor ? "201 เตรียมงาน" : "101 เตรียมงาน")).trim();
       const prodAmtSum = items
         .filter(i => (i.category || "").trim() === prod)
         .reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
@@ -307,10 +309,12 @@ function MultiLineItemsBuilder({
 
       itemBudget = checkCategoryBudgetCap({
         "ID Project": projectId,
+        "ร้านค้า/ผู้รับเหมา": values?.["ร้านค้า/ผู้รับเหมา"] || "",
         "สินค้า": prod,
-        "ประเภท": type,
+        "ประเภท": isContractor ? (prod || type) : type,
         "ยอดเงิน": amt,
-        "ค่าของ": isMaterialCost(type) ? amt : "",
+        "ค่าของ": (!isContractor && isMaterialCost(type)) ? amt : "",
+        "ค่าแรง": (isLaborCost(type) || isContractor) ? amt : "",
         "น้ำมัน": isFuelCost(type) ? amt : "",
         "ซ่อมรถ": isRepairCost(type) ? amt : "",
         "เครื่องจักร": isMachineCost(type) ? amt : "",
@@ -319,71 +323,39 @@ function MultiLineItemsBuilder({
       }, matchedProject, existingBills);
     }
 
-    const hasSubBudget = Boolean(itemBudget?.hasBudgetCap && (itemBudget.isProductLevel || itemBudget.targetBudgetField !== "งบไม่เกินค่าของ"));
+    const hasBudgetCap = Boolean(itemBudget?.hasBudgetCap);
     const isOver = Boolean(itemBudget?.isOverBudget);
 
     return (
       <div
         key={item.id}
         className={`bg-white border rounded-lg p-2 sm:px-2.5 sm:py-2 flex flex-col sm:flex-row items-stretch sm:items-start gap-2 shadow-2xs transition-colors ${
-          isOver ? "border-rose-300 bg-rose-50/20" : "border-slate-200/90 hover:border-slate-300"
+          isOver && Number(item.amount) > 0 ? "border-rose-300 bg-rose-50/20" : "border-slate-200/90 hover:border-slate-300"
         }`}
       >
         <span className="font-mono text-xs text-slate-400 font-semibold w-5 shrink-0 text-center hidden sm:block pt-2">
           {idx + 1}
         </span>
 
-        {/* Product Selector with Category Badge & Budget Indicator */}
+        {/* Product / Labor Category Selector */}
         <div className="w-full sm:w-48 md:w-56 shrink-0">
           <SearchableRefSelect
             name={`product_category_${item.id}`}
             value={item.category}
             options={productOptions}
             readOnly={false}
-            placeholder={`เลือกสินค้า (${idx + 1})...`}
-            onChange={(val) => onUpdate(item.id, "category", val)}
+            placeholder={isContractor ? `เลือกหมวดงานค่าแรง (${idx + 1})...` : `เลือกสินค้า (${idx + 1})...`}
+            onChange={(val) => {
+              onUpdate(item.id, "category", val);
+              if (isContractor) {
+                onUpdate(item.id, "categoryType", val);
+              }
+            }}
+            creatable
           />
-
-          {hasSubBudget && itemBudget ? (
-            <div
-              className={`mt-1 w-full h-6 px-2 rounded-md border flex items-center justify-between text-[11px] font-sans shadow-2xs transition-all ${
-                itemBudget.isOverBudget
-                  ? "bg-rose-50 border-rose-300 text-rose-950 animate-pulse"
-                  : itemBudget.isWarning
-                  ? "bg-amber-50 border-amber-300 text-amber-950"
-                  : "bg-sky-50/90 border-sky-200/90 text-sky-950"
-              }`}
-            >
-              <div className="flex items-center gap-1 min-w-0 truncate">
-                <span
-                  className={`text-[10px] font-semibold px-1.5 py-0.2 rounded shrink-0 ${
-                    itemBudget.isOverBudget
-                      ? "bg-rose-200 text-rose-800"
-                      : itemBudget.isWarning
-                      ? "bg-amber-200 text-amber-800"
-                      : "bg-sky-200/90 text-sky-800"
-                  }`}
-                >
-                  {itemBudget.percentUsedAfterBill}%
-                </span>
-                <span className="text-[10px] text-slate-600 truncate">
-                  {itemBudget.accumulatedAmount > 0
-                    ? `เบิกแล้ว ${money(itemBudget.accumulatedAmount)} (${itemBudget.percentUsedBeforeBill}%) | งบ ${money(itemBudget.budgetLimit)}`
-                    : `งบ ${money(itemBudget.budgetLimit)}`}
-                </span>
-              </div>
-              <span className="font-semibold shrink-0 text-[11px] ml-1">
-                {itemBudget.remainingAfterBill < 0 ? (
-                  <span className="text-rose-700 font-bold">เกินงบ {money(Math.abs(itemBudget.remainingAfterBill))} ฿</span>
-                ) : (
-                  <span className="text-sky-800">คงเหลือ {money(itemBudget.remainingAfterBill)} ฿</span>
-                )}
-              </span>
-            </div>
-          ) : null}
         </div>
 
-        {/* Detail / Contextual Dropdown */}
+        {/* Detail / Contextual Dropdown or Budget Control / Work Description Input */}
         <div className="flex-1 min-w-0">
           {isFuelCost(item.categoryType) ? (
             <SearchableRefSelect
@@ -434,10 +406,95 @@ function MultiLineItemsBuilder({
                 onUpdate(item.id, "detail", val);
               }}
             />
-          ) : (
-            <div className="h-10 sm:h-9 flex items-center justify-center text-xs text-slate-300 select-none bg-slate-50/50 rounded-lg border border-dashed border-slate-200">
-              -
+          ) : hasBudgetCap && itemBudget ? (
+            <div className="w-full space-y-1">
+              <div
+                className={`w-full h-10 sm:h-9 px-2.5 rounded-lg border flex items-center justify-between text-xs font-sans shadow-2xs transition-all ${
+                  itemBudget.isOverBudget
+                    ? "bg-rose-50 border-rose-300 text-rose-950"
+                    : itemBudget.isWarning
+                    ? "bg-amber-50 border-amber-300 text-amber-950"
+                    : "bg-sky-50/90 border-sky-200/90 text-sky-950"
+                }`}
+              >
+                <div className="flex items-center gap-1.5 min-w-0 flex-1 truncate">
+                  <span
+                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
+                      itemBudget.isOverBudget
+                        ? "bg-rose-200 text-rose-900"
+                        : itemBudget.isWarning
+                        ? "bg-amber-200 text-amber-900"
+                        : "bg-sky-200 text-sky-900"
+                    }`}
+                  >
+                    {itemBudget.percentUsedAfterBill}%
+                  </span>
+                  <span className="text-[11px] text-slate-700 truncate font-medium">
+                    {itemBudget.accumulatedAmount > 0
+                      ? `เบิกแล้ว ${money(itemBudget.accumulatedAmount)} / งบ ${money(itemBudget.budgetLimit)} ฿`
+                      : `งบ ${money(itemBudget.budgetLimit)} ฿`}
+                  </span>
+                </div>
+
+                <div className="shrink-0 font-semibold text-xs ml-2 flex items-center gap-1.5">
+                  {itemBudget.remainingAfterBill < 0 ? (
+                    <span className="text-rose-700 font-bold flex items-center gap-1">
+                      <AlertCircle size={13} className="text-rose-600 inline shrink-0" />
+                      <span>เกินงบ {money(Math.abs(itemBudget.remainingAfterBill))} ฿</span>
+                    </span>
+                  ) : (
+                    <span className="text-emerald-700 flex items-center gap-1">
+                      <CheckCircle2 size={13} className="text-emerald-600 inline shrink-0" />
+                      <span>คงเหลือ {money(itemBudget.remainingAfterBill)} ฿</span>
+                    </span>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const currentShow = showNoteMap[item.id] ?? Boolean(item.detail);
+                      setShowNoteMap(prev => ({ ...prev, [item.id]: !currentShow }));
+                    }}
+                    className={`p-1 rounded hover:bg-black/5 transition cursor-pointer text-[11px] flex items-center gap-0.5 ${
+                      item.detail ? "text-slate-800 font-medium" : "text-slate-400 hover:text-slate-600"
+                    }`}
+                    title={item.detail ? `งวดงาน: ${item.detail}` : "ระบุงวดงาน / รายละเอียดเพิ่มเติม"}
+                  >
+                    <FileText size={13} />
+                    {item.detail ? <span className="max-w-[70px] truncate text-[10px]">({item.detail})</span> : null}
+                  </button>
+                </div>
+              </div>
+
+              {(showNoteMap[item.id] || (item.detail && showNoteMap[item.id] !== false)) ? (
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    value={item.detail || ""}
+                    placeholder="ระบุงวดงาน / รายละเอียดงาน (เช่น งวดที่ 1)..."
+                    onChange={(e) => onUpdate(item.id, "detail", e.target.value)}
+                    className="w-full h-7.5 bg-white border border-slate-300 text-xs text-slate-800 px-2 rounded-md focus:outline-none focus:border-slate-800 transition"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNoteMap(prev => ({ ...prev, [item.id]: false }))}
+                    className="p-1 text-slate-400 hover:text-slate-600 text-xs cursor-pointer shrink-0"
+                    title="ซ่อนช่องงวดงาน"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              ) : null}
             </div>
+          ) : (
+            <input
+              type="text"
+              value={item.detail || ""}
+              placeholder={isContractor ? "รายละเอียดงาน / งวดงาน (เช่น งวดที่ 1 เทเสาเข็ม)..." : "รายละเอียดเพิ่มเติม (ถ้ามี)..."}
+              onChange={(e) => onUpdate(item.id, "detail", e.target.value)}
+              className="w-full h-10 sm:h-9 bg-slate-50 border border-slate-300 text-xs text-slate-800 px-2.5 rounded-lg focus:outline-none focus:bg-white focus:border-slate-800 transition"
+            />
           )}
         </div>
 
@@ -450,10 +507,10 @@ function MultiLineItemsBuilder({
             onChange={(e) => onUpdate(item.id, "amount", e.target.value)}
             placeholder="0.00"
             className={`w-full h-10 sm:h-9 bg-white border rounded-lg text-xs sm:text-sm px-2.5 py-1.5 focus:outline-none focus:border-slate-800 text-right font-semibold text-slate-900 placeholder:text-slate-400 ${
-              isOver ? "border-rose-400 bg-rose-50/30 text-rose-950" : "border-slate-300"
+              isOver && Number(item.amount) > 0 ? "border-rose-400 bg-rose-50/30 text-rose-950" : "border-slate-300"
             }`}
           />
-          {isOver ? (
+          {isOver && Number(item.amount) > 0 ? (
             <span className="absolute -top-2 right-2 px-1.5 py-0.2 bg-rose-600 text-white text-[9px] font-bold rounded shadow-2xs">
               เกินงบ
             </span>
@@ -481,7 +538,9 @@ function MultiLineItemsBuilder({
         <div className="flex items-center gap-2">
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block ring-4 ring-emerald-100" />
           <span className="font-semibold text-xs text-slate-800">
-            {isSubBill ? "รายการสินค้า / จัดกลุ่มตามร้านค้า (บิลย่อย)" : "รายการสินค้า / ค่าใช้จ่ายในบิล"}
+            {isContractor
+              ? "รายการค่าแรง / งานงวดผู้รับเหมา"
+              : (isSubBill ? "รายการสินค้า / จัดกลุ่มตามร้านค้า (บิลย่อย)" : "รายการสินค้า / ค่าใช้จ่ายในบิล")}
           </span>
           <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100/70 text-emerald-800">
             {isSubBill ? `${storeGroups.length} ร้านค้า | ` : ""}{items.length} รายการ
@@ -586,8 +645,8 @@ function MultiLineItemsBuilder({
         <div className="space-y-2">
           <div className="hidden sm:flex items-center gap-2 px-2 text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
             <span className="w-5 text-center shrink-0">#</span>
-            <span className="w-48 sm:w-56 shrink-0">สินค้า / หมวด</span>
-            <span className="flex-1 min-w-0">ทะเบียนรถ / รายการ (ถ้ามี)</span>
+            <span className="w-48 sm:w-56 shrink-0">{isContractor ? "หมวดงานค่าแรง" : "สินค้า / หมวด"}</span>
+            <span className="flex-1 min-w-0">{isContractor ? "สถานะคุมงบประมาณ / งวดงาน" : "ทะเบียนรถ / รายการ (ถ้ามี)"}</span>
             <span className="w-28 sm:w-32 text-right shrink-0 pr-1">ยอดเงิน (฿)</span>
             <span className="w-8 shrink-0"></span>
           </div>
@@ -601,7 +660,7 @@ function MultiLineItemsBuilder({
               className="h-9 px-3.5 rounded-lg bg-emerald-50 text-emerald-800 hover:bg-emerald-100 hover:text-emerald-950 font-semibold text-xs flex items-center gap-1.5 cursor-pointer transition-colors border border-emerald-200/80 shadow-2xs shrink-0"
             >
               <Plus size={14} className="shrink-0 text-emerald-700" />
-              <span>เพิ่มรายการ</span>
+              <span>{isContractor ? "เพิ่มรายการงานค่าแรง" : "เพิ่มรายการ"}</span>
             </button>
           </div>
         </div>
@@ -732,11 +791,15 @@ export function FormModal({
   const formBodyRef = useRef<HTMLDivElement>(null);
 
   const productOptions = useMemo(() => {
+    const isContractor = values["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา";
+    if (isContractor) {
+      return ALL_CONTRACTOR_CATEGORIES.map((c: string) => ({ label: c, value: c }));
+    }
     const field = activeForm?.schema.find(f => f.name === "สินค้า");
     const rawList: string[] = Array.isArray(field?.values) ? field.values : [];
     if (rawList.length > 0) return rawList.map((v: string) => ({ label: String(v), value: String(v) }));
     return (activeForm?.refOptions?.["สินค้า"] || []).map(opt => ({ label: String(opt.label || opt.value || ""), value: String(opt.value || "") }));
-  }, [activeForm]);
+  }, [activeForm, values["ร้านค้า/ผู้รับเหมา"]]);
 
   const vehicleOptions = useMemo(() => {
     const fromRef = activeForm?.refOptions?.["ทะเบียน"] || activeForm?.refOptions?.["ทะเบียนรถ"] || [];
@@ -814,7 +877,9 @@ export function FormModal({
 
   function syncMultiLineItemsToValues(items: MultiLineItem[]) {
     if (items.length === 0) return;
-    const matSum = items.filter(i => isMaterialCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+    const isContractorVendor = values["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา";
+    const matSum = items.filter(i => !isContractorVendor && isMaterialCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+    const laborSum = items.filter(i => isLaborCost(i.categoryType) || isContractorVendor).reduce((s, i) => s + (Number(i.amount) || 0), 0);
     const fuelSum = items.filter(i => isFuelCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
     const repairSum = items.filter(i => isRepairCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
     const machineSum = items.filter(i => isMachineCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
@@ -838,7 +903,7 @@ export function FormModal({
       .map(i => i.subItem || (isOtherExpense(i.categoryType) ? i.detail : ""))
       .filter(Boolean);
 
-    const isSub = String(values["บิล"] || "").includes("ย่อย");
+    const isSub = !isContractorVendor && String(values["บิล"] || "").includes("ย่อย");
     const storeNames = Array.from(new Set(
       items.map(i => resolveStoreName(i.storeGroup || "").trim()).filter(name => Boolean(name) && !name.startsWith("ร้านที่ "))
     ));
@@ -846,6 +911,7 @@ export function FormModal({
     setValues(current => {
       const next = { ...current };
       next["ค่าของ"] = matSum > 0 ? String(matSum) : "";
+      next["ค่าแรง"] = laborSum > 0 ? String(laborSum) : "";
       next["น้ำมัน"] = fuelSum > 0 ? String(fuelSum) : "";
       next["ซ่อมรถ"] = repairSum > 0 ? String(repairSum) : "";
       next["เครื่องจักร"] = machineSum > 0 ? String(machineSum) : "";
@@ -863,8 +929,26 @@ export function FormModal({
       if (otherItems.length > 0) {
         next["รายการ"] = otherItems[0] || "";
       }
-      if (items[0]?.category) next["สินค้า"] = items[0].category;
-      next["ประเภท"] = items[0]?.categoryType || current["ประเภท"] || "101 เตรียมงาน";
+      if (isContractorVendor) {
+        const details = items
+          .map(i => {
+            const d = (i.detail || "").trim();
+            const cat = (i.category || "").trim();
+            if (cat && d) return `${cat}: ${d}`;
+            return cat || d;
+          })
+          .filter(Boolean);
+        if (!current["รายละเอียดงาน"] && details.length > 0) {
+          next["รายละเอียดงาน"] = details.join(" | ");
+        }
+        if (!current["สินค้า/ทำงาน"]) {
+          next["สินค้า/ทำงาน"] = next["รายละเอียดงาน"] || details.join(" | ");
+        }
+        next["ประเภท"] = items[0]?.categoryType || items[0]?.category || current["ประเภท"] || "201 เตรียมงาน";
+      } else {
+        if (items[0]?.category) next["สินค้า"] = items[0].category;
+        next["ประเภท"] = items[0]?.categoryType || current["ประเภท"] || "101 เตรียมงาน";
+      }
       if (isSub && storeNames.length > 0) {
         next["ร้านค้า"] = storeNames.join(", ");
         next["ร้าน/บุคคล"] = storeNames.join(", ");
@@ -875,22 +959,25 @@ export function FormModal({
 
   function enableMultiItemMode() {
     setIsMultiItemMode(true);
-    const primaryType = values["ประเภท"] || deriveCategoryFromProduct(values["สินค้า"]) || "101 เตรียมงาน";
+    const isContractor = values["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา";
+    const primaryType = isContractor
+      ? (values["ประเภท"] && !isMaterialCost(values["ประเภท"]) ? values["ประเภท"] : "201 เตรียมงาน")
+      : (deriveCategoryFromProduct(values["สินค้า"]) || "101 เตรียมงาน");
     setValues(current => ({
       ...current,
       "ประเภท": primaryType
     }));
     if (multiLineItems.length === 0) {
-      const initialAmt = values["ค่าของ"] || values["น้ำมัน"] || values["ซ่อมรถ"] || values["เครื่องจักร"] || values["เครื่องมือ"] || values["อื่นๆ"] || values["ยอดเงิน"] || "";
-      const isSub = String(values["บิล"] || "").includes("ย่อย");
-      const initialStore = resolveStoreName(values["ร้านค้า"] || values["ร้าน/บุคคล"] || "") || (isSub ? "ร้านที่ 1" : "");
+      const initialAmt = values["ค่าแรง"] || values["ค่าของ"] || values["น้ำมัน"] || values["ซ่อมรถ"] || values["เครื่องจักร"] || values["เครื่องมือ"] || values["อื่นๆ"] || values["ยอดเงิน"] || "";
+      const isSub = !isContractor && String(values["บิล"] || "").includes("ย่อย");
+      const initialStore = !isContractor ? (resolveStoreName(values["ร้านค้า"] || values["ร้าน/บุคคล"] || "") || (isSub ? "ร้านที่ 1" : "")) : "";
       const initialItems: MultiLineItem[] = [
         {
           id: "1",
           storeGroup: initialStore,
-          category: values["สินค้า"] || "",
+          category: isContractor ? (primaryType || "201 เตรียมงาน") : (values["สินค้า"] || ""),
           categoryType: primaryType,
-          detail: values["รายละเอียดงาน"] || "",
+          detail: isContractor ? "" : (values["รายละเอียดงาน"] || ""),
           vehiclePlate: values["ทะเบียน"] || "",
           toolName: values["ชื่อเครื่องมือ"] || "",
           subItem: values["รายการ"] || "",
@@ -899,8 +986,8 @@ export function FormModal({
         {
           id: "2",
           storeGroup: initialStore,
-          category: "",
-          categoryType: "101 เตรียมงาน",
+          category: isContractor ? "201 เตรียมงาน" : "",
+          categoryType: isContractor ? "201 เตรียมงาน" : "101 เตรียมงาน",
           detail: "",
           vehiclePlate: "",
           toolName: "",
@@ -910,6 +997,17 @@ export function FormModal({
       ];
       setMultiLineItems(initialItems);
       syncMultiLineItemsToValues(initialItems);
+    } else if (isContractor) {
+      setMultiLineItems(prev => {
+        const next = prev.map(it => {
+          if (!it.category || isMaterialCost(it.category) || it.category.startsWith("1")) {
+            return { ...it, storeGroup: "", category: "201 เตรียมงาน", categoryType: "201 เตรียมงาน" };
+          }
+          return { ...it, storeGroup: "" };
+        });
+        syncMultiLineItemsToValues(next);
+        return next;
+      });
     }
   }
 
@@ -924,9 +1022,10 @@ export function FormModal({
 
   function handleAddLineItem(defaultStore?: string) {
     setMultiLineItems(prev => {
+      const isContractor = values["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา";
       let storeToUse = defaultStore;
       if (storeToUse === undefined) {
-        const isSub = String(values["บิล"] || "").includes("ย่อย");
+        const isSub = !isContractor && String(values["บิล"] || "").includes("ย่อย");
         storeToUse = isSub && prev.length > 0 ? (prev[prev.length - 1]?.storeGroup || "ร้านที่ 1") : "";
       }
       return [
@@ -935,7 +1034,7 @@ export function FormModal({
           id: String(Date.now() + Math.random()),
           storeGroup: storeToUse,
           category: "",
-          categoryType: "101 เตรียมงาน",
+          categoryType: isContractor ? "201 เตรียมงาน" : "101 เตรียมงาน",
           detail: "",
           vehiclePlate: "",
           toolName: "",
@@ -987,7 +1086,8 @@ export function FormModal({
         if (item.id !== id) return item;
         const updated = { ...item, [field]: val };
         if (field === "category") {
-          updated.categoryType = deriveCategoryFromProduct(val);
+          const isContractor = values["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา";
+          updated.categoryType = isContractor ? (val || "201 เตรียมงาน") : deriveCategoryFromProduct(val);
         }
         return updated;
       });
@@ -1178,8 +1278,50 @@ export function FormModal({
     return () => window.removeEventListener(openEventName, openFromExternalButton as EventListener);
   }, [activeForm, openEventName, resolvedTableName]);
 
+  function handleVendorTypeChangeForLineItems(newVendorType: string) {
+    if (newVendorType === "ผู้รับเหมา") {
+      setMultiLineItems(prev => {
+        if (!prev || prev.length === 0) return prev;
+        const updated = prev.map(it => {
+          const isMat = !it.category || it.category.startsWith("1") || isMaterialCost(it.category) || isMaterialCost(it.categoryType);
+          if (isMat) {
+            return {
+              ...it,
+              storeGroup: "",
+              category: "201 เตรียมงาน",
+              categoryType: "201 เตรียมงาน"
+            };
+          }
+          return { ...it, storeGroup: "" };
+        });
+        syncMultiLineItemsToValues(updated);
+        return updated;
+      });
+    } else if (newVendorType === "ร้านค้า") {
+      setMultiLineItems(prev => {
+        if (!prev || prev.length === 0) return prev;
+        const updated = prev.map(it => {
+          const isLab = !it.category || it.category.startsWith("2") || isLaborCost(it.category) || isLaborCost(it.categoryType);
+          if (isLab) {
+            return {
+              ...it,
+              category: "101 เตรียมงาน",
+              categoryType: "101 เตรียมงาน"
+            };
+          }
+          return it;
+        });
+        syncMultiLineItemsToValues(updated);
+        return updated;
+      });
+    }
+  }
+
   function updateValue(field: FieldSchema, value: string) {
     if (!activeForm) return;
+    if (field.name === "ร้านค้า/ผู้รับเหมา") {
+      handleVendorTypeChangeForLineItems(value);
+    }
     setValues(current => {
       const next = { ...current, [field.name]: value };
       applyRefFill(next, field, activeForm, value);
@@ -1199,6 +1341,9 @@ export function FormModal({
 
   function updateValueByName(fieldName: string, value: string) {
     if (!activeForm) return;
+    if (fieldName === "ร้านค้า/ผู้รับเหมา") {
+      handleVendorTypeChangeForLineItems(value);
+    }
     setValues(current => {
       const next = { ...current, [fieldName]: value };
       const targetField = activeForm.schema.find(f => f.name === fieldName);
@@ -1246,7 +1391,9 @@ export function FormModal({
         return;
       }
 
+      const isContractorVendor = submitValues["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา";
       const matSum = multiLineItems.filter(i => isMaterialCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+      const laborSum = multiLineItems.filter(i => isLaborCost(i.categoryType) || isContractorVendor).reduce((s, i) => s + (Number(i.amount) || 0), 0);
       const fuelSum = multiLineItems.filter(i => isFuelCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
       const repairSum = multiLineItems.filter(i => isRepairCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
       const machineSum = multiLineItems.filter(i => isMachineCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
@@ -1255,6 +1402,7 @@ export function FormModal({
       const totalSum = multiLineItems.reduce((s, i) => s + (Number(i.amount) || 0), 0);
 
       submitValues["ค่าของ"] = matSum > 0 ? String(matSum) : "";
+      submitValues["ค่าแรง"] = laborSum > 0 ? String(laborSum) : "";
       submitValues["น้ำมัน"] = fuelSum > 0 ? String(fuelSum) : "";
       submitValues["ซ่อมรถ"] = repairSum > 0 ? String(repairSum) : "";
       submitValues["เครื่องจักร"] = machineSum > 0 ? String(machineSum) : "";
@@ -1262,13 +1410,12 @@ export function FormModal({
       submitValues["อื่นๆ"] = otherSum > 0 ? String(otherSum) : "";
       submitValues["ยอดเงิน"] = String(totalSum);
       submitValues["ยอดโอน"] = String(totalSum);
-      submitValues["ประเภท"] = multiLineItems[0]?.categoryType || submitValues["ประเภท"] || "101 เตรียมงาน";
+      submitValues["ประเภท"] = multiLineItems[0]?.categoryType || multiLineItems[0]?.category || submitValues["ประเภท"] || (isContractorVendor ? "201 เตรียมงาน" : "101 เตรียมงาน");
       const prodNames = multiLineItems.map(i => i.category).filter(Boolean);
-      submitValues["สินค้า"] = prodNames.join(", ") || submitValues["สินค้า"] || "";
-      submitValues["สินค้า/ทำงาน"] = prodNames.join(", ") || submitValues["สินค้า/ทำงาน"] || "";
+      submitValues["สินค้า"] = isContractorVendor ? "" : (prodNames.join(", ") || submitValues["สินค้า"] || "");
       submitValues["items"] = JSON.stringify(multiLineItems);
 
-      const isSub = String(submitValues["บิล"] || values["บิล"] || "").includes("ย่อย");
+      const isSub = !isContractorVendor && String(submitValues["บิล"] || values["บิล"] || "").includes("ย่อย");
       if (isSub) {
         const storeNames = Array.from(new Set(
           multiLineItems.map(i => resolveStoreName(i.storeGroup || "").trim()).filter(name => Boolean(name) && !name.startsWith("ร้านที่ "))
@@ -1309,19 +1456,27 @@ export function FormModal({
       const details = multiLineItems
         .map(i => {
           const d = (i.detail || "").trim();
-          if (!d) return "";
-          return i.category ? `${i.category}: ${d}` : d;
+          const cat = (i.category || "").trim();
+          if (cat && d) return `${cat}: ${d}`;
+          return cat || d;
         })
         .filter(Boolean);
-      if (details.length > 0 && !submitValues["รายละเอียดงาน"]) {
+      if (!submitValues["รายละเอียดงาน"] && details.length > 0) {
         submitValues["รายละเอียดงาน"] = details.join(" | ");
+      }
+      if (!submitValues["สินค้า/ทำงาน"]) {
+        submitValues["สินค้า/ทำงาน"] = submitValues["รายละเอียดงาน"] || details.join(" | ");
       }
       if (submitValues["รายละเอียดงาน"]) {
         body.set("รายละเอียดงาน", submitValues["รายละเอียดงาน"]);
       }
+      if (submitValues["สินค้า/ทำงาน"]) {
+        body.set("สินค้า/ทำงาน", submitValues["สินค้า/ทำงาน"]);
+      }
 
       body.set("ประเภท", submitValues["ประเภท"]);
       body.set("ค่าของ", submitValues["ค่าของ"]);
+      body.set("ค่าแรง", submitValues["ค่าแรง"]);
       body.set("น้ำมัน", submitValues["น้ำมัน"]);
       body.set("ซ่อมรถ", submitValues["ซ่อมรถ"]);
       body.set("เครื่องจักร", submitValues["เครื่องจักร"]);
@@ -1330,7 +1485,6 @@ export function FormModal({
       body.set("ยอดเงิน", submitValues["ยอดเงิน"]);
       body.set("ยอดโอน", submitValues["ยอดโอน"]);
       body.set("สินค้า", submitValues["สินค้า"]);
-      body.set("สินค้า/ทำงาน", submitValues["สินค้า/ทำงาน"]);
       body.set("items", JSON.stringify(multiLineItems));
       body.delete("rows");
     }
@@ -1570,6 +1724,9 @@ export function FormModal({
                       <div className="space-y-3">
                         {DATA_FORM_SECTIONS.map(section => {
                           const isStoreVendor = values["ร้านค้า/ผู้รับเหมา"] === "ร้านค้า" || !values["ร้านค้า/ผู้รับเหมา"];
+                          const isContractorVendor = values["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา";
+                          const isMultiItemAllowed = isStoreVendor || isContractorVendor;
+
                           const sectionFields = visibleFields.filter(f => {
                             if (f.name === "ประเภท") return false;
                             if (isMultiItemMode && isStoreVendor && (
@@ -1587,9 +1744,16 @@ export function FormModal({
                             )) {
                               return false;
                             }
+                            if (isMultiItemMode && isContractorVendor && (
+                              f.name === "สินค้า" ||
+                              f.name === "ค่าแรง" ||
+                              f.name === "รายการ"
+                            )) {
+                              return false;
+                            }
                             return section.fields.includes(f.name);
                           });
-                          if (!sectionFields.length && (section.id !== "vendor" || !isStoreVendor || !isMultiItemMode)) return null;
+                          if (!sectionFields.length && (section.id !== "vendor" || !isMultiItemAllowed || !isMultiItemMode)) return null;
 
                           const sectionGridClass =
                             section.id === "basic"
@@ -1615,6 +1779,8 @@ export function FormModal({
                                   const customClassName =
                                     section.id === "vendor" && field.name === "ร้านค้า"
                                       ? (isMultiItemMode ? "col-span-1 sm:col-span-2 lg:col-span-2" : "col-span-1")
+                                      : section.id === "vendor" && (field.name === "ผู้รับเหมา" || field.name === "รายละเอียดงาน")
+                                      ? "col-span-1"
                                       : undefined;
 
                                   return (
@@ -1636,7 +1802,7 @@ export function FormModal({
                                   );
                                 })}
 
-                                {section.id === "vendor" && isStoreVendor ? (
+                                {section.id === "vendor" && isMultiItemAllowed ? (
                                   <div className="col-span-1 space-y-1 min-w-0 w-full overflow-hidden">
                                     <label className="text-xs font-medium text-slate-700 block">
                                       รูปแบบรายการ
@@ -1682,7 +1848,7 @@ export function FormModal({
                                   </div>
                                 ) : null}
 
-                                {section.id === "vendor" && isStoreVendor && isMultiItemMode ? (
+                                {section.id === "vendor" && isMultiItemAllowed && isMultiItemMode ? (
                                   <MultiLineItemsBuilder
                                     items={multiLineItems}
                                     productOptions={productOptions}
@@ -4171,6 +4337,10 @@ function isFieldVisible(field: FieldSchema, values: Record<string, string>) {
 function getFieldClassName(field: FieldSchema, values?: Record<string, string>) {
   const vendorType = values?.["ร้านค้า/ผู้รับเหมา"];
 
+  if (field.name === "ผู้รับเหมา" || field.name === "รายละเอียดงาน") {
+    // แสดง 1 คอลัมน์ เพื่อให้อยู่ข้างกันในแถวเดียวกับรูปแบบรายการ (1 + 1 + 1 = 3 คอลัมน์)
+    return "col-span-1";
+  }
   if (
     field.type === "LongText" ||
     field.type === "Image" ||
@@ -4179,14 +4349,6 @@ function getFieldClassName(field: FieldSchema, values?: Record<string, string>) 
     field.name === "ร้านค้า/ผู้รับเหมา"
   ) {
     return "col-span-full";
-  }
-  if (field.name === "ผู้รับเหมา") {
-    // แสดง 1 คอลัมน์ทางซ้าย เพื่อให้ "รายละเอียดงาน" อยู่ข้างๆ ทางขวาในแถวเดียวกัน (1 + 2 = 3 คอลัมน์)
-    return "col-span-1";
-  }
-  if (field.name === "รายละเอียดงาน") {
-    // แสดง 2 คอลัมน์ทางขวา ต่อจากช่อง "ผู้รับเหมา" พอดี
-    return "col-span-1 sm:col-span-2 lg:col-span-2";
   }
   if (field.name === "สินค้า" && vendorType === "ผู้รับเหมา") {
     // เมื่อเป็นผู้รับเหมา ให้ช่อง "ประเภทงาน (ผู้รับเหมา)" ขยายเต็มแถว

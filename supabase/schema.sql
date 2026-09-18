@@ -815,6 +815,36 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
+-- 8.4 Atomic Sequence Allocator for Bills (Concurrency Protection)
+CREATE OR REPLACE FUNCTION public.get_atomic_next_bill_sequence(p_custom_start INT DEFAULT 1)
+RETURNS BIGINT
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_next_id BIGINT;
+  v_start BIGINT := COALESCE(p_custom_start, 1);
+BEGIN
+  IF v_start < 1 THEN
+    v_start := 1;
+  END IF;
+
+  -- Transaction-level advisory lock prevents race conditions across concurrent requests
+  PERFORM pg_advisory_xact_lock(hashtext('bill_sequence_lock'));
+
+  SELECT COALESCE(MAX(id), v_start - 1) + 1 INTO v_next_id FROM public.bills;
+
+  IF v_next_id < v_start THEN
+    v_next_id := v_start;
+  END IF;
+
+  RETURN v_next_id;
+END;
+$$;
+
+-- Grant execute permission to authenticated and service roles
+GRANT EXECUTE ON FUNCTION public.get_atomic_next_bill_sequence(INT) TO postgres, anon, authenticated, service_role;
+
 -- =========================================================================
 -- COMPLETION MESSAGE
 -- =========================================================================

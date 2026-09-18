@@ -1066,7 +1066,22 @@ export async function getNextBillSequence(customStart?: number): Promise<number>
   if (!Number.isFinite(startSeq) || startSeq < 1) startSeq = 1;
 
   try {
-    // 1. Check if startSeq is available directly
+    // 1. Try atomic database-level RPC function first (concurrency safe with transaction advisory lock)
+    const { data: rpcVal, error: rpcErr } = await supabaseAdmin.rpc("get_atomic_next_bill_sequence", {
+      p_custom_start: startSeq
+    });
+    if (!rpcErr && rpcVal !== null && rpcVal !== undefined) {
+      const parsedRpc = Number(rpcVal);
+      if (Number.isFinite(parsedRpc) && parsedRpc >= startSeq) {
+        return parsedRpc;
+      }
+    }
+  } catch {
+    // Graceful fallback to application scan if RPC is not yet created in Supabase
+  }
+
+  try {
+    // 2. Fallback: Check if startSeq is available directly
     const { data: exactMatch } = await supabaseAdmin
       .from("bills")
       .select("id")
@@ -2048,6 +2063,24 @@ export async function insertRowToSupabase(tableName: string, rowData: Record<str
     while (res.error && retries < 25) {
       retries++;
       if (res.error.message.includes("duplicate key") || res.error.message.includes("unique constraint") || res.error.message.includes("already exists")) {
+        if (dbTable === "bills") {
+          // Concurrency collision protection: NEVER upsert/overwrite existing bills!
+          // Re-allocate the next available unique sequence and retry insert
+          const freshSeq = await getNextBillSequence();
+          dbRow.id = freshSeq;
+          if (dbRow.data && typeof dbRow.data === "object") {
+            dbRow.data["ลำดับ"] = String(freshSeq);
+            if (dbRow.data["ลำดับtest"]) dbRow.data["ลำดับtest"] = String(freshSeq);
+          }
+          res = await supabaseAdmin.from(dbTable).insert(dbRow).select();
+          if (!res.error) {
+            rowData["ลำดับ"] = String(freshSeq);
+            if (rowData["ลำดับtest"]) rowData["ลำดับtest"] = String(freshSeq);
+            if (rowData.id !== undefined) rowData.id = freshSeq;
+            break;
+          }
+          continue;
+        }
         res = await supabaseAdmin.from(dbTable).upsert(dbRow).select();
         if (!res.error) break;
       }

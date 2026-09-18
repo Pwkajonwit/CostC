@@ -231,12 +231,14 @@ export function MultiItemsBudgetGuardrail({
   // ที่นี่จึงแสดงเฉพาะ "งบภาพรวม" ของโครงการเท่านั้น เพื่อไม่ให้ซ้ำซ้อนกับรายการในตาราง
   const totalSum = items.reduce((s, i) => s + (Number(i.amount) || 0), 0);
 
+  const isContractor = values?.["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา";
   const rowForOverall: SheetRow = {
     ...values,
     "สินค้า": "",
-    "ประเภท": "101 เตรียมงาน",
+    "ประเภท": isContractor ? "งบค่าแรงทั้งหมด" : "งบค่าของทั้งหมด",
     "ยอดเงิน": String(totalSum),
-    "ค่าของ": String(totalSum),
+    "ค่าของ": isContractor ? "" : String(totalSum),
+    "ค่าแรง": isContractor ? String(totalSum) : "",
   };
 
   const overallCheck = checkCategoryBudgetCap(rowForOverall, matchedProject, existingBills);
@@ -248,7 +250,7 @@ export function MultiItemsBudgetGuardrail({
       <BudgetStatusCard
         key={overallCheck.categoryLabel}
         check={overallCheck}
-        prefix="คุมงบภาพรวม"
+        prefix={isContractor ? "" : "คุมงบภาพรวม"}
       />
     </div>
   );

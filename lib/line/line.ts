@@ -385,7 +385,7 @@ export function isSubBillRecord(b: Record<string, any> | undefined | null): bool
   return false;
 }
 
-export function extractBillLineItems(b: Record<string, any>): Array<{ category?: string; categoryType?: string; amount?: string | number; name?: string; type?: string; price?: string | number; total?: string | number }> {
+export function extractBillLineItems(b: Record<string, any>): Array<{ category?: string; categoryType?: string; amount?: string | number; name?: string; type?: string; price?: string | number; total?: string | number; detail?: string; subItem?: string; vehiclePlate?: string; toolName?: string; storeGroup?: string }> {
   if (!b) return [];
   const rawItems = b.items || b.data?.items || b["รายการสินค้า"] || b.line_items;
   if (Array.isArray(rawItems) && rawItems.length > 0) {
@@ -525,8 +525,10 @@ export function createBillNotificationFlex(bill: {
   const otherDisplayName = String(rawOther || "").trim();
 
   const rawCategory = String((bill as any)["ประเภท"] || (bill as any).category || "").trim();
+  const rawVendorType = String((bill as any)["ร้านค้า/ผู้รับเหมา"] || (bill as any).vendor_type || "").trim();
+  const isContractor = rawVendorType === "ผู้รับเหมา" || Boolean((bill as any)["ผู้รับเหมา"]) || Boolean((bill as any).contractor_id) || rawCategory.includes("ค่าแรง") || rawCategory.startsWith("2.");
 
-  let rawBillDescription = bill.description || (bill as any)["สินค้า/ทำงาน"] || (bill as any)["รายละเอียด"] || "-";
+  let rawBillDescription = bill.description || (bill as any)["รายละเอียดงาน"] || (bill as any).data?.["รายละเอียดงาน"] || (bill as any)["สินค้า/ทำงาน"] || (bill as any)["รายละเอียด"] || "-";
   let billDescription = sanitizeFlexItemDescription(rawBillDescription, carsMap, peopleMap);
   if (carDisplayName && (billDescription === "-" || !billDescription || /^[a-zA-Z]{1,3}[-_]?\d+$/.test(billDescription))) {
     billDescription = rawCategory.includes("ซ่อม") ? `ซ่อมรถ (${carDisplayName})` : `น้ำมัน (${carDisplayName})`;
@@ -652,7 +654,7 @@ export function createBillNotificationFlex(bill: {
               type: "box",
               layout: "baseline",
               contents: [
-                { type: "text", text: isSubBill ? "ร้านค้า/บิล:" : "ร้าน/บุคคล:", color: "#64748B", size: "xs", flex: 2 },
+                { type: "text", text: isSubBill ? "ร้านค้า/บิล:" : (isContractor ? "ผู้รับเหมา:" : "ร้าน/บุคคล:"), color: "#64748B", size: "xs", flex: 2 },
                 {
                   type: "text",
                   text: resolveVendorName(vendorCandidate, bankInfoMap, bill as any, peopleMap) || bankInfo?.storeName || bankInfo?.accountName || vendorCandidate,
@@ -757,12 +759,12 @@ export function createBillNotificationFlex(bill: {
                 ],
               }
             ] : []),
-            ...(billDescription && billDescription !== "-" && lineItems.length === 0 ? [
+            ...(billDescription && billDescription !== "-" && (lineItems.length === 0 || isContractor) ? [
               {
                 type: "box",
                 layout: "baseline",
                 contents: [
-                  { type: "text", text: "รายละเอียด:", color: "#64748B", size: "xs", flex: 2 },
+                  { type: "text", text: isContractor ? "รายละเอียดงาน:" : "รายละเอียด:", color: "#64748B", size: "xs", flex: 2 },
                   { type: "text", text: billDescription, color: "#1E293B", size: "xs", flex: 5, wrap: true },
                 ],
               }
@@ -790,7 +792,7 @@ export function createBillNotificationFlex(bill: {
                     type: "box",
                     layout: "horizontal",
                     contents: [
-                      { type: "text", text: `📦 รายการสินค้า (${lineItems.length} รายการ):`, size: "xs", weight: "bold", color: "#0F172A", flex: 7 },
+                      { type: "text", text: isContractor ? `👷‍♂️ รายการค่าแรง / งวดงาน (${lineItems.length} รายการ):` : `📦 รายการสินค้า (${lineItems.length} รายการ):`, size: "xs", weight: "bold", color: "#0F172A", flex: 7 },
                       { type: "text", text: "ราคา", size: "xs", weight: "bold", color: "#64748B", flex: 3, align: "end" }
                     ]
                   },
@@ -798,18 +800,34 @@ export function createBillNotificationFlex(bill: {
                     const itemAmt = Number(item.amount ?? item.price ?? item.total ?? 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                     const rawCat = String(item.category || "").trim();
                     const rawName = String(item.name || "").trim();
+                    const rawDetail = String(item.detail || "").trim();
                     const cleanCat = rawCat.replace(/^\d+\.?\s*\d*\.?\s*/, "").trim();
                     const cleanName = rawName.replace(/^\d+\.?\s*\d*\.?\s*/, "").trim();
 
                     let itemTitle = "";
-                    if (cleanCat && cleanName && cleanCat !== cleanName) {
-                      itemTitle = `${cleanCat} ${cleanName}`;
+                    if (isContractor) {
+                      const catDisplay = rawCat || cleanCat || "ค่าแรง";
+                      if (rawDetail && !catDisplay.includes(rawDetail)) {
+                        itemTitle = `${catDisplay} - ${rawDetail}`;
+                      } else {
+                        itemTitle = catDisplay;
+                      }
                     } else {
-                      itemTitle = cleanName || cleanCat || `สินค้า ${idx + 1}`;
+                      if (cleanCat && cleanName && cleanCat !== cleanName) {
+                        itemTitle = `${cleanCat} ${cleanName}`;
+                      } else {
+                        itemTitle = cleanName || cleanCat || `สินค้า ${idx + 1}`;
+                      }
+                      if (rawDetail && !itemTitle.includes(rawDetail)) {
+                        itemTitle = `${itemTitle} (${rawDetail})`;
+                      }
                     }
 
                     const rawType = String(item.categoryType || item.type || "").trim();
                     const cleanType = rawType.replace(/^\d+\.?\s*/, "").trim();
+                    const rawSub = String(item.subItem || "").trim();
+                    const tagText = rawSub ? (cleanType && !isContractor ? `${cleanType} • ${rawSub}` : rawSub) : (cleanType && !isContractor ? cleanType : "");
+
                     return {
                       type: "box",
                       layout: "vertical",
@@ -840,14 +858,14 @@ export function createBillNotificationFlex(bill: {
                             }
                           ]
                         },
-                        ...(cleanType ? [
+                        ...(tagText ? [
                           {
                             type: "box",
                             layout: "horizontal",
                             contents: [
                               {
                                 type: "text",
-                                text: `   (${cleanType})`,
+                                text: `   (${tagText})`,
                                 size: "xxs",
                                 color: "#0284C7",
                                 wrap: true
@@ -1532,19 +1550,14 @@ export function createBillSearchResultFlex(
           const rawStaffRef = (b as any)["ชื่อพนักงาน"] || (b as any).staff_name || (b as any)["รหัสพนักงาน"];
           const staffName = resolveStaffDisplayName(rawStaffRef, peopleMap);
 
-          const rawDesc = b.description || (b as any)["สินค้า/ทำงาน"] || (b as any)["รายละเอียด"] || "-";
+          const rawVendorType = String((b as any)["ร้านค้า/ผู้รับเหมา"] || (b as any).vendor_type || "").trim();
+          const rawCatName = String((b as any)["ประเภท"] || (b as any).category || "").trim();
+          const isContractor = rawVendorType === "ผู้รับเหมา" || Boolean((b as any)["ผู้รับเหมา"]) || Boolean((b as any).contractor_id) || rawCatName.includes("ค่าแรง") || rawCatName.startsWith("2.");
+
+          const rawDesc = b.description || (b as any)["รายละเอียดงาน"] || (b as any).data?.["รายละเอียดงาน"] || (b as any)["สินค้า/ทำงาน"] || (b as any)["รายละเอียด"] || "-";
           const cleanDesc = sanitizeFlexItemDescription(rawDesc, carsMap, peopleMap);
 
-          const rawItems = (b as any).items || (b as any).data?.items || (b as any)["รายการสินค้า"] || (b as any).line_items;
-          let lineItems: Array<{ category?: string; categoryType?: string; amount?: string | number; name?: string; type?: string; price?: string | number; total?: string | number }> = [];
-          if (Array.isArray(rawItems) && rawItems.length > 0) {
-            lineItems = rawItems.filter(Boolean);
-          } else if (typeof rawItems === "string" && rawItems.trim().startsWith("[")) {
-            try {
-              const parsed = JSON.parse(rawItems);
-              if (Array.isArray(parsed) && parsed.length > 0) lineItems = parsed.filter(Boolean);
-            } catch {}
-          }
+          const lineItems = extractBillLineItems(b);
 
           const textDetailsBox = {
             type: "box",
@@ -1563,7 +1576,7 @@ export function createBillSearchResultFlex(
                 layout: "baseline",
                 margin: "xs",
                 contents: [
-                  { type: "text", text: "ผู้เบิก/ร้าน:", size: "xxs", color: "#64748B", flex: 3 },
+                  { type: "text", text: itemIsSub ? "ร้านค้า/บิล:" : (isContractor ? "ผู้รับเหมา:" : "ผู้เบิก/ร้าน:"), size: "xxs", color: "#64748B", flex: 3 },
                   { type: "text", text: requesterName, size: "xxs", color: "#1E293B", flex: 7, wrap: true }
                 ]
               },
@@ -1698,13 +1711,13 @@ export function createBillSearchResultFlex(
                   ]
                 }
               ] : []),
-              ...(cleanDesc && cleanDesc !== "-" && lineItems.length === 0 ? [
+              ...(cleanDesc && cleanDesc !== "-" && (lineItems.length === 0 || isContractor) ? [
                 {
                   type: "box",
                   layout: "baseline",
                   margin: "xs",
                   contents: [
-                    { type: "text", text: "รายละเอียด:", size: "xxs", color: "#64748B", flex: 3 },
+                    { type: "text", text: isContractor ? "รายละเอียดงาน:" : "รายละเอียด:", size: "xxs", color: "#64748B", flex: 3 },
                     { type: "text", text: cleanDesc, size: "xxs", color: "#334155", flex: 7, wrap: true }
                   ]
                 }
@@ -1723,7 +1736,7 @@ export function createBillSearchResultFlex(
                       type: "box",
                       layout: "horizontal",
                       contents: [
-                        { type: "text", text: `📦 สินค้า (${lineItems.length} รายการ):`, size: "xxs", weight: "bold", color: "#0F172A", flex: 7 },
+                        { type: "text", text: isContractor ? `👷‍♂️ ค่าแรง (${lineItems.length} รายการ):` : `📦 สินค้า (${lineItems.length} รายการ):`, size: "xxs", weight: "bold", color: "#0F172A", flex: 7 },
                         { type: "text", text: "ราคา", size: "xxs", weight: "bold", color: "#64748B", flex: 3, align: "end" }
                       ]
                     },
@@ -1731,18 +1744,34 @@ export function createBillSearchResultFlex(
                       const itemAmt = Number(item.amount ?? item.price ?? item.total ?? 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                       const rawCat = String(item.category || "").trim();
                       const rawName = String(item.name || "").trim();
+                      const rawDetail = String(item.detail || "").trim();
                       const cleanCat = rawCat.replace(/^\d+\.?\s*\d*\.?\s*/, "").trim();
                       const cleanName = rawName.replace(/^\d+\.?\s*\d*\.?\s*/, "").trim();
 
                       let itemTitle = "";
-                      if (cleanCat && cleanName && cleanCat !== cleanName) {
-                        itemTitle = `${cleanCat} ${cleanName}`;
+                      if (isContractor) {
+                        const catDisplay = rawCat || cleanCat || "ค่าแรง";
+                        if (rawDetail && !catDisplay.includes(rawDetail)) {
+                          itemTitle = `${catDisplay} - ${rawDetail}`;
+                        } else {
+                          itemTitle = catDisplay;
+                        }
                       } else {
-                        itemTitle = cleanName || cleanCat || `สินค้า ${iIdx + 1}`;
+                        if (cleanCat && cleanName && cleanCat !== cleanName) {
+                          itemTitle = `${cleanCat} ${cleanName}`;
+                        } else {
+                          itemTitle = cleanName || cleanCat || `สินค้า ${iIdx + 1}`;
+                        }
+                        if (rawDetail && !itemTitle.includes(rawDetail)) {
+                          itemTitle = `${itemTitle} (${rawDetail})`;
+                        }
                       }
 
                       const rawType = String(item.categoryType || item.type || "").trim();
                       const cleanType = rawType.replace(/^\d+\.?\s*/, "").trim();
+                      const rawSub = String(item.subItem || "").trim();
+                      const tagText = rawSub ? (cleanType && !isContractor ? `${cleanType} • ${rawSub}` : rawSub) : (cleanType && !isContractor ? cleanType : "");
+
                       return {
                         type: "box",
                         layout: "vertical",
@@ -1773,14 +1802,14 @@ export function createBillSearchResultFlex(
                               }
                             ]
                           },
-                          ...(cleanType ? [
+                          ...(tagText ? [
                             {
                               type: "box",
                               layout: "horizontal",
                               contents: [
                                 {
                                   type: "text",
-                                  text: `   (${cleanType})`,
+                                  text: `   (${tagText})`,
                                   size: "xxs",
                                   color: "#0284C7",
                                   wrap: true
@@ -4738,6 +4767,17 @@ export function createMultiBillFlex(
       const productName = b["สินค้า"] || b.product || "";
       const categoryName = b["ประเภท"] || b.category || "";
 
+      const rawWorkDesc = String(
+        b["รายละเอียดงาน"] ||
+        b.data?.["รายละเอียดงาน"] ||
+        b["สินค้า/ทำงาน"] ||
+        b.data?.["สินค้า/ทำงาน"] ||
+        b.description ||
+        b.data?.description ||
+        ""
+      ).trim();
+      const cleanWorkDesc = sanitizeFlexItemDescription(rawWorkDesc, carsMap, peopleMap);
+
       const textDetailsBox: Record<string, any> = {
         type: "box",
         layout: "vertical",
@@ -4844,6 +4884,18 @@ export function createMultiBillFlex(
               margin: "xs",
               contents: [
                 { type: "text", text: `${vendorLabel}: ${vendorName}`, size: "xxs", color: "#1E293B", weight: "bold", wrap: true }
+              ]
+            }
+          ] : []),
+          // Row 2.5: Work Details / รายละเอียดงาน (Always display if available)
+          ...(cleanWorkDesc && cleanWorkDesc !== "-" && cleanWorkDesc !== "non" ? [
+            {
+              type: "box",
+              layout: "baseline",
+              margin: "xs",
+              contents: [
+                { type: "text", text: isContractor ? "รายละเอียดงาน:" : "รายละเอียด:", size: "xxs", color: "#64748B", flex: 3 },
+                { type: "text", text: cleanWorkDesc, size: "xxs", color: "#334155", flex: 9, wrap: true }
               ]
             }
           ] : []),
@@ -5046,14 +5098,27 @@ export function createMultiBillFlex(
                   const itemAmt = itemAmtNum.toLocaleString("th-TH");
                   const rawCat = String(item.category || "").trim();
                   const rawName = String(item.name || "").trim();
+                  const rawDetail = String(item.detail || "").trim();
                   const cleanCat = rawCat.replace(/^\d+\.?\s*\d*\.?\s*/, "").trim();
                   const cleanName = rawName.replace(/^\d+\.?\s*\d*\.?\s*/, "").trim();
 
                   let itemTitle = "";
-                  if (cleanCat && cleanName && cleanCat !== cleanName) {
-                    itemTitle = `${cleanCat} ${cleanName}`;
+                  if (isContractor || isLaborBill) {
+                    const catDisplay = rawCat || cleanCat || "ค่าแรง";
+                    if (rawDetail && !catDisplay.includes(rawDetail)) {
+                      itemTitle = `${catDisplay} - ${rawDetail}`;
+                    } else {
+                      itemTitle = catDisplay;
+                    }
                   } else {
-                    itemTitle = cleanName || cleanCat || `สินค้า ${iIdx + 1}`;
+                    if (cleanCat && cleanName && cleanCat !== cleanName) {
+                      itemTitle = `${cleanCat} ${cleanName}`;
+                    } else {
+                      itemTitle = cleanName || cleanCat || `สินค้า ${iIdx + 1}`;
+                    }
+                    if (rawDetail && !itemTitle.includes(rawDetail)) {
+                      itemTitle = `${itemTitle} (${rawDetail})`;
+                    }
                   }
                   itemTitle = sanitizeFlexItemDescription(itemTitle, carsMap, peopleMap);
 
@@ -5083,7 +5148,10 @@ export function createMultiBillFlex(
                   } else {
                     const rawType = String(item.categoryType || item.type || "").trim();
                     const cleanType = rawType.replace(/^\d+\.?\s*/, "").trim();
-                    if (cleanType && !itemTitle.includes(cleanType)) {
+                    const rawSub = String(item.subItem || "").trim();
+                    if (rawSub) {
+                      budgetTag = `(${rawSub})`;
+                    } else if (cleanType && !itemTitle.includes(cleanType) && !isContractor) {
                       budgetTag = `(${cleanType})`;
                     }
                   }
