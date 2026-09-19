@@ -1331,6 +1331,10 @@ export function FormModal({
         (activeForm.tableName === TABLES.PROJECT || activeForm.tableName === "Project" || activeForm.tableName === "1. Project รวม") &&
         field.name === "ยอดรวม vat"
       ) {
+        const vatNum = toNumber(value);
+        if (vatNum > 0) {
+          next["ยอดงาน"] = String(Math.round((vatNum / 1.07) * 100) / 100);
+        }
         return next;
       }
       pruneHiddenConditionalValues(next, activeForm);
@@ -1350,6 +1354,16 @@ export function FormModal({
       if (targetField) {
         applyRefFill(next, targetField, activeForm, value);
         normalizeDependentValues(next, fieldName, activeForm);
+      }
+      if (
+        (activeForm.tableName === TABLES.PROJECT || activeForm.tableName === "Project" || activeForm.tableName === "1. Project รวม") &&
+        fieldName === "ยอดรวม vat"
+      ) {
+        const vatNum = toNumber(value);
+        if (vatNum > 0) {
+          next["ยอดงาน"] = String(Math.round((vatNum / 1.07) * 100) / 100);
+        }
+        return next;
       }
       applyLocalFormulas(next, activeForm.tableName);
       return next;
@@ -1971,8 +1985,8 @@ export function FormModal({
                       </div>
                     )}
 
-                    {activeForm.tableName === TABLES.PROJECT || activeForm.tableName === "Project" ? (
-                      <ProjectBudgetAllocator values={values} onChange={updateValueByName} />
+                    {activeForm.tableName === TABLES.PROJECT || activeForm.tableName === "Project" || activeForm.tableName === "1. Project รวม" ? (
+                      <ProjectBudgetAllocator values={values} onChange={updateValueByName} defaultExpanded={false} />
                     ) : null}
                   </fieldset>
                 </>

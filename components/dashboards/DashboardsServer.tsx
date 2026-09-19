@@ -1,7 +1,7 @@
 import { TABLES } from "@/lib/config";
 import { MainDashboardClient } from "@/components/dashboards/MainDashboardClient";
 import { isCommittedBill, normalizeBillStatus } from "@/lib/bills/bill-status";
-import { computeBillTransferAmount, hydrateProjectRowsForList, isCreditActive, isDeductActive, isVatActive } from "@/lib/project-summary";
+import { computeBillTransferAmount, hydrateDataRows, hydrateProjectRowsForList, isCreditActive, isDeductActive, isVatActive } from "@/lib/project-summary";
 import { WithdrawDashboardClient, type WithdrawFilters } from "@/components/dashboards/WithdrawDashboardClient";
 import { WorkStatusDashboardClient } from "@/components/dashboards/WorkStatusDashboardClient";
 import { BillFollowDashboardClient } from "@/components/dashboards/BillFollowDashboardClient";
@@ -264,22 +264,6 @@ export function findMatchingRequesterKey(
 }
 
 
-
-function sumColumns(rows: SheetRow[], columns: string[]) {
-  return rows.reduce((sum, row) => sum + columns.reduce((inner, column) => inner + toNumber(row[column]), 0), 0);
-}
-
-function hydrateDataRows(rows: SheetRow[]) {
-  const amountColumns = ["ค่าของ", "ค่าแรง", "พนักงาน", "น้ำมัน", "ซ่อมรถ", "เครื่องจักร", "เครื่องมือ", "อื่นๆ"];
-  return rows.map(row => {
-    const output = { ...row };
-    if (!hasValue(output["ยอดเงิน"])) output["ยอดเงิน"] = sumColumns([output], amountColumns);
-    output["ยอดโอน"] = computeBillTransferAmount(output);
-    if (!hasValue(output["ร้าน/บุคคล"])) output["ร้าน/บุคคล"] = firstValue(output, ["ร้านค้า", "ผู้รับเหมา", "ร้านค้า/ผู้รับเหมา"]);
-    if (!hasValue(output["สินค้า/ทำงาน"])) output["สินค้า/ทำงาน"] = firstValue(output, ["สินค้า", "รายละเอียดงาน", "รายการ"]);
-    return output;
-  });
-}
 
 function firstValue(row: SheetRow, columns: string[]) {
   for (const column of columns) {

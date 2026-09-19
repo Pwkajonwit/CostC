@@ -216,54 +216,6 @@ export function BillDetailClient({
   const paidDueDate = formatDateThai(currentBill["วันจ่าย"] || currentBill.paid_date);
   const createdAtFormatted = formatDateThai(currentBill.created_at);
 
-  // Expense Breakdown List
-  const expenseBreakdown = useMemo(() => {
-    const items: Array<{ label: string; value: unknown; extra?: string; isAmount?: boolean }> = [];
-
-    const catSums: Record<string, number> = {};
-    if (lineItems.length > 0) {
-      lineItems.forEach(i => {
-        const field = getExpenseFieldForCategory(i.categoryType || i.category || i.type || "");
-        catSums[field] = (catSums[field] || 0) + toNumber(i.amount ?? i.price ?? i.total);
-      });
-    }
-
-    const getVal = (col: string) => {
-      const direct = toNumber(currentBill[col]);
-      if (direct > 0) return direct;
-      if (catSums[col] && catSums[col] > 0) return catSums[col];
-      return "";
-    };
-
-    const matVal = getVal("ค่าของ");
-    if (hasValue(matVal)) items.push({ label: "ค่าของ (วัสดุก่อสร้าง)", value: matVal, isAmount: true });
-
-    const laborVal = getVal("ค่าแรง");
-    if (hasValue(laborVal)) items.push({ label: "ค่าแรง", value: laborVal, isAmount: true, extra: laborStatus ? `สถานะ: ${laborStatus}` : undefined });
-
-    const staffVal = getVal("พนักงาน");
-    if (hasValue(staffVal)) items.push({ label: "ค่าแรงพนักงาน", value: staffVal, isAmount: true, extra: staffName ? `ชื่อ: ${staffName}` : undefined });
-
-    const fuelVal = getVal("น้ำมัน");
-    if (hasValue(fuelVal)) items.push({ label: "ค่าน้ำมัน", value: fuelVal, isAmount: true });
-
-    const carVal = getVal("ซ่อมรถ");
-    if (hasValue(carVal)) items.push({ label: "ค่าซ่อมรถ", value: carVal, isAmount: true, extra: carPlate ? `ทะเบียน: ${carPlate}` : undefined });
-
-    const machineVal = getVal("เครื่องจักร");
-    if (hasValue(machineVal)) items.push({ label: "ค่าเครื่องจักร", value: machineVal, isAmount: true });
-
-    const toolVal = getVal("เครื่องมือ");
-    if (hasValue(toolVal)) items.push({ label: "ค่าเครื่องมือ", value: toolVal, isAmount: true, extra: toolName ? `ชื่อ: ${toolName}` : undefined });
-
-    const otherVal = getVal("อื่นๆ");
-    if (hasValue(otherVal)) items.push({ label: "ค่าใช้จ่ายอื่นๆ", value: otherVal, isAmount: true, extra: itemName ? `รายการ: ${itemName}` : undefined });
-
-    if (hasValue(currentBill["ค่าแรงคงเหลือ"])) items.push({ label: "ค่าแรงคงเหลือของสัญญา", value: currentBill["ค่าแรงคงเหลือ"], isAmount: true });
-
-    return items;
-  }, [currentBill, lineItems, laborStatus, itemName, toolName, carPlate, staffName]);
-
   return (
     <div className="w-full flex flex-col gap-3 p-3 sm:p-4 max-w-[1400px] mx-auto font-sans text-sm text-slate-900">
       {/* 1. HEADER BREADCRUMB & WORKFLOW ACTIONS */}
@@ -749,42 +701,49 @@ export function BillDetailClient({
             );
           })()}
 
-          {/* Section 2: รายการค่าใช้จ่าย (Expense Breakdown) - แสดงเฉพาะกรณีที่ไม่มีรายการสินค้าแยกย่อย lineItems */}
+          {/* Section 2: รายการสินค้า / งาน - แสดงกรณีบิลรายการเดี่ยว (Single Item) */}
           {lineItems.length === 0 && (
             <div className="border border-slate-300 rounded-xl bg-white overflow-hidden">
               <div className="px-3.5 py-2 border-b border-slate-300 bg-slate-100 flex items-center justify-between">
                 <div className="flex items-center gap-1.5 font-bold text-xs text-slate-900">
-                  <Layers size={14} className="text-slate-700" />
-                  <span>แจกแจงรายการค่าใช้จ่าย</span>
+                  <Receipt size={14} className="text-slate-700" />
+                  <span>รายการสินค้า / งาน</span>
                 </div>
                 <span className="text-xs font-black text-slate-950">{money(total)} ฿</span>
               </div>
-
-              {expenseBreakdown.length > 0 ? (
+              <div className="overflow-x-auto">
                 <table className="w-full text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                    <tr>
+                      <th className="px-3.5 py-2 text-left w-10">#</th>
+                      <th className="px-3.5 py-2 text-left">สินค้า / หมวดงาน</th>
+                      <th className="px-3.5 py-2 text-left w-28">ประเภท</th>
+                      <th className="px-3.5 py-2 text-right w-32">จำนวนเงิน</th>
+                    </tr>
+                  </thead>
                   <tbody className="divide-y divide-slate-200">
-                    {expenseBreakdown.map((item, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50 transition">
-                        <td className="px-3.5 py-2 text-slate-800 font-semibold w-[45%]">
-                          <div>{item.label}</div>
-                          {item.extra && <div className="text-[11px] text-slate-600 font-normal mt-0.5">{item.extra}</div>}
-                        </td>
-                        <td className="px-3.5 py-2 text-right font-bold text-slate-950">
-                          {item.isAmount ? `${money(item.value)} ฿` : String(item.value)}
-                        </td>
-                      </tr>
-                    ))}
+                    <tr className="hover:bg-slate-50 transition">
+                      <td className="px-3.5 py-2 text-slate-400 font-mono">1</td>
+                      <td className="px-3.5 py-2 text-slate-900 font-semibold">
+                        <div>{productOrWork !== "-" ? productOrWork : (category || "รายการค่าใช้จ่าย")}</div>
+                        {itemName && <div className="text-[11px] text-slate-500 font-normal mt-0.5">{itemName}</div>}
+                      </td>
+                      <td className="px-3.5 py-2 text-slate-600">
+                        <span className={`px-2 py-0.5 rounded border text-[11px] font-medium ${getCostCodeBadgeStyle(category)}`}>
+                          {category}
+                        </span>
+                      </td>
+                      <td className="px-3.5 py-2 text-right font-mono font-bold text-slate-950">
+                        {money(total)} ฿
+                      </td>
+                    </tr>
                     <tr className="bg-slate-100 font-black border-t-2 border-slate-300">
-                      <td className="px-3.5 py-2 text-slate-950 text-xs">ยอดเงินรวมทั้งสิ้น</td>
+                      <td colSpan={3} className="px-3.5 py-2 text-slate-950 text-xs">ยอดเงินรวมทั้งสิ้น</td>
                       <td className="px-3.5 py-2 text-right text-slate-950 text-sm font-black">{money(total)} ฿</td>
                     </tr>
                   </tbody>
                 </table>
-              ) : (
-                <div className="p-3 text-center text-slate-600 text-xs font-medium">
-                  ยอดเงินรวม {money(total)} ฿ (ไม่มีการแจกแจงหมวดย่อยเพิ่มเติม)
-                </div>
-              )}
+              </div>
             </div>
           )}
 
