@@ -371,6 +371,27 @@ export function BillDetailDrawer({
                   <span className="text-indigo-600 text-sm block mt-0.5">{money(lineItemsTotal > 0 ? lineItemsTotal : bill["ยอดเงิน"])}</span>
                 </div>
 
+                {toNumber(bill["จำนวนหัก"] || bill["3เปอร์"]) > 0 ? (
+                  <div>
+                    <span className="text-xs text-slate-400 block">หักภาษี ({bill["หัก"] || "3%"}):</span>
+                    <span className="text-amber-700 font-semibold block mt-0.5">-{money(toNumber(bill["จำนวนหัก"] || bill["3เปอร์"]))}</span>
+                  </div>
+                ) : null}
+
+                {bill["ยอดโอน"] && toNumber(bill["ยอดโอน"]) > 0 && toNumber(bill["ยอดโอน"]) !== toNumber(lineItemsTotal > 0 ? lineItemsTotal : bill["ยอดเงิน"]) ? (
+                  <div>
+                    <span className="text-xs text-slate-400 block">ยอดโอนสุทธิ:</span>
+                    <span className="text-emerald-700 font-semibold block mt-0.5">{money(toNumber(bill["ยอดโอน"]))}</span>
+                  </div>
+                ) : null}
+
+                {bill["วันจ่าย"] ? (
+                  <div>
+                    <span className="text-xs text-slate-400 block">วันจ่าย {bill["เครดิต"] ? `(เครดิต ${bill["เครดิต"]})` : ""}:</span>
+                    <span className="text-sky-700 font-semibold block mt-0.5">{formatDateDisplay(bill["วันจ่าย"])}</span>
+                  </div>
+                ) : null}
+
                 <div>
                   <span className="text-xs text-slate-400 block">ผู้เบิก:</span>
                   <span className="text-slate-800 block mt-0.5">{String(bill["ผู้เบิก"] || "-")}</span>

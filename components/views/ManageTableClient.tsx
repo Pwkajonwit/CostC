@@ -1359,6 +1359,21 @@ function renderDisplayCell(column: string, value: RowValue | undefined, displayL
   if ((column === "ธนาคาร" || column === "bank" || column === "bank_name") && rawValue) {
     return rawValue.replace(/^Ba\d+\s*[-–—]?\s*/i, "").trim() || rawValue;
   }
+  if (column === "เครดิตจ่าย" && rawValue && rawValue !== "-") {
+    const match = rawValue.match(/\d+/);
+    if (match) {
+      const dayNum = parseInt(match[0], 10);
+      if (dayNum >= 1 && dayNum <= 31) {
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md font-medium text-[11px] bg-amber-50 text-amber-900 border border-amber-200/80 shadow-2xs">
+            <span>🗓️</span>
+            <span>วันที่ {dayNum} ของเดือน</span>
+          </span>
+        );
+      }
+    }
+    return rawValue;
+  }
   if (isDateColumn(column) && rawValue) return formatDateDisplay(rawValue);
   return formatValue(value, column);
 }
@@ -1403,10 +1418,11 @@ function isDateColumn(column: string) {
 }
 
 function isCenterColumn(column: string) {
-  return column === "color" || column === "COLOR" || column === "จัดการ" || column === "ประเภท" || column === "สถานะ";
+  return column === "color" || column === "COLOR" || column === "จัดการ" || column === "ประเภท" || column === "สถานะ" || column === "เครดิตจ่าย";
 }
 
 function isAmountColumn(column: string) {
+  if (column === "เครดิตจ่าย") return false;
   return /ยอด|เงิน|ราคา|vat|หัก|เครดิต|ค่าแรง|รวม|คงเหลือ|โอน|งบ/.test(column);
 }
 

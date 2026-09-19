@@ -22,6 +22,7 @@ export type BillCategoryBudgetGuardrailProps = {
 
 export function BillCategoryBudgetGuardrail({ values, projectRows = [], existingBills = [] }: BillCategoryBudgetGuardrailProps) {
   const [budgetStatus, setBudgetStatus] = useState<CategoryBudgetCheckResult | null>(null);
+  const [overallStatus, setOverallStatus] = useState<CategoryBudgetCheckResult | null>(null);
 
   const selectedProjectId = String(values["ID Project"] || "").trim();
   const selectedProduct = String(values["สินค้า"] || "").trim();
@@ -30,6 +31,7 @@ export function BillCategoryBudgetGuardrail({ values, projectRows = [], existing
   useEffect(() => {
     if (!selectedProjectId || (!selectedProduct && !selectedCategory)) {
       setBudgetStatus(null);
+      setOverallStatus(null);
       return;
     }
 
@@ -49,85 +51,64 @@ export function BillCategoryBudgetGuardrail({ values, projectRows = [], existing
 
     if (!matchedProject) {
       setBudgetStatus(null);
+      setOverallStatus(null);
       return;
     }
 
     const status = checkCategoryBudgetCap(values, matchedProject, existingBills);
     setBudgetStatus(status);
+
+    const isContractor = values?.["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา";
+    const billAmt = String(values["ยอดเงิน"] || values["ค่าของ"] || values["ค่าแรง"] || "0");
+    const rowForOverall: SheetRow = {
+      ...values,
+      "สินค้า": "",
+      "ประเภท": isContractor ? "งบค่าแรงทั้งหมด" : "งบค่าของทั้งหมด",
+      "ยอดเงิน": billAmt,
+      "ค่าของ": isContractor ? "" : billAmt,
+      "ค่าแรง": isContractor ? billAmt : "",
+    };
+    const overall = checkCategoryBudgetCap(rowForOverall, matchedProject, existingBills);
+    if (overall && overall.hasBudgetCap) {
+      setOverallStatus(overall);
+    } else {
+      setOverallStatus(null);
+    }
   }, [selectedProjectId, selectedProduct, selectedCategory, values, projectRows, existingBills]);
 
-  if (!budgetStatus) {
+  if (!budgetStatus && !overallStatus) {
     return null;
   }
 
-  if (!budgetStatus.hasBudgetCap) {
-    const label = budgetStatus.categoryLabel || selectedCategory || selectedProduct || "หมวดนี้";
+  const label = selectedProduct || selectedCategory || budgetStatus?.categoryLabel || "หมวดนี้";
+
+  // Case 1: Specific sub-budget exists
+  if (budgetStatus && budgetStatus.hasBudgetCap && budgetStatus.isSpecificSubBudget) {
     return (
-      <div className="w-full min-w-0 max-w-full h-10 sm:h-9 px-3 rounded-lg border border-dashed border-slate-300 bg-slate-50/70 text-slate-500 text-xs font-sans flex items-center justify-between gap-2 shadow-2xs">
-        <div className="flex items-center gap-1.5 min-w-0 truncate">
-          <Info size={14} className="text-slate-400 shrink-0" />
-          <span className="truncate">หมวด '{label}': ไม่ได้ตั้งวงเงินคุมงบ</span>
-        </div>
-        <span className="text-[11px] text-slate-400 shrink-0 bg-slate-200/60 px-1.5 py-0.5 rounded">
-          ไม่คุมงบ
-        </span>
+      <div className="space-y-1.5 w-full">
+        <BudgetStatusCard check={budgetStatus} prefix="คุมงบหมวดย่อย" />
+        {overallStatus && (
+          <BudgetStatusCard check={overallStatus} prefix="คุมงบภาพรวม" />
+        )}
       </div>
     );
   }
 
-  const {
-    categoryLabel,
-    budgetLimit,
-    currentBillAmount,
-    totalAfterBill,
-    remainingAfterBill,
-    percentUsedAfterBill,
-    isOverBudget,
-    isWarning,
-  } = budgetStatus;
-
+  // Case 2: No specific sub-budget (either fell back to overall or has no budget cap)
   return (
-    <div
-      className={`w-full min-w-0 max-w-full h-10 sm:h-9 px-3 rounded-lg border transition-all text-xs font-sans flex items-center justify-between gap-2 shadow-2xs ${
-        isOverBudget
-          ? "bg-rose-50 border-rose-300 text-rose-900 animate-pulse"
-          : isWarning
-          ? "bg-amber-50 border-amber-300 text-amber-900"
-          : "bg-emerald-50/90 border-emerald-200/80 text-emerald-900"
-      }`}
-    >
-      <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden">
-        {isOverBudget ? (
-          <ShieldAlert size={15} className="text-rose-600 shrink-0" />
-        ) : isWarning ? (
-          <AlertTriangle size={15} className="text-amber-600 shrink-0" />
-        ) : (
-          <ShieldCheck size={15} className="text-emerald-600 shrink-0" />
-        )}
-
+    <div className="space-y-1.5 w-full">
+      <div className="w-full min-w-0 max-w-full h-10 sm:h-9 px-3 rounded-lg border border-dashed border-slate-300 bg-slate-50/70 text-slate-500 text-xs font-sans flex items-center justify-between gap-2 shadow-2xs">
         <div className="flex items-center gap-1.5 min-w-0 truncate">
-          <span className="font-semibold text-xs truncate">คุมงบ: {categoryLabel}</span>
-          <span
-            className={`text-[10px] font-semibold px-1.5 py-0.2 rounded shrink-0 ${
-              isOverBudget
-                ? "bg-rose-200 text-rose-800"
-                : isWarning
-                ? "bg-amber-200 text-amber-800"
-                : "bg-emerald-200 text-emerald-800"
-            }`}
-          >
-            {percentUsedAfterBill}%
-          </span>
+          <Info size={14} className="text-slate-400 shrink-0" />
+          <span className="truncate">หมวด '{label}': ไม่ได้ตั้งวงเงินคุมงบย่อย</span>
         </div>
+        <span className="text-[11px] text-slate-400 shrink-0 bg-slate-200/60 px-1.5 py-0.5 rounded">
+          ไม่คุมงบย่อย
+        </span>
       </div>
-
-      <div className="text-right shrink-0 text-xs font-semibold">
-        {remainingAfterBill < 0 ? (
-          <span className="text-rose-700 font-bold">เกิน {money(Math.abs(remainingAfterBill))} ฿</span>
-        ) : (
-          <span className="text-emerald-800">คงเหลือ {money(remainingAfterBill)} ฿</span>
-        )}
-      </div>
+      {overallStatus && (
+        <BudgetStatusCard check={overallStatus} prefix="คุมงบภาพรวม" />
+      )}
     </div>
   );
 }

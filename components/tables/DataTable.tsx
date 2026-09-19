@@ -404,6 +404,7 @@ function extractRowSequence(row: SheetRow): number {
 }
 
 function isAmountColumn(column: string) {
+  if (column === "เครดิตจ่าย") return false;
   return /ยอด|เงิน|ราคา|vat|หัก|เครดิต|ค่าแรง|รวม|คงเหลือ|โอน|งบ/.test(column);
 }
 
@@ -429,6 +430,7 @@ function isCenterColumn(column: string): boolean {
     col === "จัดการ" ||
     col === "statusค่าแรง" ||
     col === "เครดิต" ||
+    col === "เครดิตจ่าย" ||
     col === "vat" ||
     col === "หัก" ||
     col === "วันได้บิล" ||

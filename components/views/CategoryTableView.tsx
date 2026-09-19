@@ -27,20 +27,6 @@ import {
   getCostCodeBadgeStyle
 } from "@/lib/cost-codes";
 
-type WorkGroup = "โครงสร้าง" | "สถาปัตยกรรม & ปูผิว" | "งานระบบ M&E" | "ตกแต่ง & ภูมิทัศน์" | "เตรียมงาน & ดำเนินการ" | "ยานพาหนะ & เครื่องมือ" | "พนักงาน";
-
-function getWorkGroup(code: string): WorkGroup {
-  const num = parseInt(code.replace(/\D/g, ""), 10);
-  if ([101, 201, 121, 221, 122, 222, 123, 223].includes(num)) return "เตรียมงาน & ดำเนินการ";
-  if ([102, 202, 103, 203, 104, 204, 105, 205, 106, 206, 107, 207, 108, 208, 109, 209].includes(num)) return "โครงสร้าง";
-  if ([110, 210, 111, 211, 112, 212, 113, 213, 114, 214].includes(num)) return "สถาปัตยกรรม & ปูผิว";
-  if ([115, 215, 116, 216, 117, 217].includes(num)) return "งานระบบ M&E";
-  if ([118, 218, 119, 219, 120, 220].includes(num)) return "ตกแต่ง & ภูมิทัศน์";
-  if ([501, 502, 503, 504].includes(num)) return "ยานพาหนะ & เครื่องมือ";
-  if (num === 301) return "พนักงาน";
-  return "เตรียมงาน & ดำเนินการ";
-}
-
 export function CategoryTableView() {
   const [activeTab, setActiveTab] = useState<"all" | "material" | "labor">("all");
   const [search, setSearch] = useState("");
@@ -53,7 +39,6 @@ export function CategoryTableView() {
       materialName: string;
       laborCode: string;
       laborName: string;
-      group: WorkGroup;
       subItems?: string[];
     }> = [];
 
@@ -67,7 +52,6 @@ export function CategoryTableView() {
         materialName: mat.name,
         laborCode: lab.code,
         laborName: lab.name,
-        group: getWorkGroup(mat.code),
         subItems: mat.code === "123" ? SUB_ITEMS_123 : (lab.code === "223" ? SUB_ITEMS_223 : undefined)
       });
     }
@@ -79,8 +63,7 @@ export function CategoryTableView() {
         materialCode: eq.code,
         materialName: eq.name,
         laborCode: "-",
-        laborName: "-",
-        group: "ยานพาหนะ & เครื่องมือ"
+        laborName: "-"
       });
     });
 
@@ -91,8 +74,7 @@ export function CategoryTableView() {
         materialCode: "-",
         materialName: "-",
         laborCode: st.code,
-        laborName: st.name,
-        group: "พนักงาน"
+        laborName: st.name
       });
     });
 
@@ -110,7 +92,6 @@ export function CategoryTableView() {
         item.materialName.toLowerCase().includes(q) ||
         item.laborCode.includes(q) ||
         item.laborName.toLowerCase().includes(q) ||
-        item.group.toLowerCase().includes(q) ||
         (item.subItems && item.subItems.some(s => s.toLowerCase().includes(q)))
       );
     });
@@ -123,14 +104,12 @@ export function CategoryTableView() {
         code: m.code,
         name: m.name,
         type: m.code === "123" ? "อื่นๆ" : "ค่าของ",
-        group: getWorkGroup(m.code),
         subItems: m.code === "123" ? SUB_ITEMS_123 : undefined
       })),
       ...EQUIPMENT_500_CODES.map(e => ({
         code: e.code,
         name: e.name,
         type: getExpenseFieldForCategory(e.code),
-        group: "ยานพาหนะ & เครื่องมือ" as WorkGroup,
         subItems: undefined
       }))
     ];
@@ -141,7 +120,6 @@ export function CategoryTableView() {
       i.code.includes(q) ||
       i.name.toLowerCase().includes(q) ||
       i.type.toLowerCase().includes(q) ||
-      i.group.toLowerCase().includes(q) ||
       (i.subItems && i.subItems.some(s => s.toLowerCase().includes(q)))
     );
   }, [search]);
@@ -153,14 +131,12 @@ export function CategoryTableView() {
         code: l.code,
         name: l.name,
         type: "ค่าแรง",
-        group: getWorkGroup(l.code),
         subItems: l.code === "223" ? SUB_ITEMS_223 : undefined
       })),
       ...STAFF_300_CODES.map(s => ({
         code: s.code,
         name: s.name,
         type: "พนักงาน",
-        group: "พนักงาน" as WorkGroup,
         subItems: undefined
       }))
     ];
@@ -171,7 +147,6 @@ export function CategoryTableView() {
       i.code.includes(q) ||
       i.name.toLowerCase().includes(q) ||
       i.type.toLowerCase().includes(q) ||
-      i.group.toLowerCase().includes(q) ||
       (i.subItems && i.subItems.some(s => s.toLowerCase().includes(q)))
     );
   }, [search]);
@@ -297,14 +272,13 @@ export function CategoryTableView() {
                     </div>
                   </th>
                   <th className="py-3 px-4">ชื่อรายการ (ค่าแรง)</th>
-                  <th className="py-3 px-4 w-48">กลุ่มหมวดงาน</th>
                   <th className="py-3 px-4">รายละเอียด / รายการย่อย</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-[12px]">
                 {filteredComparison.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-12 text-center text-slate-400">
+                    <td colSpan={6} className="py-12 text-center text-slate-400">
                       ไม่พบข้อมูลที่ตรงกับคำค้นหา &ldquo;{search}&rdquo;
                     </td>
                   </tr>
@@ -355,13 +329,6 @@ export function CategoryTableView() {
                         )}
                       </td>
 
-                      {/* Work Group */}
-                      <td className="py-2.5 px-4">
-                        <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200/80">
-                          {item.group}
-                        </span>
-                      </td>
-
                       {/* Sub-items / Note */}
                       <td className="py-2.5 px-4 text-slate-500 text-[11px]">
                         {item.subItems && item.subItems.length > 0 ? (
@@ -397,14 +364,13 @@ export function CategoryTableView() {
                   <th className="py-3 px-4 w-20 text-center">รหัส</th>
                   <th className="py-3 px-4 w-60">ชื่อหมวดสินค้า/ค่าของ</th>
                   <th className="py-3 px-4 w-36">ประเภทบัญชีหลัก</th>
-                  <th className="py-3 px-4 w-48">กลุ่มงานก่อสร้าง</th>
                   <th className="py-3 px-4">รายละเอียด / รายการย่อย</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-[12px]">
                 {materialList.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-12 text-center text-slate-400">
+                    <td colSpan={4} className="py-12 text-center text-slate-400">
                       ไม่พบข้อมูลที่ตรงกับคำค้นหา
                     </td>
                   </tr>
@@ -422,11 +388,6 @@ export function CategoryTableView() {
                       <td className="py-2.5 px-4">
                         <span className="inline-block px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-800 border border-slate-200">
                           {item.type}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-4">
-                        <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-50 text-slate-600 border border-slate-200">
-                          {item.group}
                         </span>
                       </td>
                       <td className="py-2.5 px-4 text-slate-500 text-[11px]">
@@ -459,14 +420,13 @@ export function CategoryTableView() {
                   <th className="py-3 px-4 w-20 text-center">รหัส</th>
                   <th className="py-3 px-4 w-60">ชื่อหมวดงานค่าแรง</th>
                   <th className="py-3 px-4 w-36">ประเภทบัญชีหลัก</th>
-                  <th className="py-3 px-4 w-48">กลุ่มงานก่อสร้าง</th>
                   <th className="py-3 px-4">รายละเอียด / รายการย่อย</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-[12px]">
                 {laborList.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-12 text-center text-slate-400">
+                    <td colSpan={4} className="py-12 text-center text-slate-400">
                       ไม่พบข้อมูลที่ตรงกับคำค้นหา
                     </td>
                   </tr>
@@ -484,11 +444,6 @@ export function CategoryTableView() {
                       <td className="py-2.5 px-4">
                         <span className="inline-block px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-800 border border-slate-200">
                           {item.type}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-4">
-                        <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-50 text-slate-600 border border-slate-200">
-                          {item.group}
                         </span>
                       </td>
                       <td className="py-2.5 px-4 text-slate-500 text-[11px]">

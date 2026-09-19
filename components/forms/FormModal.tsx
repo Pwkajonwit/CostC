@@ -324,7 +324,8 @@ function MultiLineItemsBuilder({
     }
 
     const hasBudgetCap = Boolean(itemBudget?.hasBudgetCap);
-    const isOver = Boolean(itemBudget?.isOverBudget);
+    const hasSpecificCap = Boolean(itemBudget?.hasBudgetCap && itemBudget?.isSpecificSubBudget);
+    const isOver = Boolean(hasSpecificCap && itemBudget?.isOverBudget);
 
     return (
       <div
@@ -406,7 +407,7 @@ function MultiLineItemsBuilder({
                 onUpdate(item.id, "detail", val);
               }}
             />
-          ) : hasBudgetCap && itemBudget ? (
+          ) : hasSpecificCap && itemBudget ? (
             <div className="w-full space-y-1">
               <div
                 className={`w-full h-10 sm:h-9 px-2.5 rounded-lg border flex items-center justify-between text-xs font-sans shadow-2xs transition-all ${
@@ -918,7 +919,7 @@ export function FormModal({
       next["เครื่องมือ"] = toolSum > 0 ? String(toolSum) : "";
       next["อื่นๆ"] = otherSum > 0 ? String(otherSum) : "";
       next["ยอดเงิน"] = String(totalSum);
-      next["ยอดโอน"] = String(totalSum);
+      applyBillDeductAmount(next);
       next["has_fuel_or_repair"] = hasFuelOrRepair ? "true" : "";
       if (plates.length > 0) {
         next["ทะเบียน"] = plates[0] || "";
@@ -1423,7 +1424,7 @@ export function FormModal({
       submitValues["เครื่องมือ"] = toolSum > 0 ? String(toolSum) : "";
       submitValues["อื่นๆ"] = otherSum > 0 ? String(otherSum) : "";
       submitValues["ยอดเงิน"] = String(totalSum);
-      submitValues["ยอดโอน"] = String(totalSum);
+      applyBillDeductAmount(submitValues);
       submitValues["ประเภท"] = multiLineItems[0]?.categoryType || multiLineItems[0]?.category || submitValues["ประเภท"] || (isContractorVendor ? "201 เตรียมงาน" : "101 เตรียมงาน");
       const prodNames = multiLineItems.map(i => i.category).filter(Boolean);
       submitValues["สินค้า"] = isContractorVendor ? "" : (prodNames.join(", ") || submitValues["สินค้า"] || "");
@@ -1498,6 +1499,8 @@ export function FormModal({
       body.set("อื่นๆ", submitValues["อื่นๆ"]);
       body.set("ยอดเงิน", submitValues["ยอดเงิน"]);
       body.set("ยอดโอน", submitValues["ยอดโอน"]);
+      if (submitValues["จำนวนหัก"]) body.set("จำนวนหัก", submitValues["จำนวนหัก"]);
+      if (submitValues["3เปอร์"]) body.set("3เปอร์", submitValues["3เปอร์"]);
       body.set("สินค้า", submitValues["สินค้า"]);
       body.set("items", JSON.stringify(multiLineItems));
       body.delete("rows");
@@ -2940,10 +2943,33 @@ function renderField(
         value={isDateField ? toDateInputValue(value) : value}
         readOnly={readOnly}
         inputMode={inputMode}
+        placeholder={field.placeholder}
         lang={isDateField ? "th-TH" : undefined}
         onChange={event => onChange(isDateField ? normalizeBillDateInput(event.target.value) : event.target.value)}
         className="w-full min-w-0 max-w-full block box-border h-10 sm:h-9 px-3 bg-white border border-slate-300 focus:border-slate-800 focus:outline-none rounded-lg text-xs sm:text-sm font-normal text-slate-800 placeholder:text-slate-400 transition-all appearance-none cursor-pointer"
       />
+      {field.name === "เครดิตจ่าย" ? (
+        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+          <span className="text-2xs text-slate-500 font-medium">ปุ่มลัดวันตัดรอบ:</span>
+          {[1, 5, 10, 15, 16, 20, 25, 30].map(day => {
+            const isSelected = parseInt(String(value || "").replace(/\D/g, ""), 10) === day;
+            return (
+              <button
+                key={day}
+                type="button"
+                onClick={() => onChange(String(day))}
+                className={`px-2 py-0.5 text-2xs rounded border transition cursor-pointer ${
+                  isSelected
+                    ? "bg-amber-600 text-white border-amber-700 font-semibold shadow-2xs"
+                    : "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100"
+                }`}
+              >
+                {day === 30 ? "สิ้นเดือน (30)" : `วันที่ ${day}`}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
       {isProjectVatTotal && workAmount > 0 ? (
         <div className="flex items-center justify-between text-[11px] bg-emerald-50 text-emerald-800 px-2.5 py-1 rounded-md border border-emerald-200">
           <span>ภาษี VAT 7%: <strong className="font-semibold text-emerald-700">฿{vatAmount.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
@@ -3892,6 +3918,43 @@ function calculateDueDate(baseDateStr: string, days: number): string {
   return `${y}-${m}-${d}`;
 }
 
+function parseCreditCutoffDay(value: unknown): number {
+  if (value === null || value === undefined) return 0;
+  const str = String(value).trim();
+  if (!str || str === "-" || str === "0") return 0;
+  const match = str.match(/\d+/);
+  if (!match) return 0;
+  const day = parseInt(match[0], 10);
+  return day >= 1 && day <= 31 ? day : 0;
+}
+
+function calculateMonthlyCutoffDueDate(baseDateStr: string, cutoffDay: number): string {
+  const parsed = parseDateStrict(baseDateStr);
+  if (!parsed || isNaN(cutoffDay) || cutoffDay < 1 || cutoffDay > 31) return "";
+  
+  let targetYear = parsed.year;
+  let targetMonth = parsed.month; // 1-12
+  
+  // หากวันที่ซื้อ มากกว่า วันตัดรอบจ่าย (เช่น ซื้อวันที่ 20 แต่วันตัดรอบคือ 16) -> จ่ายวันที่ 16 ของเดือนถัดไป
+  if (parsed.day > cutoffDay) {
+    if (targetMonth === 12) {
+      targetYear += 1;
+      targetMonth = 1;
+    } else {
+      targetMonth += 1;
+    }
+  }
+  // หากวันที่ซื้อ น้อยกว่าหรือเท่ากับ วันตัดรอบจ่าย (เช่น ซื้อวันที่ 1 แต่วันตัดรอบคือ 16) -> จ่ายวันที่ 16 ของเดือนเดียวกัน
+  
+  const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
+  const targetDay = Math.min(cutoffDay, daysInMonth);
+  
+  const y = targetYear;
+  const m = String(targetMonth).padStart(2, "0");
+  const d = String(targetDay).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 function normalizeDependentValues(values: Record<string, string>, changedField: string, form: FormPayload) {
   // Contractor Form: เมื่อเปลี่ยนประเภท ให้ auto-set วงเงินจำกัดยอด/ปี
   const isContractorForm = form.tableName === TABLES.CONTRACTOR || form.tableName === "contractors" || form.tableName === "รับเหมา" || form.tableName === "5. รับเหมา";
@@ -3942,6 +4005,20 @@ function normalizeDependentValues(values: Record<string, string>, changedField: 
       }
       values["ประเภท"] = values["สินค้า"] || "201 เตรียมงาน";
       transferAmountToCategory(values, values["ประเภท"]);
+    }
+  }
+
+  // หากเลือกร้านค้า และร้านค้านั้นมี "เครดิตจ่าย" (วันตัดรอบประจำเดือน เช่น วันที่ 16)
+  if (changedField === "ร้านค้า" && hasValue(values["ร้านค้า"])) {
+    const storeOption = (form.refOptions?.["ร้านค้า"] || []).find(opt => opt.value === values["ร้านค้า"]);
+    const storeCutoffRaw = storeOption?.row?.["เครดิตจ่าย"] || storeOption?.row?.["credit_payment_day"];
+    const storeCutoffDay = parseCreditCutoffDay(storeCutoffRaw);
+    if (storeCutoffDay > 0) {
+      const baseDate = values["ว/ด/ป"] || values["วันที่"] || getTodayDateIso();
+      const cutoffDueDate = calculateMonthlyCutoffDueDate(baseDate, storeCutoffDay);
+      if (cutoffDueDate) {
+        values["วันจ่าย"] = cutoffDueDate;
+      }
     }
   }
 
@@ -4021,16 +4098,28 @@ function normalizeDependentValues(values: Record<string, string>, changedField: 
 
   // หากเลือกเครดิต จะเคลียข้อมูลวันที่ได้บิล และคำนวณวันจ่ายจาก ว/ด/ป (หรือ วันที่) + เครดิต
   if (changedField === "เครดิต") {
-    const creditDays = parseCreditDays(values["เครดิต"]);
-    if (creditDays > 0) {
-      values["วันได้บิล"] = ""; // เคลียร์ข้อมูลวันที่ได้บิลทันที
-      const baseDate = values["ว/ด/ป"] || values["วันที่"] || getTodayDateIso();
-      const dueDate = calculateDueDate(baseDate, creditDays);
-      if (dueDate) {
-        values["วันจ่าย"] = dueDate;
+    const storeOption = (form.refOptions?.["ร้านค้า"] || []).find(opt => opt.value === values["ร้านค้า"]);
+    const storeCutoffRaw = storeOption?.row?.["เครดิตจ่าย"] || storeOption?.row?.["credit_payment_day"];
+    const storeCutoffDay = parseCreditCutoffDay(storeCutoffRaw);
+    const baseDate = values["ว/ด/ป"] || values["วันที่"] || getTodayDateIso();
+
+    if (storeCutoffDay > 0) {
+      values["วันได้บิล"] = "";
+      const cutoffDueDate = calculateMonthlyCutoffDueDate(baseDate, storeCutoffDay);
+      if (cutoffDueDate) {
+        values["วันจ่าย"] = cutoffDueDate;
       }
     } else {
-      values["วันจ่าย"] = "";
+      const creditDays = parseCreditDays(values["เครดิต"]);
+      if (creditDays > 0) {
+        values["วันได้บิล"] = ""; // เคลียร์ข้อมูลวันที่ได้บิลทันที
+        const dueDate = calculateDueDate(baseDate, creditDays);
+        if (dueDate) {
+          values["วันจ่าย"] = dueDate;
+        }
+      } else {
+        values["วันจ่าย"] = "";
+      }
     }
   }
 
@@ -4039,15 +4128,26 @@ function normalizeDependentValues(values: Record<string, string>, changedField: 
     values["วันออก 3%"] = "";
   }
 
-  // Auto-calculate "วันจ่าย" from "ว/ด/ป" + "เครดิต"
+  // Auto-calculate "วันจ่าย" from "ว/ด/ป" (หรือ วันที่) + ร้านค้า เครดิตจ่าย หรือ เครดิต (วัน)
   if (changedField === "ว/ด/ป" || changedField === "วันที่") {
-    const creditDays = parseCreditDays(values["เครดิต"]);
-    if (creditDays > 0) {
-      const baseDate = values["ว/ด/ป"] || values["วันที่"];
-      if (hasValue(baseDate)) {
-        const dueDate = calculateDueDate(baseDate, creditDays);
-        if (dueDate) {
-          values["วันจ่าย"] = dueDate;
+    const storeOption = (form.refOptions?.["ร้านค้า"] || []).find(opt => opt.value === values["ร้านค้า"]);
+    const storeCutoffRaw = storeOption?.row?.["เครดิตจ่าย"] || storeOption?.row?.["credit_payment_day"];
+    const storeCutoffDay = parseCreditCutoffDay(storeCutoffRaw);
+    const baseDate = values["ว/ด/ป"] || values["วันที่"] || getTodayDateIso();
+
+    if (storeCutoffDay > 0) {
+      const cutoffDueDate = calculateMonthlyCutoffDueDate(baseDate, storeCutoffDay);
+      if (cutoffDueDate) {
+        values["วันจ่าย"] = cutoffDueDate;
+      }
+    } else {
+      const creditDays = parseCreditDays(values["เครดิต"]);
+      if (creditDays > 0) {
+        if (hasValue(baseDate)) {
+          const dueDate = calculateDueDate(baseDate, creditDays);
+          if (dueDate) {
+            values["วันจ่าย"] = dueDate;
+          }
         }
       }
     }
@@ -4330,6 +4430,12 @@ function isFieldVisible(field: FieldSchema, values: Record<string, string>) {
   }
   if (field.name === "vat") {
     return vendorType === "ร้านค้า" || (vendorType === "ผู้รับเหมา" && values["statusค่าแรง"] === "บริษัท");
+  }
+  if (field.name === "เครดิต") {
+    return vendorType === "ร้านค้า" || isVatActive(values["vat"]) || parseCreditDays(values["เครดิต"]) > 0;
+  }
+  if (field.name === "วันจ่าย") {
+    return Boolean(values["วันจ่าย"] || parseCreditDays(values["เครดิต"]) > 0 || hasValue(values["เครดิต"]));
   }
   if (field.name === "หัก") {
     return vendorType === "ผู้รับเหมา" || isLaborCost(cat) || isOtherExpense(cat);
