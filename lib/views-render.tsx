@@ -319,6 +319,7 @@ function detailTitle(id: string, row: SheetRow, fallback: string) {
 }
 
 function amountField(field: string) {
+  if (field === "เครดิตจ่าย") return false;
   return /ยอด|เงิน|ราคา|vat|หัก|เครดิต|ค่าแรง|รวม|คงเหลือ|โอน|งบ/.test(field);
 }
 
@@ -326,6 +327,16 @@ function formatDetailValue(field: string, value: unknown, lookups?: { banks?: Re
   if (value === null || value === undefined || value === "") return "-";
   if (amountField(field) && typeof value === "number") return money(value);
   const strVal = String(value).trim();
+  if (field === "เครดิตจ่าย" && strVal && strVal !== "-") {
+    const match = strVal.match(/\d+/);
+    if (match) {
+      const dayNum = parseInt(match[0], 10);
+      if (dayNum >= 1 && dayNum <= 31) {
+        return `วันที่ ${dayNum} ของเดือน`;
+      }
+    }
+    return strVal;
+  }
   if (field === "ธนาคาร" || field === "bank" || field === "bank_name") {
     if (lookups?.banks && lookups.banks[strVal]) {
       return lookups.banks[strVal];

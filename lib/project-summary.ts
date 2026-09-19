@@ -2,17 +2,6 @@ import { toNumber } from "@/lib/utils/numbers";
 import { isCommittedBill } from "@/lib/bills/bill-status";
 import type { RowValue, SheetRow } from "@/lib/types";
 
-const AMOUNT_COLUMNS = [
-  "ค่าของ",
-  "ค่าแรง",
-  "พนักงาน",
-  "น้ำมัน",
-  "ซ่อมรถ",
-  "เครื่องจักร",
-  "เครื่องมือ",
-  "อื่นๆ"
-];
-
 export function valueOf(row: SheetRow, columns: string[]) {
   for (const column of columns) {
     const value = row[column];
@@ -70,18 +59,7 @@ export function hydrateDataRows(rows: SheetRow[]) {
     const items = parseBillItems(output);
     const itemsSum = items.reduce((s, item) => s + toNumber(item.amount ?? item.price ?? item.total), 0);
     
-    if (itemsSum > 0) {
-      output["ยอดเงิน"] = itemsSum;
-    } else if (!hasValue(output["ยอดเงิน"])) {
-      let sum = 0;
-      for (let j = 0; j < AMOUNT_COLUMNS.length; j++) {
-        const val = output[AMOUNT_COLUMNS[j]];
-        if (val !== null && val !== undefined && val !== "") {
-          sum += toNumber(val);
-        }
-      }
-      output["ยอดเงิน"] = sum;
-    }
+    output["ยอดเงิน"] = itemsSum > 0 ? itemsSum : toNumber(output["ยอดเงิน"]);
     
     if (!hasValue(output["ยอดโอน"])) {
       output["ยอดโอน"] = computeTransferAmount(output);
@@ -97,11 +75,11 @@ export function hydrateDataRows(rows: SheetRow[]) {
   return result;
 }
 
-export function computeBillAmount(row: SheetRow) {
+export function computeBillAmount(row: SheetRow): number {
+  if (!row) return 0;
   const items = parseBillItems(row);
   const itemsSum = items.reduce((s, i) => s + toNumber(i.amount ?? i.price ?? i.total), 0);
-  const colSum = sumColumns([row], AMOUNT_COLUMNS);
-  return itemsSum > 0 ? itemsSum : colSum;
+  return itemsSum > 0 ? itemsSum : toNumber(row["ยอดเงิน"]);
 }
 
 export function computeBillTransferAmount(row: SheetRow) {
@@ -239,7 +217,7 @@ export function computeCashFlowBreakdown(dataRows: SheetRow[]): {
 
   for (const row of dataRows) {
     if (!isCommittedBill(row)) continue;
-    const amount = toNumber(row["ยอดเงิน"]) || AMOUNT_COLUMNS.reduce((sum, c) => sum + toNumber(row[c]), 0);
+    const amount = toNumber(row["ยอดเงิน"]);
     const st = String(row["สถานะ"] || "").trim().toLowerCase();
     if (st.includes("เบิกแล้ว") || st === "paid" || st === "withdrawn") {
       actualPaid += amount;
@@ -262,7 +240,7 @@ export function hydrateProjectRowsForList(projectRows: SheetRow[], dataRows: She
     if (!isCommittedBill(row)) continue;
     const projectId = String(row["ID Project"] || "").trim();
     if (!projectId) continue;
-    const amount = toNumber(row["ยอดเงิน"]) || AMOUNT_COLUMNS.reduce((sum, column) => sum + toNumber(row[column]), 0);
+    const amount = toNumber(row["ยอดเงิน"]);
     const st = String(row["สถานะ"] || "").trim().toLowerCase();
     const isPaid = st.includes("เบิกแล้ว") || st === "paid" || st === "withdrawn";
 

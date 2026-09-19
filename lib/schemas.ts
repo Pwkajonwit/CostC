@@ -156,6 +156,12 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
     { name: "id_store", type: "Text", key: true, initialValue: "nextStoreId", required: true },
     { name: "ชื่อร้านค้า", type: "Text", required: true },
     { name: "ชื่อเต็ม", type: "Text" },
+    {
+      name: "เครดิตจ่าย",
+      type: "Text",
+      placeholder: "เช่น วันที่ 16 หรือ 16",
+      description: "กำหนดวันตัดรอบจ่ายเงินของร้าน เช่น วันที่ 16 (ซื้อ 1-16 จ่าย 16 เดือนนี้, ซื้อหลัง 16 จ่าย 16 เดือนถัดไป)"
+    },
     { name: "เลขบัญชี", type: "Text" },
     { name: "ธนาคาร", type: "Ref", refTable: TABLES.BANK, refKey: "id_bank", refLabel: "ชื่อธนาคาร" },
     { name: "เบอร์โทร", type: "Text" },

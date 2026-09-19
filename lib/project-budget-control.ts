@@ -330,7 +330,13 @@ export function calculateProjectBudgetControl(
   const vatTotal = toNumber(project["ยอดรวม vat"] || project["ยอดรวม VAT"] || (workAmount > 0 ? workAmount * 1.07 : 0));
 
   // งบประมาณโครงการ (ตามเกณฑ์ของ ProjectBudgetAllocator)
-  const projectBudget = rawBudget > 0 ? rawBudget : (workAmount > 0 ? workAmount : 0);
+  const projectBudget = workAmount > 0
+    ? workAmount
+    : vatTotal > 0
+    ? Math.round((vatTotal / 1.07) * 100) / 100
+    : rawBudget > 0
+    ? rawBudget
+    : 0;
 
   // 1. คำนวณยอดจัดสรรของ 27 รายการค่าของ
   const materialSubTotal = ALLOCATED_BUDGET_ITEMS

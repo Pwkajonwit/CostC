@@ -184,6 +184,8 @@ export type CategoryBudgetCheckResult = {
   isWarning: boolean;
   message: string;
   isProductLevel?: boolean;
+  isSpecificSubBudget?: boolean;
+  isOverallFallback?: boolean;
 };
 
 export async function validateBillRelations(row: SheetRow) {
@@ -245,6 +247,8 @@ export function checkCategoryBudgetCap(
   let targetBudgetField = "";
   let categoryLabel = "";
   let isProductLevel = false;
+  let isSpecificSubBudget = false;
+  let isOverallFallback = false;
 
   // 1. หมวดค่าแรง / ผู้รับเหมา (201 - 223)
   const isLabor = isLaborCost(categoryVal) || vendorType === "ผู้รับเหมา";
@@ -257,11 +261,14 @@ export function checkCategoryBudgetCap(
       targetBudgetField = specificField;
       categoryLabel = categoryVal || `201 เตรียมงาน`;
       isProductLevel = false;
+      isSpecificSubBudget = true;
     } else if (getProjectBudgetVal(project, "งบไม่เกินค่าแรง") > 0) {
       targetBudgetField = "งบไม่เกินค่าแรง";
       const isOverall = !categoryVal || categoryVal.includes("ทั้งหมด") || categoryVal.includes("ภาพรวม") || categoryVal === "2.ค่าแรง" || categoryVal === "ค่าแรง";
       categoryLabel = isOverall ? "งบค่าแรงทั้งหมด" : `${categoryVal} (คุมงบรวมค่าแรง)`;
       isProductLevel = false;
+      isSpecificSubBudget = isOverall;
+      isOverallFallback = !isOverall;
     }
   }
 
@@ -271,10 +278,13 @@ export function checkCategoryBudgetCap(
       targetBudgetField = "งบไม่เกินพนักงาน";
       categoryLabel = categoryVal || "พนักงาน / ช่างประจำไซต์";
       isProductLevel = false;
+      isSpecificSubBudget = true;
     } else if (getProjectBudgetVal(project, "งบไม่เกินค่าแรง") > 0) {
       targetBudgetField = "งบไม่เกินค่าแรง";
       categoryLabel = "ค่าแรง & บุคลากร (ภาพรวม)";
       isProductLevel = false;
+      isSpecificSubBudget = false;
+      isOverallFallback = true;
     }
   }
 
@@ -290,38 +300,35 @@ export function checkCategoryBudgetCap(
       targetBudgetField = specificMaterialField;
       categoryLabel = productVal || categoryVal || specificMaterialField;
       isProductLevel = true;
-    } else if (isFuelCost(categoryVal)) {
-      if (getProjectBudgetVal(project, "งบไม่เกินน้ำมัน") > 0) {
-        targetBudgetField = "งบไม่เกินน้ำมัน";
-        categoryLabel = "501. น้ำมัน";
-      }
-    } else if (isRepairCost(categoryVal)) {
-      if (getProjectBudgetVal(project, "งบไม่เกินซ่อมรถ") > 0) {
-        targetBudgetField = "งบไม่เกินซ่อมรถ";
-        categoryLabel = "502. ซ่อมรถ";
-      }
-    } else if (isMachineCost(categoryVal)) {
-      if (getProjectBudgetVal(project, "งบไม่เกินเครื่องจักร") > 0) {
-        targetBudgetField = "งบไม่เกินเครื่องจักร";
-        categoryLabel = "503. เครื่องจักร";
-      }
-    } else if (isToolCost(categoryVal)) {
-      if (getProjectBudgetVal(project, "งบไม่เกินเครื่องมือ") > 0) {
-        targetBudgetField = "งบไม่เกินเครื่องมือ";
-        categoryLabel = "504. เครื่องมือ";
-      }
-    } else if (isOtherExpense(categoryVal)) {
-      if (getProjectBudgetVal(project, "งบไม่เกินดำเนินการ") > 0 || getProjectBudgetVal(project, "งบไม่เกินอื่นๆ") > 0) {
-        targetBudgetField = getProjectBudgetVal(project, "งบไม่เกินดำเนินการ") > 0 ? "งบไม่เกินดำเนินการ" : "งบไม่เกินอื่นๆ";
-        categoryLabel = categoryVal || "ดำเนินการ(อื่นๆ)";
-      }
-    }
-
-    // Fallback สู่ภาพรวมค่าของ
-    if (!targetBudgetField && getProjectBudgetVal(project, "งบไม่เกินค่าของ") > 0) {
+      isSpecificSubBudget = true;
+    } else if (isFuelCost(categoryVal) && getProjectBudgetVal(project, "งบไม่เกินน้ำมัน") > 0) {
+      targetBudgetField = "งบไม่เกินน้ำมัน";
+      categoryLabel = "501. น้ำมัน";
+      isSpecificSubBudget = true;
+    } else if (isRepairCost(categoryVal) && getProjectBudgetVal(project, "งบไม่เกินซ่อมรถ") > 0) {
+      targetBudgetField = "งบไม่เกินซ่อมรถ";
+      categoryLabel = "502. ซ่อมรถ";
+      isSpecificSubBudget = true;
+    } else if (isMachineCost(categoryVal) && getProjectBudgetVal(project, "งบไม่เกินเครื่องจักร") > 0) {
+      targetBudgetField = "งบไม่เกินเครื่องจักร";
+      categoryLabel = "503. เครื่องจักร";
+      isSpecificSubBudget = true;
+    } else if (isToolCost(categoryVal) && getProjectBudgetVal(project, "งบไม่เกินเครื่องมือ") > 0) {
+      targetBudgetField = "งบไม่เกินเครื่องมือ";
+      categoryLabel = "504. เครื่องมือ";
+      isSpecificSubBudget = true;
+    } else if (isOtherExpense(categoryVal) && (getProjectBudgetVal(project, "งบไม่เกินดำเนินการ") > 0 || getProjectBudgetVal(project, "งบไม่เกินอื่นๆ") > 0)) {
+      targetBudgetField = getProjectBudgetVal(project, "งบไม่เกินดำเนินการ") > 0 ? "งบไม่เกินดำเนินการ" : "งบไม่เกินอื่นๆ";
+      categoryLabel = categoryVal || "ดำเนินการ(อื่นๆ)";
+      isSpecificSubBudget = true;
+    } else if (getProjectBudgetVal(project, "งบไม่เกินค่าของ") > 0) {
+      // Fallback สู่ภาพรวมค่าของ
       targetBudgetField = "งบไม่เกินค่าของ";
+      const isOverall = !productVal && (!categoryVal || categoryVal.includes("ทั้งหมด") || categoryVal.includes("ภาพรวม") || categoryVal === "1.ค่าของ" || categoryVal === "ค่าของ");
       categoryLabel = productVal ? `${productVal} (คุมงบรวมค่าของ)` : "ค่าของ (ภาพรวม)";
       isProductLevel = false;
+      isSpecificSubBudget = isOverall;
+      isOverallFallback = !isOverall;
     }
   }
 
@@ -338,7 +345,9 @@ export function checkCategoryBudgetCap(
     percentUsedAfterBill: 0,
     isOverBudget: false,
     isWarning: false,
-    message: ""
+    message: "",
+    isSpecificSubBudget: false,
+    isOverallFallback: false
   };
 
   if (!targetBudgetField) return defaultResult;
@@ -528,7 +537,9 @@ export function checkCategoryBudgetCap(
     isOverBudget,
     isWarning,
     message,
-    isProductLevel
+    isProductLevel,
+    isSpecificSubBudget,
+    isOverallFallback
   };
 }
 

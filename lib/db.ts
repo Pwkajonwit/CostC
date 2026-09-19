@@ -1,4 +1,4 @@
-﻿import { cached, clearCache } from "@/lib/utils/cache";
+import { cached, clearCache } from "@/lib/utils/cache";
 import { TABLE_KEYS, TABLES } from "@/lib/config";
 import type { RefOption, TableRow, SheetRow } from "@/lib/types";
 import {
@@ -250,8 +250,10 @@ export async function listRefOptions(tableName: string, options: {
   const keyColumn = options.keyColumn || TABLE_KEYS[tableName] || "id";
   const labelColumn = options.labelColumn || keyColumn;
   const isProjectTable = tableName === TABLES.PROJECT || tableName === "Project" || tableName === "projects";
+  const isStoreTable = tableName === TABLES.STORE || tableName === "stores" || tableName === "ร้านค้า";
   const projectExtraCols = isProjectTable ? ["งบไม่เกินค่าแรง", "งบไม่เกิน", "ยอดงาน", "คุมงบประเภทงาน", "งบไม่เกินค่าของ"] : [];
-  const rowColumns = unique([keyColumn, labelColumn, "image", "image_url", ...projectExtraCols, ...(options.rowColumns || [])]);
+  const storeExtraCols = isStoreTable ? ["เครดิตจ่าย", "credit_payment_day", "ชื่อเต็ม", "เลขบัญชี", "ธนาคาร"] : [];
+  const rowColumns = unique([keyColumn, labelColumn, "image", "image_url", ...projectExtraCols, ...storeExtraCols, ...(options.rowColumns || [])]);
 
   return rows
     .filter(row => row[keyColumn] !== "" && row[keyColumn] !== undefined && row[keyColumn] !== null)
@@ -261,7 +263,7 @@ export async function listRefOptions(tableName: string, options: {
       label: (tableName === "BANK" || tableName === "ธนาคาร" || tableName === "banks")
         ? String(row["ชื่อธนาคาร"] || row.name || row[labelColumn] || row[keyColumn])
         : row[labelColumn] ? String(row[labelColumn]) : String(row[keyColumn]),
-      row: isProjectTable ? row : pick(row, rowColumns)
+      row: isProjectTable || isStoreTable ? row : pick(row, rowColumns)
     }));
 }
 

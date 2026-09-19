@@ -18,11 +18,7 @@ export function hasValue(val: unknown): boolean {
 
 export function getRowAmount(row: SheetRow): number {
   if (!row) return 0;
-  const direct = toNumber(row["ยอดเงิน"]);
-  if (direct > 0) return direct;
-
-  const costCols = ["ค่าของ", "ค่าแรง", "พนักงาน", "น้ำมัน", "ซ่อมรถ", "เครื่องจักร", "เครื่องมือ", "อื่นๆ"];
-  return costCols.reduce((sum, col) => sum + toNumber(row[col]), 0);
+  return toNumber(row["ยอดเงิน"]);
 }
 
 export function getRowTransferAmount(row: SheetRow): number {

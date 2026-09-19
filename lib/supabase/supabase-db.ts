@@ -344,11 +344,15 @@ export function mapSupabaseRowToSheetRow(dbTable: string, row: Record<string, an
     res["_sheetRow"] = row.id ?? row._sheetRow;
     res["ชื่อร้านค้า"] = row.name ?? row["ชื่อร้านค้า"];
     res["ชื่อเต็ม"] = row.full_name ?? row["ชื่อเต็ม"];
+    res["เครดิตจ่าย"] = row.credit_payment_day ?? row["เครดิตจ่าย"] ?? (dataObj && dataObj["เครดิตจ่าย"]) ?? "";
     res["เลขบัญชี"] = row.bank_account ?? row["เลขบัญชี"];
     res["ธนาคาร"] = row.bank_name ?? row.bank ?? row["ธนาคาร"];
     res["เบอร์โทร"] = row.phone ?? row["เบอร์โทร"];
     res["ที่อยู่"] = row.address ?? row["ที่อยู่"];
     res["เลขที่ผู้เสียภาษี"] = row.tax_id ?? row["เลขที่ผู้เสียภาษี"];
+    if (dataObj && typeof dataObj === "object") {
+      Object.assign(res, dataObj);
+    }
   } else if (dbTable === "contractors") {
     res["id_Contractor"] = row.id ?? row["id_Contractor"];
     res["_sheetRow"] = row.id ?? row._sheetRow;
@@ -724,11 +728,20 @@ export function mapSheetRowToSupabaseRow(tableName: string, row: Record<string, 
     }
     if (row["ชื่อร้านค้า"] !== undefined) dbRow.name = row["ชื่อร้านค้า"];
     if (row["ชื่อเต็ม"] !== undefined) dbRow.full_name = row["ชื่อเต็ม"];
+    if (row["เครดิตจ่าย"] !== undefined || row["credit_payment_day"] !== undefined) {
+      const creditVal = row["เครดิตจ่าย"] ?? row["credit_payment_day"];
+      dbRow.credit_payment_day = creditVal;
+      if (!dbRow.data) dbRow.data = {};
+      dbRow.data["เครดิตจ่าย"] = creditVal;
+    }
     if (row["เลขบัญชี"] !== undefined) dbRow.bank_account = row["เลขบัญชี"];
     if (row["ธนาคาร"] !== undefined) dbRow.bank_name = row["ธนาคาร"];
     if (row["เบอร์โทร"] !== undefined) dbRow.phone = row["เบอร์โทร"];
     if (row["ที่อยู่"] !== undefined) dbRow.address = row["ที่อยู่"];
     if (row["เลขที่ผู้เสียภาษี"] !== undefined) dbRow.tax_id = row["เลขที่ผู้เสียภาษี"];
+    if (row.data && typeof row.data === "object") {
+      dbRow.data = { ...(dbRow.data || {}), ...row.data };
+    }
   } else if (dbTable === "contractors") {
     if (row["id_Contractor"] !== undefined || row["id"] !== undefined) {
       dbRow.id = row["id_Contractor"] ?? row["id"];

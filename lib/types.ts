@@ -74,6 +74,7 @@ export type FieldSchema = {
   validIf?: string;
   showIf?: ShowIf;
   description?: string;
+  placeholder?: string;
   dynamicValues?: string;
   dynamicOptionSets?: Record<string, string[]>;
   refFill?: Record<string, string>;

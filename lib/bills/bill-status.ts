@@ -30,9 +30,8 @@ export function isValidBill(row: SheetRow) {
   const hasSeq = Boolean(row["ลำดับ"] || row._sheetRow || row.id);
   const hasVendor = Boolean(row["ร้าน/บุคคล"] && String(row["ร้าน/บุคคล"]).trim() !== "");
   const hasProject = Boolean(row["ชื่อ Project"] || row["ID Project"]);
-  const hasItem = Boolean(row["สินค้า/ทำงาน"] || row["รายการ"]);
-  const hasMoney = toNumber(row["ยอดเงิน"]) > 0 || ["ค่าของ", "ค่าแรง", "พนักงาน", "น้ำมัน", "ซ่อมรถ", "เครื่องจักร", "เครื่องมือ", "อื่นๆ"].some(c => toNumber(row[c]) > 0);
-  return hasSeq || hasVendor || hasProject || hasItem || hasMoney;
+  const hasMoney = toNumber(row["ยอดเงิน"]) > 0;
+  return hasSeq || hasVendor || hasProject || hasMoney;
 }
 
 export function isCommittedBill(row: SheetRow) {
