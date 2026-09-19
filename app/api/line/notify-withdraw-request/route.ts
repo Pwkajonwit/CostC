@@ -14,7 +14,8 @@ import {
   createWithdrawApproverFlex,
   createWithdrawCompletedRequesterFlex,
   createDailyTransferSummaryFlex,
-  getBillFlexGrossAmount
+  getBillFlexGrossAmount,
+  getPettyCashSummaryMap
 } from "@/lib/line/line";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 
@@ -48,12 +49,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const [peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap] = await Promise.all([
+    const [peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap, pettyCashMap] = await Promise.all([
       getPeopleMap(),
       getBankInfoMap(),
       getContractWorkMap(),
       getProjectBudgetMap(),
-      getCarsMap()
+      getCarsMap(),
+      getPettyCashSummaryMap()
     ]);
     const targetRole = body.targetRole || "requester";
     const totalAmount = bills.reduce((sum: number, b: any) => sum + getBillFlexGrossAmount(b), 0);
@@ -97,7 +99,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "ไม่พบ LINE User ID ของฝ่ายการเงิน หรือกลุ่มการเงินในระบบ" }, { status: 400 });
       }
 
-      const flex = createWithdrawApproverFlex(bills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap);
+      const flex = createWithdrawApproverFlex(bills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap, pettyCashMap);
       const altText = bills.length === 1
         ? `✅ รายการอนุมัติสำเร็จ (รอปิดงาน) #${bills[0]._sheetRow || bills[0].id || bills[0]["ลำดับ"] || ""} (฿${amountStr})`
         : `✅ รายการอนุมัติสำเร็จ ${bills.length} รายการ (รวม ฿${amountStr})`;
@@ -116,7 +118,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "ยังไม่ได้ระบุผู้อนุมัติตั้งเบิก (Approvers) ในระบบ (โปรดตั้งค่าสิทธิ์อนุมัติบิลในหน้าพนักงาน)" }, { status: 400 });
       }
 
-      const flex = createWithdrawOwnerFlex(bills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap);
+      const flex = createWithdrawOwnerFlex(bills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap, pettyCashMap);
       const altText = bills.length === 1
         ? `📋 คำขออนุมัติเบิกเงิน #${bills[0]._sheetRow || bills[0].id || bills[0]["ลำดับ"] || ""} (฿${amountStr})`
         : `📋 คำขออนุมัติเบิกเงิน ${bills.length} รายการ (รวม ฿${amountStr})`;
@@ -243,7 +245,7 @@ export async function POST(req: NextRequest) {
         };
       });
 
-      const flex = createWithdrawCompletedRequesterFlex(enrichedBills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap);
+      const flex = createWithdrawCompletedRequesterFlex(enrichedBills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap, pettyCashMap);
       const altText = bills.length === 1
         ? `🎉 รายการเบิกเงินสำเร็จเรียบร้อย #${bills[0]._sheetRow || bills[0].id || bills[0]["ลำดับ"] || ""} (฿${amountStr})`
         : `🎉 รายการเบิกเงินสำเร็จเรียบร้อย ${bills.length} รายการ (รวม ฿${amountStr})`;
@@ -372,7 +374,7 @@ export async function POST(req: NextRequest) {
       };
     });
 
-    const flex = createWithdrawRequesterFlex(enrichedBills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap);
+    const flex = createWithdrawRequesterFlex(enrichedBills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap, pettyCashMap);
     const altText = bills.length === 1
       ? `📄 แจ้งเตือนรายการตั้งเบิกเงิน #${bills[0]._sheetRow || bills[0].id || bills[0]["ลำดับ"] || ""} (฿${amountStr})`
       : `📄 แจ้งเตือนรายการตั้งเบิกเงิน ${bills.length} รายการ (รวม ฿${amountStr})`;

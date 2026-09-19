@@ -316,6 +316,9 @@ function sanitizeBySchema(row: SheetRow, tableName: string) {
     }
     if (field.type === "Hidden") return;
     if (hasMultiItems && amountCols.includes(field.name) && hasValue(row[field.name])) return;
+    // CRITICAL: NEVER wipe out "วันจ่าย" or "เครดิต" if a value was provided
+    if (field.name === "วันจ่าย" && (hasValue(row["วันจ่าย"]) || hasValue(row.paid_date))) return;
+    if (field.name === "เครดิต" && (hasValue(row["เครดิต"]) || hasValue(row.credit_days))) return;
     if (isFieldVisible(field, row)) return;
     row[field.name] = "";
   });
@@ -348,6 +351,13 @@ function isFieldVisible(field: ReturnType<typeof getFormSchema>[number], row: Sh
     const hasCredit = parseCreditDays(row["เครดิต"]) > 0;
     return hasVat && !hasCredit;
   }
+  if (field.name === "เครดิต") {
+    const vendorType = String(row["ร้านค้า/ผู้รับเหมา"] ?? row.vendor_type ?? "").trim();
+    return vendorType === "ร้านค้า" || isVatActive(row["vat"]) || parseCreditDays(row["เครดิต"]) > 0 || hasValue(row["เครดิต"]);
+  }
+  if (field.name === "วันจ่าย") {
+    return Boolean(hasValue(row["วันจ่าย"]) || hasValue(row["paid_date"]) || parseCreditDays(row["เครดิต"]) > 0 || hasValue(row["เครดิต"]));
+  }
   if (!field.showIf) return true;
   const actual = row[field.showIf.column] || "";
   if (field.showIf.equals !== undefined) return String(actual) === field.showIf.equals;
@@ -355,7 +365,7 @@ function isFieldVisible(field: ReturnType<typeof getFormSchema>[number], row: Sh
   if (field.showIf.notBlank) {
     if (field.showIf.column === "vat") return isVatActive(actual);
     if (field.showIf.column === "หัก") return parseDeductPercent(actual) > 0;
-    if (field.showIf.column === "เครดิต") return parseCreditDays(actual) > 0;
+    if (field.showIf.column === "เครดิต") return parseCreditDays(actual) > 0 || hasValue(actual);
     return hasValue(actual);
   }
   return true;

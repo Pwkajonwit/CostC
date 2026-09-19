@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sendFlexMessage, createBillNotificationFlex, getBankInfoMap, getPeopleMap, getCarsMap, getBillFlexGrossAmount } from "@/lib/line/line";
+import { sendFlexMessage, createBillNotificationFlex, getBankInfoMap, getPeopleMap, getCarsMap, getBillFlexGrossAmount, getPettyCashSummaryMap } from "@/lib/line/line";
 
 export async function POST(req: NextRequest) {
   try {
@@ -23,13 +23,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing LINE group ID configuration" }, { status: 400 });
     }
 
-    const [bankInfoMap, peopleMap, carsMap] = await Promise.all([
+    const [bankInfoMap, peopleMap, carsMap, pettyCashMap] = await Promise.all([
       getBankInfoMap(),
       getPeopleMap(),
-      getCarsMap()
+      getCarsMap(),
+      getPettyCashSummaryMap()
     ]);
     const billGross = getBillFlexGrossAmount(bill);
-    const flex = createBillNotificationFlex(bill, bankInfoMap, peopleMap, carsMap);
+    const flex = createBillNotificationFlex(bill, bankInfoMap, peopleMap, carsMap, pettyCashMap);
     const success = await sendFlexMessage(
       targetGroup,
       `🧾 รายการแจ้งเตือนการเบิกเงิน: ฿${billGross.toLocaleString("th-TH")}`,

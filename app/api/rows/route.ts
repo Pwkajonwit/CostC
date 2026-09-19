@@ -198,6 +198,7 @@ export async function POST(request: NextRequest) {
     if (tableName === TABLES.DATA) {
       await validateBillRelations(row);
     }
+    const isPettyCash = tableName === TABLES.PETTY_CASH || tableName === "เปิดเงินสดย่อย" || tableName === "petty_cash";
     const output = tableName === TABLES.CONTRACT_WORK
       ? await applyContractFormulas(row)
       : tableName === TABLES.PROJECT
@@ -205,6 +206,11 @@ export async function POST(request: NextRequest) {
         : (tableName === TABLES.DATA || tableName === "Data" || tableName === "bills")
           ? await applyBillFormulas(row)
           : row;
+    if (isPettyCash) {
+      const amt = Number(output["จำนวนเงิน"] || 0);
+      const clr = Number(output["ยอดเคลียร์แล้ว"] || 0);
+      output["ยอดคงเหลือ"] = String(Math.max(0, amt - clr));
+    }
     await appendRow(tableName, output);
     await appendAuditLog({
       action: "CREATE",
@@ -217,9 +223,10 @@ export async function POST(request: NextRequest) {
     revalidateAllBillViews();
     try {
       revalidatePath("/contract-open");
+      revalidatePath("/petty-cash");
       revalidatePath("/views", "layout");
     } catch {}
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, row: output });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 400 });
   }
@@ -273,7 +280,8 @@ export async function PATCH(request: NextRequest) {
             (row.id_Contractor !== undefined && String(row.id_Contractor) === String(targetIdentifier)) ||
             (row.id_car !== undefined && String(row.id_car) === String(targetIdentifier)) ||
             (row.id_cus !== undefined && String(row.id_cus) === String(targetIdentifier)) ||
-            (row.id_Company !== undefined && String(row.id_Company) === String(targetIdentifier))
+            (row.id_Company !== undefined && String(row.id_Company) === String(targetIdentifier)) ||
+            (row.id_petty_cash !== undefined && String(row.id_petty_cash) === String(targetIdentifier))
           );
           if (!existing) return null;
           const values = { ...existing, ...patch };
@@ -324,7 +332,8 @@ export async function PATCH(request: NextRequest) {
       (row.id_Contractor !== undefined && String(row.id_Contractor) === String(targetRowKey)) ||
       (row.id_car !== undefined && String(row.id_car) === String(targetRowKey)) ||
       (row.id_cus !== undefined && String(row.id_cus) === String(targetRowKey)) ||
-      (row.id_Company !== undefined && String(row.id_Company) === String(targetRowKey))
+      (row.id_Company !== undefined && String(row.id_Company) === String(targetRowKey)) ||
+      (row.id_petty_cash !== undefined && String(row.id_petty_cash) === String(targetRowKey))
     );
     if (!existing) throw new Error("ไม่พบข้อมูลที่ต้องการแก้ไข");
     const values = { ...existing, ...patch };
@@ -342,6 +351,8 @@ export async function PATCH(request: NextRequest) {
       values.id = String(patch["id_cus"]).trim();
     } else if (patch["id_Company"] !== undefined && String(patch["id_Company"]).trim() !== "") {
       values.id = String(patch["id_Company"]).trim();
+    } else if (patch["id_petty_cash"] !== undefined && String(patch["id_petty_cash"]).trim() !== "") {
+      values.id = String(patch["id_petty_cash"]).trim();
     }
 
     if (patch["สิทธิ์การใช้งาน"] !== undefined) {
@@ -424,6 +435,7 @@ export async function PATCH(request: NextRequest) {
     }
     const isContractWork = tableName === TABLES.CONTRACT_WORK || tableName === "Contract_work" || tableName === "contract_works" || tableName === "ContractWork";
     const isProject = tableName === TABLES.PROJECT || tableName === "Project" || tableName === "projects";
+    const isPettyCash = tableName === TABLES.PETTY_CASH || tableName === "เปิดเงินสดย่อย" || tableName === "petty_cash";
     const output = isFollowUpOrStatusPatch
       ? values
       : isContractWork
@@ -433,6 +445,11 @@ export async function PATCH(request: NextRequest) {
           : tableName === TABLES.DATA
             ? await applyBillFormulas(values)
             : values;
+    if (isPettyCash) {
+      const amt = Number(output["จำนวนเงิน"] || 0);
+      const clr = Number(output["ยอดเคลียร์แล้ว"] || 0);
+      output["ยอดคงเหลือ"] = String(Math.max(0, amt - clr));
+    }
     console.log(`[PATCH /api/rows] tableName: "${tableName}", targetRowKey: "${targetRowKey}", values:`, patch);
     const originalTarget = existing.id || (keyCol && existing[keyCol] ? existing[keyCol] : undefined) || targetRowKey || existing._sheetRow;
     const row = await updateRow(tableName, originalTarget, output);
@@ -465,6 +482,8 @@ export async function PATCH(request: NextRequest) {
       revalidatePath("/views/companies", "page");
       revalidatePath("/contract-open", "page");
       revalidatePath("/contract-open", "layout");
+      revalidatePath("/petty-cash", "page");
+      revalidatePath("/petty-cash", "layout");
       revalidatePath("/bills", "page");
       revalidatePath("/bills", "layout");
       revalidatePath("/bills/follow-up", "page");
@@ -487,19 +506,27 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "⛔ คุณไม่มีสิทธิ์ในการลบข้อมูลในระบบ (กรุณาติดต่อผู้ดูแลระบบเพื่อขอสิทธิ์ลบข้อมูล)" }, { status: 403 });
     }
 
-    const body = await request.json();
-    const tableName = String(body.tableName || "");
+    let tableName = "";
+    let rawKeys: (string | number)[] = [];
+    try {
+      const body = await request.json();
+      tableName = String(body.tableName || "");
+      rawKeys = Array.isArray(body.ids)
+        ? body.ids
+        : (Array.isArray(body.sheetRows) ? body.sheetRows : (body.id ? [body.id] : []));
+    } catch {
+      tableName = request.nextUrl.searchParams.get("tableName") || "";
+      const idParam = request.nextUrl.searchParams.get("id");
+      if (idParam) rawKeys = [idParam];
+    }
     if (!canManageTable(tableName)) return NextResponse.json({ error: "Table is not manageable" }, { status: 403 });
 
-    const rawKeys: (string | number)[] = Array.isArray(body.ids)
-      ? body.ids
-      : (Array.isArray(body.sheetRows) ? body.sheetRows : []);
     const keySet = new Set(rawKeys.map(k => String(k).trim()));
     const keyCol = TABLE_KEYS[tableName] || "id";
     const allRows = await getRows(tableName);
     const deletingRows = allRows.filter(row =>
       (row.id !== undefined && keySet.has(String(row.id))) ||
-      (row[keyCol] !== undefined && keySet.has(String(row[keyCol]))) ||
+      (keyCol && String(row[keyCol]) !== undefined && keySet.has(String(row[keyCol]))) ||
       keySet.has(String(row._sheetRow)) ||
       (row["ลำดับ"] !== undefined && keySet.has(String(row["ลำดับ"]))) ||
       (row.id_Conwork !== undefined && keySet.has(String(row.id_Conwork))) ||
@@ -508,7 +535,8 @@ export async function DELETE(request: NextRequest) {
       (row.id_Contractor !== undefined && keySet.has(String(row.id_Contractor))) ||
       (row.id_car !== undefined && keySet.has(String(row.id_car))) ||
       (row.id_cus !== undefined && keySet.has(String(row.id_cus))) ||
-      (row.id_Company !== undefined && keySet.has(String(row.id_Company)))
+      (row.id_Company !== undefined && keySet.has(String(row.id_Company))) ||
+      (row.id_petty_cash !== undefined && keySet.has(String(row.id_petty_cash)))
     );
 
     const numericSheetRows = rawKeys.map(Number).filter(n => !isNaN(n));
@@ -540,6 +568,8 @@ export async function DELETE(request: NextRequest) {
     try {
       revalidatePath("/contract-open", "page");
       revalidatePath("/contract-open", "layout");
+      revalidatePath("/petty-cash", "page");
+      revalidatePath("/petty-cash", "layout");
       revalidatePath("/bills", "page");
       revalidatePath("/bills", "layout");
       revalidatePath("/bills/[billId]", "page");
@@ -633,7 +663,8 @@ function canManageTable(tableName: string) {
     "บริษัท", "companies", "company", "9. บริษัท",
     "ยืมเงิน", "loans", "loan", "10. ยืมเงิน",
     "สินค้า", "products", "product",
-    "Tasks", "tasks", "Works", "works", "Plan", "plans"
+    "Tasks", "tasks", "Works", "works", "Plan", "plans",
+    "เปิดเงินสดย่อย", "petty_cash", "petty-cash"
   ]);
   if (knownTables.has(tableName)) return true;
   return PRIMARY_VIEWS.some(view => (view as any).table === tableName || (view as any).name === tableName || view.id === tableName);
@@ -657,6 +688,9 @@ function sanitizeBySchema(row: SheetRow, tableName: string) {
     }
     if (field.type === "Hidden") return;
     if (hasMultiItems && amountCols.includes(field.name) && hasRowValue(row[field.name])) return;
+    // CRITICAL: NEVER wipe out "วันจ่าย" or "เครดิต" if a value was provided
+    if (field.name === "วันจ่าย" && (hasRowValue(row["วันจ่าย"]) || hasRowValue(row.paid_date))) return;
+    if (field.name === "เครดิต" && (hasRowValue(row["เครดิต"]) || hasRowValue(row.credit_days))) return;
     if (isFieldVisible(field, row)) return;
     row[field.name] = "";
   });
@@ -689,6 +723,13 @@ function isFieldVisible(field: ReturnType<typeof getFormSchema>[number], row: Sh
     const hasCredit = parseCreditDays(row["เครดิต"]) > 0;
     return hasVat && !hasCredit;
   }
+  if (field.name === "เครดิต") {
+    const vendorType = String(row["ร้านค้า/ผู้รับเหมา"] ?? row.vendor_type ?? "").trim();
+    return vendorType === "ร้านค้า" || isVatActive(row["vat"]) || parseCreditDays(row["เครดิต"]) > 0 || hasRowValue(row["เครดิต"]);
+  }
+  if (field.name === "วันจ่าย") {
+    return Boolean(hasRowValue(row["วันจ่าย"]) || hasRowValue(row["paid_date"]) || parseCreditDays(row["เครดิต"]) > 0 || hasRowValue(row["เครดิต"]));
+  }
   if (!field.showIf) return true;
   const actual = row[field.showIf.column] || "";
   if (field.showIf.equals !== undefined) return String(actual) === field.showIf.equals;
@@ -696,7 +737,7 @@ function isFieldVisible(field: ReturnType<typeof getFormSchema>[number], row: Sh
   if (field.showIf.notBlank) {
     if (field.showIf.column === "vat") return isVatActive(actual);
     if (field.showIf.column === "หัก") return parseDeductPercent(actual) > 0;
-    if (field.showIf.column === "เครดิต") return parseCreditDays(actual) > 0;
+    if (field.showIf.column === "เครดิต") return parseCreditDays(actual) > 0 || hasRowValue(actual);
     return hasRowValue(actual);
   }
   return true;
