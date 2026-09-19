@@ -764,12 +764,12 @@ export function createBillNotificationFlex(bill: {
                 ],
               }
             ] : []),
-            ...(billDescription && billDescription !== "-" && (lineItems.length === 0 || isContractor) ? [
+            ...(!isContractor && billDescription && billDescription !== "-" && lineItems.length === 0 ? [
               {
                 type: "box",
                 layout: "baseline",
                 contents: [
-                  { type: "text", text: isContractor ? "รายละเอียดงาน:" : "รายละเอียด:", color: "#64748B", size: "xs", flex: 2 },
+                  { type: "text", text: "รายละเอียด:", color: "#64748B", size: "xs", flex: 2 },
                   { type: "text", text: billDescription, color: "#1E293B", size: "xs", flex: 5, wrap: true },
                 ],
               }
@@ -782,6 +782,52 @@ export function createBillNotificationFlex(bill: {
                 { type: "text", text: requesterName, color: "#1E293B", size: "xs", flex: 5 },
               ],
             },
+            ...(lineItems.length === 0 && (isContractor || rawCategory) ? [
+              { type: "separator", margin: "xs" },
+              {
+                type: "box",
+                layout: "vertical",
+                margin: "xs",
+                paddingAll: "8px",
+                backgroundColor: "#F8FAFC",
+                cornerRadius: "6px",
+                spacing: "xs",
+                contents: [
+                  {
+                    type: "box",
+                    layout: "horizontal",
+                    contents: [
+                      { type: "text", text: isContractor ? "👷‍♂️ ประเภทงาน (ผู้รับเหมา):" : "📦 รายการสินค้า / ประเภท:", size: "xs", weight: "bold", color: "#0F172A", flex: 7 },
+                      { type: "text", text: "ราคา", size: "xs", weight: "bold", color: "#64748B", flex: 3, align: "end" }
+                    ]
+                  },
+                  {
+                    type: "box",
+                    layout: "horizontal",
+                    contents: [
+                      {
+                        type: "text",
+                        text: isContractor ? `• ${rawCategory || (bill as any)["สินค้า"] || "ค่าแรง"}` : `• ${rawCategory || "รายการ"}`,
+                        size: "xs",
+                        color: "#1E293B",
+                        weight: "bold",
+                        flex: 7,
+                        wrap: true
+                      },
+                      {
+                        type: "text",
+                        text: `฿${formattedAmount}`,
+                        size: "xs",
+                        color: "#059669",
+                        weight: "bold",
+                        align: "end",
+                        flex: 3
+                      }
+                    ]
+                  }
+                ]
+              }
+            ] : []),
             ...(lineItems.length > 0 ? [
               { type: "separator", margin: "xs" },
               {
@@ -1789,14 +1835,35 @@ export function createBillSearchResultFlex(
                   ]
                 }
               ] : []),
-              ...(cleanDesc && cleanDesc !== "-" && (lineItems.length === 0 || isContractor) ? [
+              ...(!isContractor && cleanDesc && cleanDesc !== "-" && lineItems.length === 0 ? [
                 {
                   type: "box",
                   layout: "baseline",
                   margin: "xs",
                   contents: [
-                    { type: "text", text: isContractor ? "รายละเอียดงาน:" : "รายละเอียด:", size: "xxs", color: "#64748B", flex: 3 },
+                    { type: "text", text: "รายละเอียด:", size: "xxs", color: "#64748B", flex: 3 },
                     { type: "text", text: cleanDesc, size: "xxs", color: "#334155", flex: 7, wrap: true }
+                  ]
+                }
+              ] : []),
+              ...(lineItems.length === 0 && isContractor ? [
+                {
+                  type: "box",
+                  layout: "vertical",
+                  margin: "xs",
+                  paddingAll: "4px",
+                  backgroundColor: "#F1F5F9",
+                  cornerRadius: "4px",
+                  spacing: "xs",
+                  contents: [
+                    {
+                      type: "box",
+                      layout: "horizontal",
+                      contents: [
+                        { type: "text", text: `• ${rawCatName || (b as any)["สินค้า"] || (b as any)["ประเภท"] || "ค่าแรง"}`, size: "xxs", color: "#1E293B", weight: "bold", flex: 7, wrap: true },
+                        { type: "text", text: `฿${amt}`, size: "xxs", color: "#059669", weight: "bold", align: "end", flex: 3 }
+                      ]
+                    }
                   ]
                 }
               ] : []),
@@ -4580,7 +4647,7 @@ export function createMultiBillFlex(
       if ((!vendorName || vendorName === "-" || /^[a-zA-Z]{1,3}[-_]?\d+$/i.test(vendorName) || /^[a-zA-Z]{1,3}[-_]?\d+(\s*,\s*[a-zA-Z]{1,3}[-_]?\d+)+$/i.test(vendorName)) && bankInfo) {
         vendorName = bankInfo.storeName || bankInfo.accountName || vendorName;
       }
-      const projName = b["ชื่อ Project"] || b.project_name || "โครงการทั่วไป";
+      const projName = b["ชื่อ Project"] || b.project_name || b["โครงการ"] || b.project || b.data?.["ชื่อ Project"] || b.data?.["โครงการ"] || "โครงการทั่วไป";
       const desc = b["สินค้า/ทำงาน"] || b.description || b["รายละเอียดงาน"] || "-";
       const remainingLabor = String(b["ค่าแรงคงเหลือ"] || b.remaining_labor || "").trim();
       const laborStatus = String(b["statusค่าแรง"] || b.labor_status || "").trim();
@@ -4648,7 +4715,7 @@ export function createMultiBillFlex(
       let projInfo: ProjectBudgetLookupInfo | null = null;
       if (activeProjectMap) {
         const pId = String(b["ID Project"] || b.project_id || b.data?.project_id || b.data?.["ID Project"] || "").trim();
-        const pName = String(b["ชื่อ Project"] || b.project_name || b.data?.project_name || b.data?.["ชื่อ Project"] || "").trim();
+        const pName = String(b["ชื่อ Project"] || b.project_name || b["โครงการ"] || b.project || b.data?.project_name || b.data?.["ชื่อ Project"] || b.data?.["โครงการ"] || "").trim();
 
         projInfo = (activeProjectMap instanceof Map)
           ? (activeProjectMap.get(pId) || activeProjectMap.get(pId.toLowerCase()) || activeProjectMap.get(pName) || activeProjectMap.get(pName.toLowerCase()))
@@ -4994,14 +5061,14 @@ export function createMultiBillFlex(
               }
             ];
           })(),
-          // Row 2.5: Work Details / รายละเอียดงาน (Always display if available)
-          ...(cleanWorkDesc && cleanWorkDesc !== "-" && cleanWorkDesc !== "non" ? [
+          // Row 2.5: Work Details / รายละเอียดงาน (Hide for contractor/labor bills as requested by user)
+          ...(!isContractor && !isLaborBill && cleanWorkDesc && cleanWorkDesc !== "-" && cleanWorkDesc !== "non" ? [
             {
               type: "box",
               layout: "baseline",
               margin: "xs",
               contents: [
-                { type: "text", text: isContractor ? "รายละเอียดงาน:" : "รายละเอียด:", size: "xxs", color: "#64748B", flex: 3 },
+                { type: "text", text: "รายละเอียด:", size: "xxs", color: "#64748B", flex: 3 },
                 { type: "text", text: cleanWorkDesc, size: "xxs", color: "#334155", flex: 9, wrap: true }
               ]
             }
@@ -5114,10 +5181,12 @@ export function createMultiBillFlex(
               ]
             }
           ] : []),
-          // Row 7 (Store): Single Product Category Row
-          ...((productName || isFuelBill || isRepairBill || isStaffBill || isToolBill || isOtherBill) && productName !== "-" && lineItems.length === 0 && !isContractor ? (() => {
+          // Row 7 (Store & Contractor): Single Product / Work Category Row
+          ...((productName || categoryName || isContractor || isFuelBill || isRepairBill || isStaffBill || isToolBill || isOtherBill) && lineItems.length === 0 ? (() => {
             let resolvedTitle = productName;
-            if (isFuelBill) {
+            if (isContractor) {
+              resolvedTitle = categoryName || productName || String((b as any)["ประเภท"] || (b as any).category || (b as any)["สินค้า"] || (b as any).product || (b as any).data?.["ประเภท"] || (b as any).data?.["สินค้า"] || "ค่าแรง").trim();
+            } else if (isFuelBill) {
               resolvedTitle = carPlate ? `น้ำมัน (${carPlate})` : (productName || "น้ำมัน");
             } else if (isRepairBill) {
               resolvedTitle = carPlate ? `ซ่อมรถ (${carPlate})` : (productName || "ซ่อมรถ");
@@ -5131,8 +5200,10 @@ export function createMultiBillFlex(
               resolvedTitle = sanitizeFlexItemDescription(productName, carsMap, peopleMap);
             }
 
-            const cleanProdName = resolvedTitle.replace(/^\d+[\.\s\-]+/, "").trim() || resolvedTitle;
-            const singleBudgetField = resolveProductBudgetField(productName || resolvedTitle || categoryName);
+            if (!resolvedTitle || resolvedTitle === "-") return [];
+
+            const cleanProdName = isContractor ? resolvedTitle : (resolvedTitle.replace(/^\d+[\.\s\-]+/, "").trim() || resolvedTitle);
+            const singleBudgetField = resolveProductBudgetField(resolvedTitle) || resolveProductBudgetField(resolvedTitle.replace(/^\d+[\.\s\-]+/, "").trim()) || resolveProductBudgetField(categoryName);
             const { cap: singleCap, actualField } = getBudgetCapForField(singleBudgetField, projInfo?.allBudgets);
             let singleTag = "";
             let singleIsOver = false;
@@ -5145,11 +5216,11 @@ export function createMultiBillFlex(
                   ? (singleCap - (singlePaid + grossAmt))
                   : (singleCap - singlePaid);
               singleIsOver = singleRemaining < 0;
-              const singleRemTag = singleRemaining < 0
-                ? `⚠️เกิน ${Math.abs(singleRemaining).toLocaleString("th-TH")}`
+              const remTag = singleRemaining < 0
+                ? `⚠️ เกิน ${Math.abs(singleRemaining).toLocaleString("th-TH")}`
                 : `เหลือ ${singleRemaining.toLocaleString("th-TH")}`;
-              singleTag = `(${singleRemTag} | งบ ${singleCap.toLocaleString("th-TH")})`;
-            } else if (categoryName) {
+              singleTag = `(${remTag} | งบ ${singleCap.toLocaleString("th-TH")})`;
+            } else if (categoryName && !isContractor) {
               const cleanType = categoryName.replace(/^\d+[\.\s\-]+/, "").trim();
               if (cleanType && !cleanProdName.includes(cleanType)) singleTag = `(${cleanType})`;
             }
@@ -5158,7 +5229,10 @@ export function createMultiBillFlex(
                 type: "box",
                 layout: "vertical",
                 margin: "xs",
-                spacing: "none",
+                paddingAll: "4px",
+                backgroundColor: "#F8FAFC",
+                cornerRadius: "4px",
+                spacing: "xs",
                 contents: [
                   {
                     type: "box",
