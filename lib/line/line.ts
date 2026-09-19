@@ -501,6 +501,11 @@ export function createBillNotificationFlex(bill: {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+  const dInfo = resolveBillDeductionInfo(bill as any);
+  const rawNet = Number((bill as any)["ยอดโอน"] || (bill as any).net_amount || (bill as any).data?.["ยอดโอน"] || (bill as any).data?.net_amount || 0);
+  const netTransferAmt = dInfo.hasDeduct
+    ? (dInfo.deductAmt > 0 ? rawAmount - dInfo.deductAmt : (rawNet > 0 ? rawNet : rawAmount))
+    : (rawNet > 0 && rawNet !== rawAmount ? rawNet : rawAmount);
 
   const bankInfo = resolveBankInfo(bill, bankInfoMap);
   const isSubBill = isSubBillRecord(bill);
@@ -886,10 +891,38 @@ export function createBillNotificationFlex(bill: {
           type: "box",
           layout: "horizontal",
           contents: [
-            { type: "text", text: "จำนวนเงินรวม", weight: "bold", color: "#0F172A", size: "sm" },
+            { type: "text", text: "จำนวนเงินรวม:", weight: "bold", color: "#0F172A", size: "sm" },
             { type: "text", text: `฿${formattedAmount}`, weight: "bold", color: "#2563EB", size: "lg", align: "end" },
           ],
         },
+        ...(dInfo.hasDeduct && dInfo.deductAmt > 0 ? [
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              { type: "text", text: `หักภาษี (${dInfo.deductPercent ? `${dInfo.deductPercent}%` : "ณ ที่จ่าย"}):`, color: "#D97706", size: "xs", weight: "bold" },
+              { type: "text", text: `-฿${dInfo.deductAmt.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, color: "#D97706", size: "sm", align: "end", weight: "bold" },
+            ],
+          },
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              { type: "text", text: "ยอดโอนสุทธิ:", weight: "bold", color: "#059669", size: "sm" },
+              { type: "text", text: `฿${netTransferAmt.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, weight: "bold", color: "#059669", size: "lg", align: "end" },
+            ],
+          }
+        ] : []),
+        ...(((bill as any)["วันจ่าย"] || (bill as any).due_date) ? [
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              { type: "text", text: `กำหนดชำระ${(bill as any)["เครดิต"] ? ` (เครดิต ${(bill as any)["เครดิต"]})` : ""}:`, color: "#64748B", size: "xs" },
+              { type: "text", text: String((bill as any)["วันจ่าย"] || (bill as any).due_date), color: "#0284C7", size: "xs", align: "end", weight: "bold" },
+            ],
+          }
+        ] : []),
       ],
     },
   };
@@ -1217,7 +1250,7 @@ export function createMorningTasksCarouselFlex(data: {
         cornerRadius: "6px",
         contents: [
           { type: "text", text: `#${b.id} ${b.requester || "-"}`, size: "xs", weight: "bold", color: "#0F172A", flex: 6, wrap: true },
-          { type: "text", text: `฿${Number(b.amount || 0).toLocaleString("th-TH")}`, size: "xs", weight: "bold", color: "#059669", flex: 4, align: "end" }
+          { type: "text", text: `฿${(getBillFlexGrossAmount(b) || Number(b.amount || 0)).toLocaleString("th-TH")}`, size: "xs", weight: "bold", color: "#059669", flex: 4, align: "end" }
         ]
       })) : [
         { type: "text", text: "✅ ไม่มีรายการบิลรออนุมัติ", size: "xs", color: "#059669", align: "center" }
@@ -1451,7 +1484,7 @@ export function createBillSearchResultFlex(
   carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>
 ): Record<string, any> {
   const count = totalCount ?? bills.length;
-  const grandTotal = totalSumAmount ?? bills.reduce((sum, b) => sum + Number(b.amount || 0), 0);
+  const grandTotal = totalSumAmount ?? bills.reduce((sum, b) => sum + (getBillFlexGrossAmount(b) || Number(b.amount || 0)), 0);
   const formattedTotal = grandTotal.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const batchParam = isSub
@@ -1526,7 +1559,14 @@ export function createBillSearchResultFlex(
         paddingAll: "10px",
         spacing: "sm",
         contents: pageBills.map((b, idx) => {
-          const amt = Number(b.amount || 0).toLocaleString("th-TH");
+          const grossAmt = getBillFlexGrossAmount(b) || Number(b.amount || 0);
+          const dInfo = resolveBillDeductionInfo(b);
+          const rawNet = Number((b as any)["ยอดโอน"] || (b as any).net_amount || (b as any).data?.["ยอดโอน"] || (b as any).data?.net_amount || 0);
+          const netTransferAmt = dInfo.hasDeduct
+            ? (dInfo.deductAmt > 0 ? grossAmt - dInfo.deductAmt : (rawNet > 0 ? rawNet : grossAmt))
+            : (rawNet > 0 && rawNet !== grossAmt ? rawNet : grossAmt);
+          const amt = grossAmt.toLocaleString("th-TH");
+          const netAmtStr = netTransferAmt.toLocaleString("th-TH");
           const billId = String(b.id || b.bill_no || startNum + idx);
           const rawReq = b.requester || b.vendor_or_person || "-";
           const bankInfo = resolveBankInfo(b, bankInfoMap);
@@ -1568,7 +1608,18 @@ export function createBillSearchResultFlex(
                 layout: "horizontal",
                 contents: [
                   { type: "text", text: `#${billId}${b.bill_type ? ` [บิล${b.bill_type}]` : ""} | ${b.project_name || "โครงการทั่วไป"}`, weight: "bold", size: "xs", color: "#0F172A", flex: 7, wrap: true },
-                  { type: "text", text: `฿${amt}`, weight: "bold", size: "xs", color: "#059669", flex: 3, align: "end" }
+                  {
+                    type: "box",
+                    layout: "vertical",
+                    flex: 4,
+                    spacing: "none",
+                    contents: [
+                      { type: "text", text: `฿${dInfo.hasDeduct && dInfo.deductAmt > 0 ? netAmtStr : amt}`, weight: "bold", size: "xs", color: dInfo.hasDeduct ? "#DC2626" : "#059669", align: "end" },
+                      ...(dInfo.hasDeduct && dInfo.deductAmt > 0 ? [
+                        { type: "text", text: `(หัก ${dInfo.deductPercent || 3}% -฿${dInfo.deductAmt.toLocaleString("th-TH")})`, size: "xxs", color: "#D97706", align: "end", weight: "bold" }
+                      ] : [])
+                    ]
+                  }
                 ]
               },
               {
@@ -1580,6 +1631,33 @@ export function createBillSearchResultFlex(
                   { type: "text", text: requesterName, size: "xxs", color: "#1E293B", flex: 7, wrap: true }
                 ]
               },
+              ...(() => {
+                const billDate = (b as any)["ว/ด/ป"] || (b as any)["วันที่"] || b.date || (b as any).data?.["ว/ด/ป"] || (b as any).data?.["วันที่"] || (b as any).data?.date;
+                const dueDate = (b as any)["วันจ่าย"] || (b as any).due_date || (b as any).data?.["วันจ่าย"] || (b as any).data?.due_date;
+                const creditVal = (b as any)["เครดิต"] || (b as any).credit || (b as any).data?.["เครดิต"] || (b as any).data?.credit || (b as any)["เครดิตจ่าย"] || (b as any).credit_payment_day;
+                if (!billDate && !dueDate) return [];
+                return [
+                  {
+                    type: "box",
+                    layout: "baseline",
+                    margin: "xs",
+                    contents: [
+                      { type: "text", text: dueDate ? "กำหนดชำระ:" : "วันที่:", size: "xxs", color: "#64748B", flex: 3 },
+                      {
+                        type: "text",
+                        text: dueDate
+                          ? `${dueDate}${creditVal ? ` (เครดิต ${creditVal})` : ""}${billDate ? ` [บิล: ${billDate}]` : ""}`
+                          : String(billDate),
+                        size: "xxs",
+                        color: dueDate ? "#0284C7" : "#334155",
+                        weight: dueDate ? "bold" : "regular",
+                        flex: 7,
+                        wrap: true
+                      }
+                    ]
+                  }
+                ];
+              })(),
               // Bank Account Information Box
               ...(itemIsSub ? (() => {
                 const reqBank = resolveRequesterBankInfo(b, bankInfoMap, peopleMap);
@@ -4612,7 +4690,7 @@ export function createMultiBillFlex(
 
       // Deduction tag (only when deduction is actually active)
       const deductTag = dInfo.hasDeduct
-        ? (dInfo.deductPercent ? `(หัก ${dInfo.deductPercent}%)` : "(หัก)")
+        ? (dInfo.deductPercent ? `(หัก ${dInfo.deductPercent}%${dInfo.deductAmt > 0 ? ` -฿${dInfo.deductAmt.toLocaleString("th-TH")}` : ""})` : "(หัก)")
         : "";
 
       // Combined Sub-tag under price
@@ -4887,6 +4965,35 @@ export function createMultiBillFlex(
               ]
             }
           ] : []),
+          // Row 2.2: Payment Due Date / Bill Date (กำหนดชำระ / วันที่บิล)
+          ...(() => {
+            const rawDueDate = b["วันจ่าย"] || b.due_date || b.data?.["วันจ่าย"] || b.data?.due_date;
+            const rawCredit = b["เครดิต"] || b.credit || b.data?.["เครดิต"] || b.data?.credit || b["เครดิตจ่าย"] || b.credit_payment_day;
+            const rawBillDate = b["ว/ด/ป"] || b["วันที่"] || b.date || b.data?.["ว/ด/ป"] || b.data?.["วันที่"] || b.data?.date;
+
+            if (!rawDueDate && !rawBillDate) return [];
+            return [
+              {
+                type: "box",
+                layout: "baseline",
+                margin: "xs",
+                contents: [
+                  { type: "text", text: rawDueDate ? "กำหนดชำระ:" : "วันที่บิล:", size: "xxs", color: "#64748B", flex: 3 },
+                  {
+                    type: "text",
+                    text: rawDueDate
+                      ? `${rawDueDate}${rawCredit ? ` (เครดิต ${rawCredit})` : ""}${rawBillDate ? ` [บิล: ${rawBillDate}]` : ""}`
+                      : String(rawBillDate),
+                    size: "xxs",
+                    color: rawDueDate ? "#0284C7" : "#334155",
+                    weight: rawDueDate ? "bold" : "regular",
+                    flex: 9,
+                    wrap: true
+                  }
+                ]
+              }
+            ];
+          })(),
           // Row 2.5: Work Details / รายละเอียดงาน (Always display if available)
           ...(cleanWorkDesc && cleanWorkDesc !== "-" && cleanWorkDesc !== "non" ? [
             {
