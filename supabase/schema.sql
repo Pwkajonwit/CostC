@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS public.stores (
   id TEXT PRIMARY KEY,                                      -- id_store
   name TEXT NOT NULL,                                       -- ชื่อร้านค้า
   full_name TEXT,                                           -- ชื่อเต็ม
+  credit_payment_day TEXT,                                  -- เครดิตจ่าย (วันตัดรอบจ่ายเงิน เช่น 16)
   bank_name TEXT,                                           -- ชื่อธนาคาร
   bank_account TEXT,                                        -- เลขบัญชี
   phone TEXT,                                               -- เบอร์โทร
@@ -297,6 +298,7 @@ ALTER TABLE IF EXISTS public.bills
 
 ALTER TABLE IF EXISTS public.stores 
   ADD COLUMN IF NOT EXISTS bank_name TEXT,
+  ADD COLUMN IF NOT EXISTS credit_payment_day TEXT,
   ADD COLUMN IF NOT EXISTS data JSONB DEFAULT '{}'::jsonb;
 
 ALTER TABLE IF EXISTS public.contractors 
