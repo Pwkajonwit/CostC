@@ -93,7 +93,11 @@ const TABLE_MAP: Record<string, string> = {
   PRODUCT: "products",
   product: "products",
   products: "products",
-  "ประเภทสินค้า": "products"
+  "ประเภทสินค้า": "products",
+  เปิดเงินสดย่อย: "petty_cash",
+  PETTY_CASH: "petty_cash",
+  petty_cash: "petty_cash",
+  pettycash: "petty_cash"
 };
 
 export function getDbTableName(tableName: string): string {
@@ -102,6 +106,9 @@ export function getDbTableName(tableName: string): string {
   const normalized = tableName.trim().toLowerCase().replace(/[-_]/g, "");
   if (normalized === "contractwork" || normalized === "contractworks" || normalized === "conwork" || tableName === "งานรับเหมา") {
     return "contract_works";
+  }
+  if (normalized === "pettycash" || normalized === "advancecash" || tableName === "เปิดเงินสดย่อย") {
+    return "petty_cash";
   }
   if (normalized === "data" || normalized === "bills" || normalized === "bill") {
     return "bills";
@@ -281,8 +288,9 @@ export function mapSupabaseRowToSheetRow(dbTable: string, row: Record<string, an
     res["statusค่าแรง"] = row.labor_status ?? row.status_labor ?? row["statusค่าแรง"] ?? dataObj["statusค่าแรง"] ?? "";
     res["ยอดโอน"] = row.transfer_amount ?? row["ยอดโอน"] ?? dataObj["ยอดโอน"] ?? "";
     res["วันได้บิล"] = row.bill_received_date ?? row["วันได้บิล"] ?? dataObj["วันได้บิล"] ?? "";
-    res["วันออก 3%"] = row.wht_issued_date ?? row["วันออก 3%"] ?? dataObj["วันออก 3%"] ?? "";
     res["วันจ่าย"] = row.paid_date ?? row["วันจ่าย"] ?? dataObj["วันจ่าย"] ?? "";
+    res["paid_date"] = res["วันจ่าย"];
+    res["due_date"] = res["วันจ่าย"];
 
     const rawCategory = String(row.category ?? row["ประเภท"] ?? dataObj["ประเภท"] ?? "").trim();
     const rawLaborStatus = String(row.labor_status ?? row["statusค่าแรง"] ?? dataObj["statusค่าแรง"] ?? "").trim();
@@ -481,6 +489,24 @@ export function mapSupabaseRowToSheetRow(dbTable: string, row: Record<string, an
     res["ชื่อ"] = row.borrower_name ?? row["ชื่อ"];
     res["type"] = row.type ?? row["type"];
     res["จำนวนเงิน"] = row.amount ?? row["จำนวนเงิน"];
+  } else if (dbTable === "petty_cash") {
+    const dataObj = (row.data && typeof row.data === "object") ? row.data : {};
+    res["id_petty_cash"] = row.id ?? row.id_petty_cash ?? dataObj["id_petty_cash"] ?? row._sheetRow;
+    res["id"] = res["id_petty_cash"];
+    res["_sheetRow"] = res["id_petty_cash"];
+    res["ผู้เบิก"] = row.requester ?? row["ผู้เบิก"] ?? dataObj["ผู้เบิก"] ?? "";
+    res["ID Project"] = row.project_id ?? row["ID Project"] ?? dataObj["ID Project"] ?? "";
+    res["ชื่อ Project"] = row.project_name ?? row["ชื่อ Project"] ?? dataObj["ชื่อ Project"] ?? "";
+    res["จำนวนเงิน"] = row.amount ?? row["จำนวนเงิน"] ?? dataObj["จำนวนเงิน"] ?? 0;
+    res["วัตถุประสงค์"] = row.purpose ?? row["วัตถุประสงค์"] ?? dataObj["วัตถุประสงค์"] ?? "";
+    res["วันที่"] = row.date ?? row["วันที่"] ?? dataObj["วันที่"] ?? "";
+    res["กำหนดเคลียร์"] = row.due_date ?? row["กำหนดเคลียร์"] ?? dataObj["กำหนดเคลียร์"] ?? "";
+    res["สถานะ"] = row.status ?? row["สถานะ"] ?? dataObj["สถานะ"] ?? "รออนุมัติ";
+    res["เลขบัญชี"] = row.bank_account ?? row["เลขบัญชี"] ?? dataObj["เลขบัญชี"] ?? "";
+    res["ธนาคาร"] = row.bank_name ?? row["ธนาคาร"] ?? dataObj["ธนาคาร"] ?? "";
+    res["ยอดเคลียร์แล้ว"] = row.cleared_amount ?? row["ยอดเคลียร์แล้ว"] ?? dataObj["ยอดเคลียร์แล้ว"] ?? 0;
+    res["ยอดคงเหลือ"] = row.remaining_amount ?? row["ยอดคงเหลือ"] ?? dataObj["ยอดคงเหลือ"] ?? (toNumber(res["จำนวนเงิน"]) - toNumber(res["ยอดเคลียร์แล้ว"]));
+    res["สลิป"] = row.image_url ?? row["สลิป"] ?? dataObj["สลิป"] ?? "";
   } else if (dbTable === "categories") {
     res["_sheetRow"] = row.id ?? row._sheetRow;
     res["ประเภท Name1"] = row.name1 ?? row.contractor_type ?? row["ประเภท Name1"];
@@ -632,6 +658,9 @@ export function mapSheetRowToSupabaseRow(tableName: string, row: Record<string, 
     if (row["เครดิต"] !== undefined || row.credit_days !== undefined) {
       const cDays = parseCreditDays(rawCredit);
       dbRow.credit_days = cDays;
+      if (!dbRow.data) dbRow.data = {};
+      dbRow.data["เครดิต"] = hasValue(rawCredit) ? String(rawCredit).trim() : "";
+      dbRow.data.credit_days = cDays;
     }
 
     const rawRequester = row["ผู้เบิก"] ?? row.requester;
@@ -656,22 +685,39 @@ export function mapSheetRowToSupabaseRow(tableName: string, row: Record<string, 
     if (hasValue(rawBillReceived)) {
       const iso = normalizeDateToIso(rawBillReceived) || String(rawBillReceived).trim();
       dbRow.bill_received_date = iso;
-      dbRow["วันได้บิล"] = iso;
+      if (!dbRow.data) dbRow.data = {};
+      dbRow.data["วันได้บิล"] = iso;
+    } else if (row["วันได้บิล"] === "" || row.bill_received_date === null) {
+      dbRow.bill_received_date = null;
     }
+    delete (dbRow as any)["วันได้บิล"];
 
     const rawWhtIssued = row["วันออก 3%"] ?? row.wht_issued_date;
     if (hasValue(rawWhtIssued)) {
       const iso = normalizeDateToIso(rawWhtIssued) || String(rawWhtIssued).trim();
       dbRow.wht_issued_date = iso;
-      dbRow["วันออก 3%"] = iso;
+      if (!dbRow.data) dbRow.data = {};
+      dbRow.data["วันออก 3%"] = iso;
+    } else if (row["วันออก 3%"] === "" || row.wht_issued_date === null) {
+      dbRow.wht_issued_date = null;
     }
+    delete (dbRow as any)["วันออก 3%"];
 
-    const rawPaidDate = row["วันจ่าย"] ?? row.paid_date;
+    const rawPaidDate = row["วันจ่าย"] ?? row.paid_date ?? row.due_date;
     if (hasValue(rawPaidDate)) {
       const iso = normalizeDateToIso(rawPaidDate) || String(rawPaidDate).trim();
       dbRow.paid_date = iso;
-      dbRow["วันจ่าย"] = iso;
+      if (!dbRow.data) dbRow.data = {};
+      dbRow.data["วันจ่าย"] = iso;
+      dbRow.data.due_date = iso;
+    } else if (row["วันจ่าย"] === "" || row.paid_date === null || row.due_date === null) {
+      dbRow.paid_date = null;
+      if (dbRow.data) {
+        delete dbRow.data["วันจ่าย"];
+        delete dbRow.data.due_date;
+      }
     }
+    delete (dbRow as any)["วันจ่าย"];
 
     if (hasValue(row["ค่าของ"] ?? row.material_cost)) dbRow.material_cost = toNumber(row["ค่าของ"] ?? row.material_cost);
     if (hasValue(row["ค่าแรง"] ?? row.labor_cost)) dbRow.labor_cost = toNumber(row["ค่าแรง"] ?? row.labor_cost);
@@ -889,6 +935,25 @@ export function mapSheetRowToSupabaseRow(tableName: string, row: Record<string, 
     if (row["ชื่อ"] !== undefined) dbRow.borrower_name = row["ชื่อ"];
     if (row["type"] !== undefined) dbRow.type = row["type"];
     if (row["จำนวนเงิน"] !== undefined) dbRow.amount = row["จำนวนเงิน"];
+  } else if (dbTable === "petty_cash") {
+    const rawId = row["id_petty_cash"] ?? row.id;
+    if (hasValue(rawId)) {
+      dbRow.id = String(rawId).trim();
+    }
+    if (row["ผู้เบิก"] !== undefined) dbRow.requester = row["ผู้เบิก"];
+    if (row["ID Project"] !== undefined) dbRow.project_id = row["ID Project"];
+    if (row["ชื่อ Project"] !== undefined) dbRow.project_name = row["ชื่อ Project"];
+    if (row["จำนวนเงิน"] !== undefined) dbRow.amount = toNumber(row["จำนวนเงิน"]);
+    if (row["วัตถุประสงค์"] !== undefined) dbRow.purpose = row["วัตถุประสงค์"];
+    if (row["วันที่"] !== undefined) dbRow.date = normalizeDateToIso(row["วันที่"]);
+    if (row["กำหนดเคลียร์"] !== undefined) dbRow.due_date = normalizeDateToIso(row["กำหนดเคลียร์"]);
+    if (row["สถานะ"] !== undefined) dbRow.status = row["สถานะ"];
+    if (row["เลขบัญชี"] !== undefined) dbRow.bank_account = row["เลขบัญชี"];
+    if (row["ธนาคาร"] !== undefined) dbRow.bank_name = row["ธนาคาร"];
+    if (row["ยอดเคลียร์แล้ว"] !== undefined) dbRow.cleared_amount = toNumber(row["ยอดเคลียร์แล้ว"]);
+    if (row["ยอดคงเหลือ"] !== undefined) dbRow.remaining_amount = toNumber(row["ยอดคงเหลือ"]);
+    if (row["สลิป"] !== undefined) dbRow.image_url = row["สลิป"];
+    dbRow.data = { ...(row.data || {}), ...row };
   } else if (dbTable === "categories") {
     if (row["id"] !== undefined) dbRow.id = row["id"];
     if (row["ประเภท Name1"] !== undefined) dbRow.name1 = row["ประเภท Name1"];
@@ -1463,6 +1528,23 @@ export async function updateRowInSupabase(tableName: string, keyColumn: string, 
     }
 
     if (res.error) {
+      const errMsg = (res.error.message || "").toLowerCase();
+      const isTableMissing = errMsg.includes("does not exist") || errMsg.includes("relation") || errMsg.includes("schema cache") || errMsg.includes("could not find the table");
+      if (dbTable === "petty_cash" && isTableMissing) {
+        const { data: opt } = await supabaseAdmin.from("system_options").select("*").eq("id", "petty_cash_records").maybeSingle();
+        let records: any[] = Array.isArray(opt?.data) ? [...opt.data] : [];
+        records = records.map(r => (String(r.id) === String(primaryVal) ? { ...r, ...dbPatch, data: { ...(r.data || {}), ...dbPatch.data } } : r));
+        await supabaseAdmin.from("system_options").upsert({
+          id: "petty_cash_records",
+          data: records,
+          updated_at: new Date().toISOString()
+        });
+        clearCache("sys_opt:petty_cash_records");
+        clearCache("rows:เปิดเงินสดย่อย");
+        clearCache("rows:petty_cash");
+        clearCache("rows:");
+        return records.filter(r => String(r.id) === String(primaryVal));
+      }
       console.error(`[Supabase UPDATE ERROR '${dbTable}'] id "${primaryVal}":`, res.error.message);
       throw new Error(res.error.message);
     } else {
@@ -1513,6 +1595,19 @@ export async function deleteRowFromSupabase(tableName: string, keyColumn: string
         .delete()
         .eq("id", String(targetVal));
     }
+    if (dbTable === "petty_cash") {
+      try {
+        const { data: opt } = await supabaseAdmin.from("system_options").select("*").eq("id", "petty_cash_records").maybeSingle();
+        let records: any[] = Array.isArray(opt?.data) ? [...opt.data] : [];
+        records = records.filter(r => String(r.id) !== String(targetVal));
+        await supabaseAdmin.from("system_options").upsert({
+          id: "petty_cash_records",
+          data: records,
+          updated_at: new Date().toISOString()
+        });
+        clearCache("sys_opt:petty_cash_records");
+      } catch {}
+    }
   } catch (err) {
     console.warn(`Exception deleting from Supabase '${dbTable}':`, err);
   }
@@ -1542,8 +1637,25 @@ export async function getRowsFromSupabase(tableName: string, maxRows = 10_000): 
     const { data, error } = mainResult;
 
     if (error) {
+      if (dbTable === "petty_cash") {
+        try {
+          const { data: opt } = await supabaseAdmin.from("system_options").select("*").eq("id", "petty_cash_records").maybeSingle();
+          if (Array.isArray(opt?.data) && opt.data.length > 0) {
+            return opt.data.map((r: any, idx: number) => mapSupabaseRowToSheetRow(tableName, r, idx));
+          }
+        } catch {}
+      }
       console.warn(`Could not fetch rows from Supabase table '${dbTable}' (requested '${tableName}'): ${error.message}`);
       return [];
+    }
+
+    if (dbTable === "petty_cash" && (!data || data.length === 0)) {
+      try {
+        const { data: opt } = await supabaseAdmin.from("system_options").select("*").eq("id", "petty_cash_records").maybeSingle();
+        if (Array.isArray(opt?.data) && opt.data.length > 0) {
+          return opt.data.map((r: any, idx: number) => mapSupabaseRowToSheetRow(tableName, r, idx));
+        }
+      } catch {}
     }
 
     if (!data || data.length === 0) {
@@ -1606,7 +1718,12 @@ export async function getRowsFromSupabase(tableName: string, maxRows = 10_000): 
           const rawSeq = String(res["ลำดับ"] || res._sheetRow || "");
           const followData = (rawId && billFollowDatesMap[rawId]) || (rawSeq && billFollowDatesMap[rawSeq]);
           if (followData) {
-            Object.assign(res, followData);
+            const cleanFollow = { ...followData };
+            if (!cleanFollow["วันจ่าย"] && res["วันจ่าย"]) delete cleanFollow["วันจ่าย"];
+            if (!cleanFollow["paid_date"] && res["วันจ่าย"]) delete cleanFollow["paid_date"];
+            Object.assign(res, cleanFollow);
+            res["paid_date"] = res["วันจ่าย"] || row.paid_date || "";
+            res["due_date"] = res["วันจ่าย"] || row.paid_date || "";
 
             // Re-enforce withholding tax and VAT consistency after followData merge
             const hasExplicitZeroWht = row.withholding_tax !== null && row.withholding_tax !== undefined && Number(row.withholding_tax) === 0;
@@ -1736,7 +1853,12 @@ export async function getWithdrawBillsFromSupabase(maxRows = 3_000): Promise<She
         const rawSeq = String(res["ลำดับ"] || res._sheetRow || "");
         const followData = (rawId && billFollowDatesMap[rawId]) || (rawSeq && billFollowDatesMap[rawSeq]);
         if (followData) {
-          Object.assign(res, followData);
+          const cleanFollow = { ...followData };
+          if (!cleanFollow["วันจ่าย"] && res["วันจ่าย"]) delete cleanFollow["วันจ่าย"];
+          if (!cleanFollow["paid_date"] && res["วันจ่าย"]) delete cleanFollow["paid_date"];
+          Object.assign(res, cleanFollow);
+          res["paid_date"] = res["วันจ่าย"] || row.paid_date || "";
+          res["due_date"] = res["วันจ่าย"] || row.paid_date || "";
           if (followData["ลำดับ"]) res["ลำดับ"] = followData["ลำดับ"];
           if (followData["ผู้สร้างบิล"]) {
             res["ผู้สร้างบิล"] = followData["ผู้สร้างบิล"];
@@ -1764,7 +1886,7 @@ export async function getBillFollowRowsFromSupabase(maxRows = 3_000): Promise<Sh
       supabaseAdmin
         .from("bills")
         .select("*")
-        .or("vat_amount.gt.0,withholding_tax.gt.0,credit_days.gt.0")
+        .or("vat_amount.gt.0,withholding_tax.gt.0,credit_days.gt.0,paid_date.not.is.null")
         .order("id", { ascending: false })
         .range(0, rangeEnd),
       getBillFollowDatesFromSupabase()
@@ -1786,7 +1908,12 @@ export async function getBillFollowRowsFromSupabase(maxRows = 3_000): Promise<Sh
         const rawSeq = String(res["ลำดับ"] || res._sheetRow || "");
         const followData = (rawId && billFollowDatesMap[rawId]) || (rawSeq && billFollowDatesMap[rawSeq]);
         if (followData) {
-          Object.assign(res, followData);
+          const cleanFollow = { ...followData };
+          if (!cleanFollow["วันจ่าย"] && res["วันจ่าย"]) delete cleanFollow["วันจ่าย"];
+          if (!cleanFollow["paid_date"] && res["วันจ่าย"]) delete cleanFollow["paid_date"];
+          Object.assign(res, cleanFollow);
+          res["paid_date"] = res["วันจ่าย"] || row.paid_date || "";
+          res["due_date"] = res["วันจ่าย"] || row.paid_date || "";
           if (followData["ลำดับ"]) res["ลำดับ"] = followData["ลำดับ"];
           if (followData["ผู้สร้างบิล"]) {
             res["ผู้สร้างบิล"] = followData["ผู้สร้างบิล"];
@@ -2127,6 +2254,24 @@ export async function insertRowToSupabase(tableName: string, rowData: Record<str
     }
 
     if (res.error) {
+      const errMsg = (res.error.message || "").toLowerCase();
+      const isTableMissing = errMsg.includes("does not exist") || errMsg.includes("relation") || errMsg.includes("schema cache") || errMsg.includes("could not find the table");
+      if (dbTable === "petty_cash" && isTableMissing) {
+        const { data: opt } = await supabaseAdmin.from("system_options").select("*").eq("id", "petty_cash_records").maybeSingle();
+        const records: any[] = Array.isArray(opt?.data) ? [...opt.data] : [];
+        const newRecord = { ...dbRow, id: dbRow.id || `PC${100 + records.length + 1}` };
+        records.unshift(newRecord);
+        await supabaseAdmin.from("system_options").upsert({
+          id: "petty_cash_records",
+          data: records,
+          updated_at: new Date().toISOString()
+        });
+        clearCache("sys_opt:petty_cash_records");
+        clearCache("rows:เปิดเงินสดย่อย");
+        clearCache("rows:petty_cash");
+        clearCache("rows:");
+        return [newRecord];
+      }
       console.warn(`Failed to insert into Supabase '${dbTable}': ${res.error.message}`);
       throw new Error(`บันทึกลงตาราง '${dbTable}' ไม่สำเร็จ: ${res.error.message}`);
     }
@@ -2204,6 +2349,7 @@ function getPrefixForTable(dbTable: string): string {
     case "customers": return "Cus";
     case "companies": return "Comp";
     case "loans": return "L";
+    case "petty_cash": return "PC";
     default: return "";
   }
 }

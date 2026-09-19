@@ -312,6 +312,7 @@ export async function getInitialValues(tableName: string): Promise<SheetRow> {
     if (column.initialValue === "nextCustomerId") values[column.name] = await nextPrefixedId(TABLES.CUSTOMER, "id_cus", "C", 100);
     if (column.initialValue === "nextCompanyId") values[column.name] = await nextPrefixedId(TABLES.COMPANY, "id_Company", "CO", 100);
     if (column.initialValue === "nextLoanId") values[column.name] = await nextPrefixedId(TABLES.LOAN, "id", "L", 100);
+    if (column.initialValue === "nextPettyCashId") values[column.name] = await nextPrefixedId(TABLES.PETTY_CASH, "id_petty_cash", "PC", 100);
     if (column.initialValue === "nextTaskId") values[column.name] = String(await nextTaskId());
     if (column.initialValue === "nextWorkId") values[column.name] = String(await nextWorkId());
     if (!values[column.name]) values[column.name] = column.initialValue;

@@ -257,6 +257,26 @@ CREATE TABLE IF NOT EXISTS public.products (
   created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
+-- 17. Petty Cash Table (เปิดเงินสดย่อย / เบิกเงินล่วงหน้า)
+CREATE TABLE IF NOT EXISTS public.petty_cash (
+  id TEXT PRIMARY KEY,                                      -- id_petty_cash (e.g. PC101)
+  requester TEXT,                                           -- ผู้เบิก
+  project_id TEXT,                                          -- ID โครงการ
+  project_name TEXT,                                        -- ชื่อโครงการ
+  amount NUMERIC DEFAULT 0,                                 -- จำนวนเงิน
+  purpose TEXT,                                             -- วัตถุประสงค์ / รายละเอียด
+  date DATE,                                                -- วันที่เบิก
+  due_date DATE,                                            -- กำหนดเคลียร์บิล
+  status TEXT DEFAULT 'รออนุมัติ',                           -- สถานะ (รออนุมัติ, อนุมัติแล้ว, จ่ายเงินแล้ว, เคลียร์บิลแล้ว, ยกเลิก)
+  bank_account TEXT,                                        -- เลขบัญชี
+  bank_name TEXT,                                           -- ธนาคาร
+  cleared_amount NUMERIC DEFAULT 0,                         -- ยอดเคลียร์แล้ว
+  remaining_amount NUMERIC DEFAULT 0,                       -- ยอดคงเหลือ
+  image_url TEXT,                                           -- รูปสลิป / เอกสารแนบ
+  data JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
 -- 17. System Options Table (ตัวเลือกระบบ & การตั้งค่า JSONB)
 CREATE TABLE IF NOT EXISTS public.system_options (
   id TEXT PRIMARY KEY DEFAULT 'system_options',
@@ -363,6 +383,9 @@ CREATE INDEX IF NOT EXISTS idx_master_members_line_id ON public.master_members(l
 CREATE INDEX IF NOT EXISTS idx_system_options_id ON public.system_options(id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status_assignee ON public.tasks(status, assignee_id);
 CREATE INDEX IF NOT EXISTS idx_works_team_status ON public.works(team, status);
+CREATE INDEX IF NOT EXISTS idx_petty_cash_project ON public.petty_cash(project_id);
+CREATE INDEX IF NOT EXISTS idx_petty_cash_status ON public.petty_cash(status);
+CREATE INDEX IF NOT EXISTS idx_petty_cash_date ON public.petty_cash(date DESC);
 
 -- =========================================================================
 -- 4. ROW LEVEL SECURITY (RLS) & ACCESS POLICIES
@@ -383,6 +406,7 @@ ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.companies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.loans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.petty_cash ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.system_options ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 
@@ -392,7 +416,7 @@ DECLARE
   tables text[] := ARRAY[
     'projects', 'stores', 'contractors', 'contract_works', 'bills', 
     'tasks', 'works', 'plans', 'master_members', 'banks', 'cars', 
-    'categories', 'customers', 'companies', 'loans', 'products', 
+    'categories', 'customers', 'companies', 'loans', 'products', 'petty_cash',
     'system_options', 'audit_logs'
   ];
 BEGIN

@@ -1165,7 +1165,17 @@ export function FormModal({
           if (selectedOpt) {
             Object.entries(field.refFill!).forEach(([targetField, sourceColumn]) => {
               if (!hasValue(nextValues[targetField])) {
-                nextValues[targetField] = String(selectedOpt.row?.[sourceColumn] ?? "");
+                let fillVal = String(selectedOpt.row?.[sourceColumn] ?? "");
+                if (targetField === "ธนาคาร" && fillVal && (targetForm.refOptions["ธนาคาร"] || []).length > 0) {
+                  const bOpt = targetForm.refOptions["ธนาคาร"].find(b =>
+                    String(b.value) === fillVal ||
+                    String(b.label) === fillVal ||
+                    String(b.row?.id_bank) === fillVal ||
+                    String(b.row?.id) === fillVal
+                  );
+                  if (bOpt) fillVal = String(bOpt.row?.["ชื่อธนาคาร"] || bOpt.label || bOpt.value);
+                }
+                nextValues[targetField] = fillVal;
               }
             });
           }
@@ -1176,7 +1186,7 @@ export function FormModal({
     setError("");
     setSuccessMessage("");
     setEnumListSearch({});
-    const targetRowKey = detail?.row?.id ?? detail?.row?.["ID Project"] ?? detail?.row?.["รหัสพนักงาน"] ?? detail?.row?.id_store ?? detail?.row?.id_Contractor ?? detail?.row?.id_Conwork ?? detail?.row?.id_bank ?? detail?.row?.id_car ?? detail?.row?.id_cus ?? detail?.row?.id_Company ?? detail?.row?.["ลำดับ"] ?? detail?.sheetRow ?? detail?.row?._sheetRow;
+    const targetRowKey = detail?.row?.id ?? detail?.row?.id_petty_cash ?? detail?.row?.["ID Project"] ?? detail?.row?.["รหัสพนักงาน"] ?? detail?.row?.id_store ?? detail?.row?.id_Contractor ?? detail?.row?.id_Conwork ?? detail?.row?.id_bank ?? detail?.row?.id_car ?? detail?.row?.id_cus ?? detail?.row?.id_Company ?? detail?.row?.["ลำดับ"] ?? detail?.sheetRow ?? detail?.row?._sheetRow;
     setEditSheetRow(detail?.row ? (targetRowKey !== undefined && targetRowKey !== null ? (typeof targetRowKey === "number" || typeof targetRowKey === "string" ? targetRowKey : String(targetRowKey)) : 1) : null);
 
     if (detail?.row) {
@@ -1243,6 +1253,7 @@ export function FormModal({
             if (freshInitial["ลำดับ"]) next["ลำดับ"] = freshInitial["ลำดับ"];
             if (freshInitial["ID Project"] && !next["ID Project"]) next["ID Project"] = freshInitial["ID Project"];
             if (freshInitial["id_Conwork"] && !next["id_Conwork"]) next["id_Conwork"] = freshInitial["id_Conwork"];
+            if (freshInitial["id_petty_cash"] && !next["id_petty_cash"]) next["id_petty_cash"] = freshInitial["id_petty_cash"];
             fresh.schema.forEach(field => {
               if (field.initialValue === "today" || (field.type === "Date" && (field.name === "ว/ด/ป" || field.name === "วันที่" || field.name === "ดู/ทำ"))) {
                 if (!next[field.name]) {
@@ -3045,6 +3056,9 @@ function SearchableRefSelect({
       String(option.row.id_store) === value ||
       String(option.row["ชื่อร้านค้า"]) === value ||
       String(option.row.id_Contractor) === value ||
+      String(option.row.id_bank) === value ||
+      String(option.row["ชื่อธนาคาร"]) === value ||
+      String(option.row.name) === value ||
       String(option.row["ชื่อเล่น"]) === value ||
       String(option.row["ชื่อ-นามสกุล"]) === value ||
       Object.values(option.row).some(v => v !== null && v !== undefined && String(v).trim() !== "" && String(v) === value)
@@ -3697,6 +3711,7 @@ function getRowStringValues(form: FormPayload, row: SheetRow) {
       (field.name === "id_cus" ? row.id : undefined),
       (field.name === "id_Company" ? row.id : undefined),
       (field.name === "id_Conwork" ? row.id : undefined),
+      (field.name === "id_petty_cash" ? (row.id_petty_cash || row.id) : undefined),
       (field.name === "ID Project" ? (row["ID Project"] || row.id || row.project_id) : undefined),
       form.initialValues[field.name]
     );
@@ -3776,6 +3791,9 @@ function getRowStringValues(form: FormPayload, row: SheetRow) {
           String(opt.row.id) === rawVal ||
           String(opt.row.id_store) === rawVal ||
           String(opt.row.id_Conwork) === rawVal ||
+          String(opt.row.id_bank) === rawVal ||
+          String(opt.row["ชื่อธนาคาร"]) === rawVal ||
+          String(opt.row.name) === rawVal ||
           String(opt.row["ชื่อร้านค้า"]) === rawVal ||
           String(opt.row["ชื่อเล่น"]) === rawVal ||
           String(opt.row["ชื่อ-นามสกุล"]) === rawVal ||
@@ -4092,8 +4110,6 @@ function normalizeDependentValues(values: Record<string, string>, changedField: 
 
   if (changedField === "vat" && !isVatActive(values["vat"])) {
     values["วันได้บิล"] = "";
-    values["เครดิต"] = "";
-    values["วันจ่าย"] = "";
   }
 
   // หากเลือกเครดิต จะเคลียข้อมูลวันที่ได้บิล และคำนวณวันจ่ายจาก ว/ด/ป (หรือ วันที่) + เครดิต
@@ -4197,6 +4213,12 @@ function applyLocalFormulas(values: Record<string, string>, tableName: string) {
     applyBillDeductAmount(values);
     return;
   }
+  if (tableName === TABLES.PETTY_CASH || tableName === "เปิดเงินสดย่อย") {
+    const total = toNumber(values["จำนวนเงิน"]);
+    const cleared = toNumber(values["ยอดเคลียร์แล้ว"]);
+    values["ยอดคงเหลือ"] = String(Math.max(0, total - cleared));
+    return;
+  }
   if (tableName !== TABLES.CONTRACT_WORK) return;
   const hireAmount = toNumber(values["ยอดเงินจ้าง"]);
   const paidAmount = toNumber(values["ยอดเงินจ่าย"]);
@@ -4283,16 +4305,27 @@ function applyRefFill(values: Record<string, string>, field: FieldSchema, form: 
   if (field.type !== "Ref" || !field.refFill) return;
   const selectedOption = (form.refOptions[field.name] || []).find(option => String(option.value) === value);
   Object.entries(field.refFill).forEach(([targetField, sourceColumn]) => {
+    let filledVal = selectedOption ? String(selectedOption.row?.[sourceColumn] ?? "") : "";
     if (sourceColumn.includes("{")) {
-      values[targetField] = selectedOption ? sourceColumn.replace(/\{([^}]+)\}/g, (_, key) => {
+      filledVal = selectedOption ? sourceColumn.replace(/\{([^}]+)\}/g, (_, key) => {
         const val = selectedOption.row?.[key];
         if (typeof val === "number") return new Intl.NumberFormat("th-TH").format(val);
         if (typeof val === "string" && !isNaN(Number(val)) && val.trim() !== "") return new Intl.NumberFormat("th-TH").format(Number(val));
         return String(val ?? "");
       }) : "";
-    } else {
-      values[targetField] = selectedOption ? String(selectedOption.row?.[sourceColumn] ?? "") : "";
     }
+    if (targetField === "ธนาคาร" && filledVal && (form.refOptions["ธนาคาร"] || []).length > 0) {
+      const bankOpt = form.refOptions["ธนาคาร"].find(b =>
+        String(b.value) === filledVal ||
+        String(b.label) === filledVal ||
+        String(b.row?.id_bank) === filledVal ||
+        String(b.row?.id) === filledVal
+      );
+      if (bankOpt) {
+        filledVal = String(bankOpt.row?.["ชื่อธนาคาร"] || bankOpt.label || bankOpt.value);
+      }
+    }
+    values[targetField] = filledVal;
   });
 }
 
@@ -4361,6 +4394,8 @@ function validateVisibleRequiredFields(values: Record<string, string>, form: For
 function pruneHiddenConditionalValues(values: Record<string, string>, form: FormPayload) {
   form.schema.forEach(field => {
     if (field.type === "Hidden" || field.name === "ประเภท" || field.name.startsWith("งบไม่เกิน") || field.name === "คุมงบประเภทงาน") return;
+    if (field.name === "วันจ่าย" && hasValue(values["วันจ่าย"])) return;
+    if (field.name === "เครดิต" && hasValue(values["เครดิต"])) return;
     if (isFieldVisible(field, values)) return;
     values[field.name] = "";
   });

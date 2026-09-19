@@ -34,9 +34,9 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
     { name: "อื่นๆ", label: "ค่าใช้จ่าย", type: "Decimal", required: true, showIf: { column: "ประเภท", in: ["123 ดำเนินการ(อื่นๆ)", "223 ค่าบริการ(อื่นๆ)", "8.อื่นๆ"] } },
     { name: "รายการ", type: "Enum", values: [...SUB_ITEMS_123, ...SUB_ITEMS_223], dynamicValues: "fieldOptions", showIf: { column: "ประเภท", in: ["123 ดำเนินการ(อื่นๆ)", "223 ค่าบริการ(อื่นๆ)", "8.อื่นๆ"] } },
     { name: "vat", type: "Enum", values: ["1", "3", "5", "7", "ระบุเอง"], inputMode: "buttons", dynamicValues: "fieldOptions", showIf: { column: "ประเภท", in: [...ALL_STORE_CATEGORIES, "1.ค่าของ", "4.น้ำมัน", "5.ซ่อมรถ", "6.เครื่องจักร", "7.เครื่องมือ", "8.อื่นๆ"] } },
-    { name: "เครดิต", type: "Enum", values: ["30", "45", "60", "ระบุเอง"], inputMode: "buttons", dynamicValues: "fieldOptions", showIf: { column: "vat", notBlank: true } },
+    { name: "เครดิต", type: "Enum", values: ["30", "45", "60", "ระบุเอง"], inputMode: "buttons", dynamicValues: "fieldOptions", showIf: { column: "ประเภท", in: [...ALL_STORE_CATEGORIES, "1.ค่าของ", "4.น้ำมัน", "5.ซ่อมรถ", "6.เครื่องจักร", "7.เครื่องมือ", "8.อื่นๆ"] } },
     { name: "วันได้บิล", type: "Date", showIf: { column: "vat", notBlank: true } },
-    { name: "วันจ่าย", type: "Date", showIf: { column: "เครดิต", notBlank: true } },
+    { name: "วันจ่าย", type: "Date" },
     { name: "ค่าแรง", type: "Decimal", required: true, showIf: { column: "ประเภท", in: [...LABOR_CATEGORY_OPTIONS, "2.ค่าแรง"] } },
     { name: "หัก", type: "Enum", values: ["1", "3", "5", "ระบุเอง"], inputMode: "buttons", dynamicValues: "fieldOptions", description: "เลือกเปอร์เซ็นต์หัก หรือระบุเอง", showIf: { column: "ประเภท", in: [...ALL_CONTRACTOR_CATEGORIES, "123 ดำเนินการ(อื่นๆ)", "223 ค่าบริการ(อื่นๆ)", "2.ค่าแรง", "8.อื่นๆ"] } },
     { name: "จำนวนหัก", type: "Decimal", showIf: { column: "หัก", notBlank: true } },
@@ -234,6 +234,53 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
     { name: "จำนวนเงิน", type: "Decimal", required: true },
     { name: "วันที่", type: "Date", initialValue: "today" }
   ],
+  [TABLES.PETTY_CASH]: [
+    { name: "id_petty_cash", type: "Text", key: true, initialValue: "nextPettyCashId", required: true },
+    {
+      name: "ผู้เบิก",
+      label: "ผู้ขอเบิกเงินล่วงหน้า",
+      type: "Ref",
+      refTable: TABLES.PEOPLE,
+      refKey: "รหัสพนักงาน",
+      refLabel: "ชื่อเล่น",
+      required: true,
+      refFill: {
+        "เลขบัญชี": "เลขบัญชี",
+        "ธนาคาร": "ธนาคาร"
+      }
+    },
+    {
+      name: "ID Project",
+      label: "โครงการ",
+      type: "Ref",
+      refTable: TABLES.PROJECT,
+      refKey: "ID Project",
+      refLabel: "ชื่อ Project",
+      validIf: "activeProjects",
+      required: true,
+      refFill: {
+        "ชื่อ Project": "ชื่อ Project"
+      }
+    },
+    { name: "ชื่อ Project", type: "Hidden" },
+    { name: "จำนวนเงิน", label: "ยอดเงินเบิกล่วงหน้า (บาท)", type: "Decimal", required: true },
+    { name: "วัตถุประสงค์", label: "วัตถุประสงค์ / รายละเอียด", type: "Text", required: true },
+    { name: "วันที่", label: "วันที่เบิก", type: "Date", initialValue: "today", required: true },
+    { name: "กำหนดเคลียร์", label: "กำหนดเคลียร์บิล", type: "Date" },
+    { name: "สถานะ", label: "สถานะ", type: "Enum", values: ["รออนุมัติ", "อนุมัติแล้ว", "จ่ายเงินแล้ว", "เคลียร์บิลแล้ว", "ยกเลิก"], initialValue: "รออนุมัติ", inputMode: "dropdown" },
+    { name: "เลขบัญชี", label: "เลขบัญชีรับเงิน", type: "Text" },
+    {
+      name: "ธนาคาร",
+      label: "ธนาคาร",
+      type: "Ref",
+      refTable: TABLES.BANK,
+      refKey: "ชื่อธนาคาร",
+      refLabel: "ชื่อธนาคาร"
+    },
+    { name: "ยอดเคลียร์แล้ว", label: "ยอดเคลียร์แล้ว (บาท)", type: "Decimal" },
+    { name: "ยอดคงเหลือ", label: "ยอดคงเหลือ (บาท)", type: "Decimal", readonly: true },
+    { name: "สลิป", label: "รูปสลิป / เอกสารแนบ", type: "Image" }
+  ],
   [TABLES.CONTRACT_WORK]: [
     { name: "id_Conwork", type: "Text", key: true, initialValue: "nextContractWorkId", required: true },
     {
@@ -321,6 +368,9 @@ export function getFormSchema(tableName: string) {
   }
   if (normalized === "project" || normalized === "projects" || tableName === TABLES.PROJECT) {
     return FORM_SCHEMAS[TABLES.PROJECT] || [];
+  }
+  if (normalized === "pettycash" || normalized === "petty_cash" || tableName === TABLES.PETTY_CASH || tableName === "เปิดเงินสดย่อย") {
+    return FORM_SCHEMAS[TABLES.PETTY_CASH] || [];
   }
   return FORM_SCHEMAS[tableName] || [];
 }

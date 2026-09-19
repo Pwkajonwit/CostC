@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
+import { getRowsFromSupabase } from "@/lib/supabase/supabase-db";
 import { LINE_CONFIG } from "@/lib/line/config";
 import { cached } from "@/lib/utils/cache";
 import { getCostCodeBudgetField } from "@/lib/cost-codes";
@@ -494,7 +495,7 @@ export function createBillNotificationFlex(bill: {
   bank_name?: string;
   account_name?: string;
   data?: any;
-}, bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>, peopleMap?: Map<string, string> | Record<string, string>, carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>): Record<string, any> {
+}, bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>, peopleMap?: Map<string, string> | Record<string, string>, carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>, pettyCashMap?: Map<string, PettyCashLookupInfo> | Record<string, PettyCashLookupInfo>): Record<string, any> {
   const lineItems = extractBillLineItems(bill as any);
   const rawAmount = getBillFlexGrossAmount(bill as any);
   const formattedAmount = Number(rawAmount || 0).toLocaleString("th-TH", {
@@ -514,8 +515,9 @@ export function createBillNotificationFlex(bill: {
   const billStatus = bill.status || (bill as any)["สถานะ"] || "ตั้งเบิก";
   const projectName = bill.project_name || (bill as any)["ชื่อ Project"] || (bill as any)["โครงการ"] || "-";
   const vendorCandidate = bill.vendor_or_person || (bill as any)["ร้าน/บุคคล"] || (bill as any)["ร้านค้า"] || (bill as any)["ผู้รับเหมา"] || (bill as any).store_name || "-";
-  const rawRequester = bill.requester || (bill as any)["ผู้เบิก"] || "-";
+  const rawRequester = bill.requester || (bill as any)["ผู้เบิก"] || (bill as any).data?.["ผู้เบิก"] || (bill as any).data?.requester || "-";
   const requesterName = resolveStaffDisplayName(rawRequester, peopleMap) || rawRequester;
+  const pettyCashInfo = resolvePettyCashInfo(rawRequester, pettyCashMap, peopleMap);
 
   const rawPlate = (bill as any)["ทะเบียน"] || (bill as any).plate_no || (bill as any)["id_car"] || (bill as any).id_car;
   const carDisplayName = resolveCarDisplayName(rawPlate, carsMap);
@@ -630,7 +632,40 @@ export function createBillNotificationFlex(bill: {
                     wrap: true
                   }
                 ]
-              }
+              },
+              ...(pettyCashInfo && pettyCashInfo.remaining > 0 ? [
+                {
+                  type: "separator",
+                  margin: "xs",
+                  color: "#475569"
+                },
+                {
+                  type: "box",
+                  layout: "horizontal",
+                  margin: "xs",
+                  paddingAll: "2px",
+                  alignItems: "center",
+                  contents: [
+                    {
+                      type: "text",
+                      text: "🪙 เบิกไว้ก่อน:",
+                      size: "xxs",
+                      color: "#FDE68A",
+                      weight: "bold",
+                      flex: 5
+                    },
+                    {
+                      type: "text",
+                      text: `฿${pettyCashInfo.remaining.toLocaleString("th-TH")}`,
+                      size: "xs",
+                      color: "#FCA5A5",
+                      weight: "bold",
+                      align: "end",
+                      flex: 7
+                    }
+                  ]
+                }
+              ] : [])
             ]
           }
         ] : [])
@@ -3086,6 +3121,130 @@ export function sanitizeFlexItemDescription(
   return result;
 }
 
+export interface PettyCashLookupInfo {
+  total: number;
+  cleared: number;
+  remaining: number;
+  activeCount: number;
+  requesterName?: string;
+}
+
+let cachedPettyCashMap: Map<string, PettyCashLookupInfo> | null = null;
+let cachedPettyCashMapTime = 0;
+
+export async function getPettyCashSummaryMap(forceRefresh = false): Promise<Map<string, PettyCashLookupInfo>> {
+  const now = Date.now();
+  if (!forceRefresh && cachedPettyCashMap && (now - cachedPettyCashMapTime < CACHE_TTL_MS)) {
+    return cachedPettyCashMap;
+  }
+
+  const pettyCashMap = new Map<string, PettyCashLookupInfo>();
+  try {
+    const [pettyRows, peopleMap] = await Promise.all([
+      getRowsFromSupabase("เปิดเงินสดย่อย").catch(() => []),
+      getPeopleMap()
+    ]);
+
+    for (const r of (pettyRows || [])) {
+      const rawReq = String(r["ผู้เบิก"] || r.requester || "").trim();
+      if (!rawReq) continue;
+
+      const amount = Number(r["จำนวนเงิน"] || r.amount || 0);
+      const cleared = Number(r["ยอดเคลียร์แล้ว"] || r.cleared_amount || 0);
+      const status = String(r["สถานะ"] || r.status || "").trim();
+      if (status === "ยกเลิก") continue;
+      const isFinished = status === "เคลียร์บิลแล้ว";
+
+      // Register variations of key for bidirectional lookup
+      const keysToRegister = new Set<string>();
+      keysToRegister.add(rawReq);
+      keysToRegister.add(rawReq.toLowerCase());
+
+      const cleanId = rawReq.toLowerCase().replace(/^(pt|pe)[-_]?/i, "").trim();
+      if (cleanId) {
+        keysToRegister.add(cleanId);
+        keysToRegister.add(`pt${cleanId}`);
+        keysToRegister.add(`PT${cleanId}`);
+        keysToRegister.add(`pe${cleanId}`);
+        keysToRegister.add(`PE${cleanId}`);
+      }
+
+      const resolvedName = peopleMap.get(rawReq) || peopleMap.get(rawReq.toLowerCase());
+      if (resolvedName) {
+        keysToRegister.add(resolvedName);
+        keysToRegister.add(resolvedName.toLowerCase());
+      }
+
+      const primaryKey = rawReq.toLowerCase();
+      let entry = pettyCashMap.get(primaryKey);
+      if (!entry) {
+        entry = {
+          total: 0,
+          cleared: 0,
+          remaining: 0,
+          activeCount: 0,
+          requesterName: resolvedName || rawReq
+        };
+      }
+
+      entry.total += amount;
+      entry.cleared += cleared;
+      entry.remaining = entry.total - entry.cleared;
+      if (!isFinished && entry.remaining > 0) {
+        entry.activeCount += 1;
+      }
+
+      for (const k of keysToRegister) {
+        pettyCashMap.set(k, entry);
+      }
+    }
+
+    cachedPettyCashMap = pettyCashMap;
+    cachedPettyCashMapTime = now;
+  } catch (e) {
+    console.warn("⚠️ Failed to fetch petty cash map for Flex resolution:", e);
+  }
+
+  return pettyCashMap;
+}
+
+export function resolvePettyCashInfo(
+  rawRequester: unknown,
+  pettyCashMap?: Map<string, PettyCashLookupInfo> | Record<string, PettyCashLookupInfo>,
+  peopleMap?: Map<string, string> | Record<string, string>
+): PettyCashLookupInfo | null {
+  const raw = String(rawRequester || "").trim();
+  if (!raw || raw === "-" || raw === "non") return null;
+
+  const map = pettyCashMap || cachedPettyCashMap || undefined;
+  if (!map) return null;
+
+  if (map instanceof Map) {
+    if (map.has(raw)) return map.get(raw)!;
+    if (map.has(raw.toLowerCase())) return map.get(raw.toLowerCase())!;
+    if (map.has(raw.toUpperCase())) return map.get(raw.toUpperCase())!;
+    const cleanId = raw.toLowerCase().replace(/^(pt|pe)[-_]?/i, "").trim();
+    if (cleanId && map.has(cleanId)) return map.get(cleanId)!;
+    if (cleanId && map.has(`pt${cleanId}`)) return map.get(`pt${cleanId}`)!;
+    if (cleanId && map.has(`PT${cleanId}`)) return map.get(`PT${cleanId}`)!;
+
+    const pMap = peopleMap || cachedPeopleMap;
+    if (pMap && pMap instanceof Map) {
+      const name = pMap.get(raw) || pMap.get(raw.toLowerCase());
+      if (name && map.has(name)) return map.get(name)!;
+      if (name && map.has(name.toLowerCase())) return map.get(name.toLowerCase())!;
+    }
+  } else if (typeof map === "object") {
+    if (map[raw]) return map[raw];
+    if (map[raw.toLowerCase()]) return map[raw.toLowerCase()];
+    if (map[raw.toUpperCase()]) return map[raw.toUpperCase()];
+    const cleanId = raw.toLowerCase().replace(/^(pt|pe)[-_]?/i, "").trim();
+    if (cleanId && map[cleanId]) return map[cleanId];
+  }
+
+  return null;
+}
+
 export type BankLookupInfo = {
   accountName?: string;
   accountNo?: string;
@@ -4442,7 +4601,8 @@ export function createMultiBillFlex(
   bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>,
   contractMap?: Map<string, any> | Record<string, any>,
   projectBudgetMap?: Map<string, any> | Record<string, any>,
-  carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>
+  carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>,
+  pettyCashMap?: Map<string, PettyCashLookupInfo> | Record<string, PettyCashLookupInfo>
 ): Record<string, any> {
   const bills = Array.isArray(billsInput) ? billsInput : [billsInput];
   if (bills.length === 0) {
@@ -4517,6 +4677,10 @@ export function createMultiBillFlex(
   const firstBill = bills[0];
   const firstReq = getRequesterDisplayName(firstBill);
   const firstCreator = getCreatorDisplayName(firstBill);
+  const firstRawReq = firstBill["ผู้เบิก"] || firstBill.requester || firstBill.data?.["ผู้เบิก"] || firstBill.data?.requester;
+  const firstPettyCash = resolvePettyCashInfo(firstRawReq, pettyCashMap, peopleMap);
+  const hasSubBills = bills.some(b => isSubBillRecord(b));
+
   const allBillTypes = Array.from(new Set(bills.map(b => {
     const bt = String(b["บิล"] || b.bill || b.bill_type || "").trim();
     if (bt.includes("ย่อย")) return "บิลย่อย";
@@ -4643,6 +4807,8 @@ export function createMultiBillFlex(
       const bankInfo = resolveBankInfo(b, bankInfoMap);
       const isSubBill = isSubBillRecord(b);
       const reqBank = resolveRequesterBankInfo(b, bankInfoMap, peopleMap);
+      const rawReqKey = b["ผู้เบิก"] || b.requester || b.data?.["ผู้เบิก"] || b.data?.requester;
+      const itemPettyCash = resolvePettyCashInfo(rawReqKey, pettyCashMap, peopleMap);
       let vendorName = isStaffBill ? (staffName || rawVendorCandidate) : resolveVendorName(rawVendorCandidate, bankInfoMap, b, peopleMap);
       if ((!vendorName || vendorName === "-" || /^[a-zA-Z]{1,3}[-_]?\d+$/i.test(vendorName) || /^[a-zA-Z]{1,3}[-_]?\d+(\s*,\s*[a-zA-Z]{1,3}[-_]?\d+)+$/i.test(vendorName)) && bankInfo) {
         vendorName = bankInfo.storeName || bankInfo.accountName || vendorName;
@@ -4981,7 +5147,40 @@ export function createMultiBillFlex(
                       maxLines: 1
                     }
                   ]
-                }
+                },
+                ...(itemPettyCash && itemPettyCash.remaining > 0 ? [
+                  {
+                    type: "separator",
+                    margin: "xs",
+                    color: "#FCD34D"
+                  },
+                  {
+                    type: "box",
+                    layout: "horizontal",
+                    margin: "xs",
+                    paddingAll: "2px",
+                    alignItems: "center",
+                    contents: [
+                      {
+                        type: "text",
+                        text: "🪙 เบิกไว้ก่อน:",
+                        size: "xxs",
+                        color: "#92400E",
+                        weight: "bold",
+                        flex: 5
+                      },
+                      {
+                        type: "text",
+                        text: `฿${itemPettyCash.remaining.toLocaleString("th-TH")}`,
+                        size: "xs",
+                        color: "#DC2626",
+                        weight: "bold",
+                        align: "end",
+                        flex: 7
+                      }
+                    ]
+                  }
+                ] : [])
               ]
             }
           ] : []),
@@ -5626,7 +5825,8 @@ export function createWithdrawRequesterFlex(
   bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>,
   contractMap?: Map<string, any> | Record<string, any>,
   projectBudgetMap?: Map<string, any> | Record<string, any>,
-  carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>
+  carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>,
+  pettyCashMap?: Map<string, PettyCashLookupInfo> | Record<string, PettyCashLookupInfo>
 ): Record<string, any> {
   const bills = (Array.isArray(billsInput) ? billsInput : [billsInput]).map(b => ({
     ...b,
@@ -5636,7 +5836,7 @@ export function createWithdrawRequesterFlex(
   return createMultiBillFlex(bills, {
     title: "📄 แจ้งเตือนรายการตั้งเบิกเงิน",
     mode: "requester"
-  }, peopleMap, bankInfoMap, contractMap, projectBudgetMap, carsMap);
+  }, peopleMap, bankInfoMap, contractMap, projectBudgetMap, carsMap, pettyCashMap);
 }
 
 export function createWithdrawOwnerFlex(
@@ -5645,7 +5845,8 @@ export function createWithdrawOwnerFlex(
   bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>,
   contractMap?: Map<string, any> | Record<string, any>,
   projectBudgetMap?: Map<string, any> | Record<string, any>,
-  carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>
+  carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>,
+  pettyCashMap?: Map<string, PettyCashLookupInfo> | Record<string, PettyCashLookupInfo>
 ): Record<string, any> {
   const bills = (Array.isArray(billsInput) ? billsInput : [billsInput]).map(b => ({
     ...b,
@@ -5655,7 +5856,7 @@ export function createWithdrawOwnerFlex(
   return createMultiBillFlex(bills, {
     title: "📋 คำขออนุมัติเบิกเงิน (ส่งจากผู้เบิก)",
     mode: "owner"
-  }, peopleMap, bankInfoMap, contractMap, projectBudgetMap, carsMap);
+  }, peopleMap, bankInfoMap, contractMap, projectBudgetMap, carsMap, pettyCashMap);
 }
 
 export function createWithdrawApproverFlex(
@@ -5664,7 +5865,8 @@ export function createWithdrawApproverFlex(
   bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>,
   contractMap?: Map<string, any> | Record<string, any>,
   projectBudgetMap?: Map<string, any> | Record<string, any>,
-  carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>
+  carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>,
+  pettyCashMap?: Map<string, PettyCashLookupInfo> | Record<string, PettyCashLookupInfo>
 ): Record<string, any> {
   const bills = (Array.isArray(billsInput) ? billsInput : [billsInput]).map(b => ({
     ...b,
@@ -5674,7 +5876,7 @@ export function createWithdrawApproverFlex(
   return createMultiBillFlex(bills, {
     title: "✅ รายการอนุมัติสำเร็จ (รอปิดงาน)",
     mode: "approver"
-  }, peopleMap, bankInfoMap, contractMap, projectBudgetMap, carsMap);
+  }, peopleMap, bankInfoMap, contractMap, projectBudgetMap, carsMap, pettyCashMap);
 }
 
 export function createWithdrawCompletedRequesterFlex(
@@ -5683,7 +5885,8 @@ export function createWithdrawCompletedRequesterFlex(
   bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>,
   contractMap?: Map<string, any> | Record<string, any>,
   projectBudgetMap?: Map<string, any> | Record<string, any>,
-  carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>
+  carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>,
+  pettyCashMap?: Map<string, PettyCashLookupInfo> | Record<string, PettyCashLookupInfo>
 ): Record<string, any> {
   const bills = (Array.isArray(billsInput) ? billsInput : [billsInput]).map(b => ({
     ...b,
@@ -5693,7 +5896,7 @@ export function createWithdrawCompletedRequesterFlex(
   return createMultiBillFlex(bills, {
     title: "🎉 รายการเบิกเงินสำเร็จเรียบร้อย (ปิดงาน)",
     mode: "completed"
-  }, peopleMap, bankInfoMap, contractMap, projectBudgetMap, carsMap);
+  }, peopleMap, bankInfoMap, contractMap, projectBudgetMap, carsMap, pettyCashMap);
 }
 
 export interface DailyTransferGroup {

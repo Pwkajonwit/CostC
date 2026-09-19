@@ -25,7 +25,8 @@ export const TABLES = {
   PRODUCT: "สินค้า",
   TASKS: "Tasks",
   WORKS: "Works",
-  PLANS: "Plan"
+  PLANS: "Plan",
+  PETTY_CASH: "เปิดเงินสดย่อย"
 } as const;
 
 export const TABLE_KEYS: Record<string, string> = {
@@ -85,7 +86,10 @@ export const TABLE_KEYS: Record<string, string> = {
   loans: "id",
 
   [TABLES.PRODUCT]: "id_product",
-  products: "id_product"
+  products: "id_product",
+
+  [TABLES.PETTY_CASH]: "id_petty_cash",
+  petty_cash: "id_petty_cash"
 };
 
 export const PRIMARY_VIEWS = [
@@ -93,6 +97,7 @@ export const PRIMARY_VIEWS = [
   { id: "bill-entry", name: "กรอกบิล", type: "table", table: TABLES.DATA, position: "first" },
   { id: "withdraw-request", name: "ตั้งเบิก", type: "dashboard", position: "first", items: ["ตรวจการเบิกเงิน", "บิลหลัก/ย่อย", "รวมยอด รออนุมัติ(บาท)", "ยอดโอน รออนุมัติ(บาท)"] },
   { id: "contract-open", name: "เปิดจ้าง", type: "table", table: TABLES.CONTRACT_WORK, position: "next" },
+  { id: "petty-cash", name: "เปิดเงินสดย่อย", type: "dashboard", position: "next", items: ["เบิกเงินล่วงหน้า", "ค้างเคลียร์", "เคลียร์แล้ว"] },
   { id: "bill-follow", name: "ตามบิล", type: "dashboard", position: "next", items: ["ตาม vat", "หัก 3", "หัก 3 บริษัท", "เครดิต"] },
   { id: "work-status", name: "งานที่ทำ", type: "dashboard", position: "last", items: ["Project ทำอยู่", "Project เสร็จแล้ว"] },
   { id: "documents", name: "เอกสาร", type: "dashboard", position: "next", items: ["สัญญาจ้างเหมา", "ใบสำคัญจ่าย", "หนังสือรับรอง 50 ทวิ", "พิมพ์ชุดเอกสาร"] },
@@ -137,5 +142,7 @@ export const VIEW_COLUMNS: Record<string, string[]> = {
   "2. งานรับเหมา & PW": ["ลำดับ", "ทีม", "กิจกรรม", "เรื่อง", "PR", "สถานที่", "นัดดู", "นัดเสนอ", "ติดต่อ1", "เบอร์1", "บริษัท", "สถานะ", "หมายเหตุ"],
   "12. งานรับเหมา & PW": ["ลำดับ", "ทีม", "กิจกรรม", "เรื่อง", "PR", "สถานที่", "นัดดู", "นัดเสนอ", "ติดต่อ1", "เบอร์1", "บริษัท", "สถานะ", "หมายเหตุ"],
   "works": ["ลำดับ", "ทีม", "กิจกรรม", "เรื่อง", "PR", "สถานที่", "นัดดู", "นัดเสนอ", "ติดต่อ1", "เบอร์1", "บริษัท", "สถานะ", "หมายเหตุ"],
-  "11. ประเภทสินค้า": ["รหัสสินค้า", "ชื่อประเภทสินค้า", "หมายเหตุ"]
+  "11. ประเภทสินค้า": ["รหัสสินค้า", "ชื่อประเภทสินค้า", "หมายเหตุ"],
+  "เปิดเงินสดย่อย": ["id_petty_cash", "ผู้เบิก", "ID Project", "ชื่อ Project", "จำนวนเงิน", "วัตถุประสงค์", "วันที่", "กำหนดเคลียร์", "สถานะ", "เลขบัญชี", "ธนาคาร", "ยอดเคลียร์แล้ว", "ยอดคงเหลือ", "สลิป"],
+  "petty_cash": ["id_petty_cash", "ผู้เบิก", "ID Project", "ชื่อ Project", "จำนวนเงิน", "วัตถุประสงค์", "วันที่", "กำหนดเคลียร์", "สถานะ", "เลขบัญชี", "ธนาคาร", "ยอดเคลียร์แล้ว", "ยอดคงเหลือ", "สลิป"]
 };

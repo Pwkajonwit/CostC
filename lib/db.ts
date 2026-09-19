@@ -253,14 +253,15 @@ export async function listRefOptions(tableName: string, options: {
   const isStoreTable = tableName === TABLES.STORE || tableName === "stores" || tableName === "ร้านค้า";
   const projectExtraCols = isProjectTable ? ["งบไม่เกินค่าแรง", "งบไม่เกิน", "ยอดงาน", "คุมงบประเภทงาน", "งบไม่เกินค่าของ"] : [];
   const storeExtraCols = isStoreTable ? ["เครดิตจ่าย", "credit_payment_day", "ชื่อเต็ม", "เลขบัญชี", "ธนาคาร"] : [];
-  const rowColumns = unique([keyColumn, labelColumn, "image", "image_url", ...projectExtraCols, ...storeExtraCols, ...(options.rowColumns || [])]);
+  const bankExtraCols = (tableName === TABLES.BANK || tableName === "BANK" || tableName === "ธนาคาร" || tableName === "banks") ? ["id_bank", "ชื่อธนาคาร", "name"] : [];
+  const rowColumns = unique([keyColumn, labelColumn, "image", "image_url", ...projectExtraCols, ...storeExtraCols, ...bankExtraCols, ...(options.rowColumns || [])]);
 
   return rows
     .filter(row => row[keyColumn] !== "" && row[keyColumn] !== undefined && row[keyColumn] !== null)
     .slice(0, 1000)
     .map(row => ({
       value: row[keyColumn],
-      label: (tableName === "BANK" || tableName === "ธนาคาร" || tableName === "banks")
+      label: (tableName === TABLES.BANK || tableName === "BANK" || tableName === "ธนาคาร" || tableName === "banks")
         ? String(row["ชื่อธนาคาร"] || row.name || row[labelColumn] || row[keyColumn])
         : row[labelColumn] ? String(row[labelColumn]) : String(row[keyColumn]),
       row: isProjectTable || isStoreTable ? row : pick(row, rowColumns)

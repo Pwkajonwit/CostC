@@ -1,15 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState, useCallback, type FormEvent } from "react";
-import { Banknote, Check, ChevronLeft, ChevronRight, Filter, List, LoaderCircle, RotateCcw, RotateCw, Search, Send, X } from "lucide-react";
+import { Banknote, Check, ChevronLeft, ChevronRight, Clock, Coins, Filter, List, LoaderCircle, RotateCcw, RotateCw, Search, Send, X } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { showToast } from "@/components/shared/ToastProvider";
 import { money, toNumber } from "@/lib/utils/numbers";
 import type { SheetRow } from "@/lib/types";
-import { formatDateDisplay, normalizeDateToIso, parseDateStrict } from "@/lib/utils/dates";
+import { formatDateDisplay, getTodayDateIso, normalizeDateToIso, parseDateStrict } from "@/lib/utils/dates";
 import { useRealtimeSync } from "@/lib/use-realtime-sync";
 import { getCostCodeBadgeStyle } from "@/lib/cost-codes";
-import { isVatActive, isDeductActive, parseDeductPercent } from "@/lib/project-summary";
+import { isVatActive, isDeductActive, parseDeductPercent, isCreditActive, parseCreditDays } from "@/lib/project-summary";
 import { useYearFilter } from "@/lib/context/YearFilterContext";
 
 export type WithdrawFilters = {
@@ -28,9 +28,66 @@ type WithdrawDashboardClientProps = {
   stores?: SheetRow[];
 };
 
-const ALL_COLUMNS = ["ลำดับ", "ID Project", "ชื่อ Project", "ร้าน/บุคคล", "สินค้า/ทำงาน", "บิล", "ประเภท", "ยอดเงิน", "ยอดโอน", "ผู้เบิก", "ว/ด/ป", "จัดการ"];
+const ALL_COLUMNS = ["ลำดับ", "ID Project", "ชื่อ Project", "ร้าน/บุคคล", "สินค้า/ทำงาน", "บิล", "ประเภท", "ยอดเงิน", "ยอดโอน", "ผู้เบิก", "ว/ด/ป", "วันจ่าย", "จัดการ"];
 const PAGE_SIZE_OPTIONS = [20, 50, 100, 200];
 let cachedStores: SheetRow[] | null = null;
+
+export function getRowCreditDueDateInfo(row: SheetRow, todayIso: string): {
+  isCredit: boolean;
+  dueDateIso: string;
+  isLocked: boolean;
+  daysRemaining: number;
+  formattedDueDate: string;
+} {
+  if (!row) {
+    return { isCredit: false, dueDateIso: "", isLocked: false, daysRemaining: 0, formattedDueDate: "-" };
+  }
+  const rawDueDate = (row as any)["วันจ่าย"] || (row as any).due_date || (row as any).paid_date || (row as any).data?.["วันจ่าย"] || (row as any).data?.due_date;
+  let dueDateIso = normalizeDateToIso(rawDueDate);
+
+  const hasCreditTerm = isCreditActive(row["เครดิต"]) || (row as any).data?.["เครดิต"];
+  const isCredit = Boolean(hasCreditTerm) || Boolean(dueDateIso);
+
+  // If dueDateIso is still empty but credit term is active, calculate from row["ว/ด/ป"]
+  if (!dueDateIso && hasCreditTerm) {
+    const cDays = parseCreditDays(row["เครดิต"] || (row as any).data?.["เครดิต"]);
+    const billDateIso = normalizeDateToIso(row["ว/ด/ป"] || (row as any)["วันที่"] || (row as any).bill_date);
+    if (billDateIso && cDays > 0) {
+      const bDate = new Date(billDateIso);
+      bDate.setDate(bDate.getDate() + cDays);
+      dueDateIso = getTodayDateIso(bDate);
+    }
+  }
+
+  if (!dueDateIso) {
+    return {
+      isCredit,
+      dueDateIso: "",
+      isLocked: false,
+      daysRemaining: 0,
+      formattedDueDate: "-"
+    };
+  }
+
+  // A bill is locked if dueDateIso is strictly after todayIso (e.g. today=2026-09-19, due=2026-10-16)
+  const isLocked = dueDateIso > todayIso;
+
+  let daysRemaining = 0;
+  if (isLocked) {
+    const d1 = new Date(todayIso);
+    const d2 = new Date(dueDateIso);
+    const diffTime = d2.getTime() - d1.getTime();
+    daysRemaining = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+  }
+
+  return {
+    isCredit,
+    dueDateIso,
+    isLocked,
+    daysRemaining,
+    formattedDueDate: formatDateDisplay(dueDateIso)
+  };
+}
 
 function getBillRowAmount(row: SheetRow): number {
   if (!row) return 0;
@@ -138,6 +195,8 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
   const [isBatchApproving, setIsBatchApproving] = useState(false);
   const [resendMode, setResendMode] = useState(false);
   const [isResending, setIsResending] = useState(false);
+  const [creditFilter, setCreditFilter] = useState<"all" | "ready" | "locked">("all");
+  const todayIso = useMemo(() => getTodayDateIso(), []);
 
   useEffect(() => {
     setFilters(current => ({
@@ -175,6 +234,78 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
   });
 
   const requesterNames = useMemo(() => requesterNameMap(peopleRows), [peopleRows]);
+
+  // ─── Petty Cash Summary (แสดงเมื่อกรอง "บิลย่อย") ─── (declared AFTER requesterNames to avoid hoisting error)
+  const [pettyCashRows, setPettyCashRows] = useState<SheetRow[]>([]);
+  const [pettyCashLoading, setPettyCashLoading] = useState(false);
+
+  useEffect(() => {
+    if (filters.bill !== "ย่อย") return;
+    setPettyCashLoading(true);
+    fetch(`/api/rows?tableName=${encodeURIComponent("เปิดเงินสดย่อย")}&limit=1000`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        const list = data?.rows || data || [];
+        if (Array.isArray(list)) setPettyCashRows(list);
+      })
+      .catch(() => {})
+      .finally(() => setPettyCashLoading(false));
+  }, [filters.bill]);
+
+  // สร้าง reverse map: ชื่อเล่น / ชื่อ-นามสกุล → รหัสพนักงาน (สำหรับ match petty_cash ที่เก็บชื่อ vs filters.requester ที่เก็บ ID)
+  const nameToIdMap = useMemo(() => {
+    return peopleRows.reduce<Record<string, string>>((acc, row) => {
+      const id = String(row["รหัสพนักงาน"] || "").trim();
+      const nickname = String(row["ชื่อเล่น"] || "").trim();
+      const fullname = String(row["ชื่อ-นามสกุล"] || "").trim();
+      if (nickname && id) acc[nickname.toLowerCase()] = id;
+      if (fullname && id) acc[fullname.toLowerCase()] = id;
+      return acc;
+    }, {});
+  }, [peopleRows]);
+
+  // คำนวณสรุปยอดเงินสดย่อยต่อผู้เบิก (รองรับทั้ง ID และ ชื่อ)
+  const pettyCashSummary = useMemo(() => {
+    if (pettyCashRows.length === 0) return null;
+    const map = new Map<string, { name: string; total: number; cleared: number; count: number }>();
+    for (const r of pettyCashRows) {
+      const rawKey = String(r["ผู้เบิก"] || "").trim();
+      if (!rawKey) continue;
+      // ถ้า rawKey เป็นชื่อ → ให้ lookup ID จาก nameToIdMap เพื่อใช้ match กับ filters.requester
+      const canonicalKey = nameToIdMap[rawKey.toLowerCase()] || rawKey;
+      // แสดงชื่อ: ถ้า rawKey เป็น ID ให้ lookup ชื่อ, ถ้าเป็นชื่ออยู่แล้วก็ใช้เลย
+      const displayName = requesterNames[rawKey] || requesterNames[canonicalKey] || rawKey;
+      const existing = map.get(canonicalKey);
+      const amount = toNumber(r["จำนวนเงิน"]);
+      const cleared = toNumber(r["ยอดเคลียร์แล้ว"]);
+      const status = String(r["สถานะ"] || "");
+      const isFinished = status === "เคลียร์บิลแล้ว" || status === "ยกเลิก";
+      if (existing) {
+        existing.total += amount;
+        existing.cleared += cleared;
+        if (!isFinished) existing.count += 1;
+      } else {
+        map.set(canonicalKey, { name: displayName, total: amount, cleared, count: isFinished ? 0 : 1 });
+      }
+    }
+    const allEntries = Array.from(map.entries()).map(([key, val]) => ({ key, ...val }));
+    const filterKey = filters.requester.trim();
+    if (filterKey) {
+      // match: ID ตรง, ชื่อตรง, หรือ lookup ชื่อจาก ID
+      const filterName = (requesterNames[filterKey] || "").toLowerCase();
+      const matched = allEntries.filter(e =>
+        e.key === filterKey ||
+        e.key.toLowerCase() === filterKey.toLowerCase() ||
+        e.name.toLowerCase() === filterKey.toLowerCase() ||
+        (filterName && e.name.toLowerCase() === filterName) ||
+        (nameToIdMap[filterKey.toLowerCase()] && nameToIdMap[filterKey.toLowerCase()] === e.key)
+      );
+      // ถ้า match ได้ให้แสดงเฉพาะคนนั้น ถ้าไม่ match ให้แสดงทั้งหมด (ไม่ซ่อน)
+      if (matched.length > 0) return matched;
+    }
+    return allEntries.filter(e => e.total > 0);
+  }, [pettyCashRows, requesterNames, nameToIdMap, filters.requester]);
+
 
   const resolveStoreName = useCallback((token: string): string => {
     const trimmed = (token || "").trim();
@@ -215,7 +346,7 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
     return str;
   }, [resolveStoreName, requesterNames]);
 
-  const displayRows = useMemo(() => {
+  const baseWithdrawRows = useMemo(() => {
     const yearFiltered = filterRowsByYear(rows);
     const currentRows = yearFiltered.map(row => {
       const rowKey = Number(row.id ?? row["ลำดับ"] ?? row._sheetRow);
@@ -227,9 +358,33 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
       .filter(row => {
         const st = normalizedStatus(row["สถานะ"]);
         return st === "รอตั้งเบิก" || st === "ตั้งเบิก" || st === "รออนุมัติ" || st === "อนุมัติ";
-      })
-      .sort((a, b) => Number(b.id ?? b["ลำดับ"] ?? b._sheetRow ?? 0) - Number(a.id ?? a["ลำดับ"] ?? a._sheetRow ?? 0));
+      });
   }, [rows, filters, statusOverrides, requesterNames, formatVendorDisplay, filterRowsByYear]);
+
+  const waitingWithdrawRows = useMemo(() => {
+    return baseWithdrawRows.filter(r => {
+      const st = normalizedStatus(r["สถานะ"]);
+      return st === "รอตั้งเบิก" || st === "รออนุมัติ";
+    });
+  }, [baseWithdrawRows]);
+
+  const readyToWithdrawCount = useMemo(() => {
+    return waitingWithdrawRows.filter(r => !getRowCreditDueDateInfo(r, todayIso).isLocked).length;
+  }, [waitingWithdrawRows, todayIso]);
+
+  const creditLockedCount = useMemo(() => {
+    return waitingWithdrawRows.filter(r => getRowCreditDueDateInfo(r, todayIso).isLocked).length;
+  }, [waitingWithdrawRows, todayIso]);
+
+  const displayRows = useMemo(() => {
+    let list = baseWithdrawRows;
+    if (creditFilter === "ready") {
+      list = list.filter(row => !getRowCreditDueDateInfo(row, todayIso).isLocked);
+    } else if (creditFilter === "locked") {
+      list = list.filter(row => getRowCreditDueDateInfo(row, todayIso).isLocked);
+    }
+    return list.slice().sort((a, b) => Number(b.id ?? b["ลำดับ"] ?? b._sheetRow ?? 0) - Number(a.id ?? a["ลำดับ"] ?? a._sheetRow ?? 0));
+  }, [baseWithdrawRows, creditFilter, todayIso]);
 
   const totalPages = Math.max(1, Math.ceil(displayRows.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -243,7 +398,7 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
 
   useEffect(() => {
     setPage(1);
-  }, [filters.requester, filters.date, filters.bill, filters.search, pageSize]);
+  }, [filters.requester, filters.date, filters.bill, filters.search, creditFilter, pageSize]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -291,6 +446,17 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
       return;
     }
 
+    // Guard: Prevent selecting credit-locked rows when not in resendMode
+    if (!resendMode) {
+      const creditInfo = getRowCreditDueDateInfo(targetRow, todayIso);
+      if (creditInfo.isLocked) {
+        const warningMsg = `⚠️ บิลนี้มีเครดิตจ่าย ยังไม่ถึงกำหนดวันจ่าย (${creditInfo.formattedDueDate} - อีก ${creditInfo.daysRemaining} วัน) ไม่สามารถเลือกตั้งเบิกได้`;
+        setActionError(warningMsg);
+        showToast("warning", warningMsg);
+        return;
+      }
+    }
+
     // Guard: Enforce same bill type
     if (selectedRows.size > 0 && currentSelectedBillType) {
       const targetType = getRowBillType(targetRow);
@@ -309,8 +475,16 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
 
   // Safe select all enforcing same bill type rule
   function handleSelectAll(eligibleCandidateRows: SheetRow[]) {
-    if (eligibleCandidateRows.length === 0) {
+    // Filter out credit locked rows if not in resendMode
+    const actionableRows = resendMode
+      ? eligibleCandidateRows
+      : eligibleCandidateRows.filter(r => !getRowCreditDueDateInfo(r, todayIso).isLocked);
+
+    if (actionableRows.length === 0) {
       setSelectedRows(new Set());
+      if (eligibleCandidateRows.length > 0 && !resendMode) {
+        showToast("info", "รายการที่รอตั้งเบิกทั้งหมดในหน้านี้เป็นบิลเครดิตที่ยังไม่ถึงกำหนดวันจ่าย");
+      }
       return;
     }
 
@@ -318,9 +492,9 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
     // 1. If rows already selected, preserve that type.
     // 2. Else if filters.bill is active ("หลัก" or "ย่อย"), use that type.
     // 3. Otherwise, use the type of the first eligible candidate row.
-    const targetType = currentSelectedBillType || (filters.bill ? filters.bill : getRowBillType(eligibleCandidateRows[0]));
+    const targetType = currentSelectedBillType || (filters.bill ? filters.bill : getRowBillType(actionableRows[0]));
 
-    const matchingCandidates = eligibleCandidateRows.filter(r => getRowBillType(r) === targetType);
+    const matchingCandidates = actionableRows.filter(r => getRowBillType(r) === targetType);
     const matchingIds = matchingCandidates.map(r => Number(r.id ?? r["ลำดับ"] ?? r._sheetRow));
 
     const isAllMatchingSelected = matchingIds.length > 0 && matchingIds.every(id => selectedRows.has(id));
@@ -336,7 +510,7 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
       const newSet = new Set([...selectedRows, ...matchingIds]);
       setSelectedRows(newSet);
 
-      if (matchingCandidates.length < eligibleCandidateRows.length) {
+      if (matchingCandidates.length < actionableRows.length) {
         const msg = `เลือกเฉพาะ "บิล${targetType}" ทั้งหมด ${matchingCandidates.length} รายการ (เนื่องจากการแจ้งตั้งเบิกต้องเป็นประเภทบิลเดียวกัน)`;
         setActionError(`💡 ${msg} — กดปุ่ม "หลัก" หรือ "ย่อย" ด้านบนเพื่อแยกดูแต่ละประเภท`);
         showToast("info", msg);
@@ -354,6 +528,15 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
     const currentSt = normalizedStatus(row["สถานะ"]);
     if (currentSt === "ตั้งเบิก" || currentSt === "อนุมัติ" || currentSt === "เบิกแล้ว") {
       setActionError("⚠️ รายการนี้ได้รับการตั้งเบิกหรืออนุมัติเรียบร้อยแล้ว ไม่สามารถสั่งตั้งเบิกซ้ำได้");
+      return;
+    }
+
+    // Guard: Prevent withdrawing credit-locked bill
+    const creditInfo = getRowCreditDueDateInfo(row, todayIso);
+    if (creditInfo.isLocked) {
+      const msg = `⚠️ ไม่สามารถสั่งตั้งเบิกได้ เนื่องจากบิลนี้มีเครดิตจ่ายและยังไม่ถึงกำหนดวันจ่าย (${creditInfo.formattedDueDate} - อีก ${creditInfo.daysRemaining} วัน)`;
+      setActionError(msg);
+      showToast("warning", msg);
       return;
     }
 
@@ -412,11 +595,16 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
       return;
     }
 
-    // Filter out rows that are already in target or finished status
+    // Filter out rows that are already in target or finished status, and rows that are credit-locked
     const validSheetRows = Array.from(selectedRows).filter(sheetRow => {
       const targetRow = rows.find(r => Number(r.id ?? r["ลำดับ"] ?? r._sheetRow) === sheetRow);
       if (!targetRow) return false;
       const currentSt = normalizedStatus(targetRow["สถานะ"]);
+
+      // Guard against credit-locked rows
+      const creditInfo = getRowCreditDueDateInfo(targetRow, todayIso);
+      if (creditInfo.isLocked) return false;
+
       // If approving or requesting withdraw, skip rows that are ALREADY approved or paid/closed
       if (targetStatus === "อนุมัติ" && (currentSt === "อนุมัติ" || currentSt === "เบิกแล้ว")) return false;
       if (targetStatus === "ตั้งเบิก" && (currentSt === "ตั้งเบิก" || currentSt === "อนุมัติ" || currentSt === "เบิกแล้ว")) return false;
@@ -532,12 +720,104 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
 
   return (
     <div className="w-full flex flex-col gap-3 p-3 sm:p-5 max-w-[1600px] mx-auto font-sans text-sm text-slate-800">
+
+      {/* 🪙 PETTY CASH SUMMARY BANNER — แสดงเฉพาะตอนกรอง "บิลย่อย" */}
+      {filters.bill === "ย่อย" && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 sm:p-4 shadow-2xs">
+          <div className="flex items-center gap-2 mb-3">
+            <Coins size={16} className="text-amber-600 shrink-0" />
+            <span className="text-xs font-semibold text-amber-900">สรุปยอดเงินสดย่อย (เบิกล่วงหน้า)</span>
+            {pettyCashLoading && <span className="text-[10px] text-amber-600 animate-pulse ml-1">กำลังโหลด...</span>}
+          </div>
+
+          {!pettyCashLoading && (!pettyCashSummary || pettyCashSummary.length === 0) ? (
+            <div className="text-xs text-amber-700 text-center py-2">ไม่พบข้อมูลเงินสดย่อย</div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {(pettyCashSummary || []).map((entry) => {
+                const remaining = entry.total - entry.cleared;
+                const pct = entry.total > 0 ? Math.round((entry.cleared / entry.total) * 100) : 0;
+                return (
+                  <div
+                    key={entry.key}
+                    className="bg-white rounded-lg border border-amber-100 p-3 flex flex-col sm:flex-row sm:items-center gap-3"
+                  >
+                    {/* Name */}
+                    <div className="flex items-center gap-2 min-w-[130px]">
+                      <span className="w-7 h-7 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-xs font-bold shrink-0">
+                        {entry.name.slice(0, 1)}
+                      </span>
+                      <div>
+                        <div className="text-xs font-semibold text-slate-900 leading-tight">{entry.name}</div>
+                        {entry.count > 0 && (
+                          <div className="text-[10px] text-amber-600">{entry.count} รายการค้างเคลียร์</div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Stats */}
+                    <div className="flex flex-1 items-center gap-4 flex-wrap">
+                      <div className="text-center min-w-[90px]">
+                        <div className="text-[10px] text-slate-500 mb-0.5">เบิกล่วงหน้า</div>
+                        <div className="text-sm font-bold text-slate-900 font-mono">{money(entry.total)}</div>
+                      </div>
+                      <div className="text-slate-300 hidden sm:block">│</div>
+                      <div className="text-center min-w-[90px]">
+                        <div className="text-[10px] text-slate-500 mb-0.5">เคลียร์แล้ว</div>
+                        <div className="text-sm font-bold text-emerald-700 font-mono">{money(entry.cleared)}</div>
+                      </div>
+                      <div className="text-slate-300 hidden sm:block">│</div>
+                      <div className="text-center min-w-[90px]">
+                        <div className="text-[10px] text-slate-500 mb-0.5">คงค้าง</div>
+                        <div className={`text-sm font-bold font-mono ${remaining > 0 ? "text-amber-700" : "text-slate-500"}`}>
+                          {money(remaining)}
+                        </div>
+                      </div>
+
+                      {/* Progress bar */}
+                      {entry.total > 0 && (
+                        <div className="flex-1 min-w-[100px]">
+                          <div className="flex justify-between text-[10px] text-slate-500 mb-1">
+                            <span>ความคืบหน้าการเคลียร์</span>
+                            <span className="font-semibold">{pct}%</span>
+                          </div>
+                          <div className="h-1.5 w-full bg-amber-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-full rounded-full transition-all duration-500"
+                              style={{
+                                width: `${Math.min(100, pct)}%`,
+                                background: pct >= 100 ? "#16a34a" : pct >= 50 ? "#d97706" : "#ef4444"
+                              }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 1. EXECUTIVE SUMMARY KPI CARDS (Hidden on mobile for clean layout) */}
       <div className="hidden md:grid md:grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="bg-white rounded-md p-3 border border-sky-200 bg-sky-50/40">
-          <span className="text-xs text-sky-800">📌 สถานะ: รอตั้งเบิก</span>
-          <div className="text-lg text-sky-900 mt-1">
-            {displayRows.filter(r => normalizedStatus(r["สถานะ"]) === "รอตั้งเบิก" || normalizedStatus(r["สถานะ"]) === "รออนุมัติ").length} รายการ
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-sky-800 font-medium">📌 สถานะ: รอตั้งเบิก</span>
+            <span className="text-xs text-sky-900 font-bold">{waitingWithdrawRows.length} รายการ</span>
+          </div>
+          <div className="mt-1.5 flex items-center gap-2 text-xs flex-wrap">
+            <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 font-medium">
+              พร้อมเบิก: <strong>{readyToWithdrawCount}</strong>
+            </span>
+            {creditLockedCount > 0 && (
+              <span className="text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 flex items-center gap-1 font-medium">
+                <Clock size={11} className="text-amber-600" />
+                รอวันจ่าย: <strong>{creditLockedCount}</strong>
+              </span>
+            )}
           </div>
         </div>
 
@@ -683,15 +963,48 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
                   ย่อย
                 </button>
               </div>
+
+              {/* Quick Filter: พร้อมตั้งเบิก / รอวันจ่าย */}
+              <div className="flex items-center gap-1 ml-1">
+                <button
+                  type="button"
+                  onClick={() => setCreditFilter(creditFilter === "ready" ? "all" : "ready")}
+                  className={`h-8 px-2.5 rounded-lg text-xs font-medium border transition cursor-pointer active:scale-95 flex items-center gap-1 justify-center shadow-2xs ${
+                    creditFilter === "ready"
+                      ? "bg-emerald-700 text-white border-emerald-700 font-semibold"
+                      : "bg-white text-slate-700 border-slate-200 hover:bg-emerald-50 hover:text-emerald-900"
+                  }`}
+                  title="แสดงเฉพาะบิลที่พร้อมตั้งเบิก (ถึงกำหนดชำระแล้วหรือบิลเงินสด)"
+                >
+                  <Check size={12} className={creditFilter === "ready" ? "text-white" : "text-emerald-600"} />
+                  <span>พร้อมเบิก ({readyToWithdrawCount})</span>
+                </button>
+                {creditLockedCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setCreditFilter(creditFilter === "locked" ? "all" : "locked")}
+                    className={`h-8 px-2.5 rounded-lg text-xs font-medium border transition cursor-pointer active:scale-95 flex items-center gap-1 justify-center shadow-2xs ${
+                      creditFilter === "locked"
+                        ? "bg-amber-600 text-white border-amber-600 font-semibold"
+                        : "bg-white text-amber-800 border-amber-300 hover:bg-amber-50"
+                    }`}
+                    title="แสดงเฉพาะบิลเครดิตที่ยังไม่ถึงกำหนดวันจ่าย"
+                  >
+                    <Clock size={12} className={creditFilter === "locked" ? "text-white" : "text-amber-600"} />
+                    <span>รอวันจ่าย ({creditLockedCount})</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Reset Filters */}
-            {(filters.requester || filters.date || filters.bill || searchInput) ? (
+            {(filters.requester || filters.date || filters.bill || searchInput || creditFilter !== "all") ? (
               <button
                 type="button"
                 onClick={() => {
                   setSearchInput("");
                   setFilters({ requester: "", date: "", bill: "", search: "" });
+                  setCreditFilter("all");
                 }}
                 className="h-8 px-2.5 text-xs text-rose-600 hover:text-rose-700 bg-rose-50/80 hover:bg-rose-100 border border-rose-200 rounded-lg flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap font-medium shadow-2xs"
                 title="ล้างตัวกรองทั้งหมด"
@@ -861,7 +1174,12 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
       <div className="border border-slate-200 rounded-xl md:rounded-md bg-white overflow-hidden shadow-2xs">
         {/* Mobile Select All Header Bar */}
         {visibleRows.length > 0 && (() => {
-          const eligibleMobileRows = visibleRows.filter(r => resendMode ? true : (normalizedStatus(r["สถานะ"]) === "รอตั้งเบิก" || normalizedStatus(r["สถานะ"]) === "รออนุมัติ"));
+          const eligibleMobileRows = visibleRows.filter(r => {
+            if (resendMode) return true;
+            const st = normalizedStatus(r["สถานะ"]);
+            const creditInfo = getRowCreditDueDateInfo(r, todayIso);
+            return (st === "รอตั้งเบิก" || st === "รออนุมัติ") && !creditInfo.isLocked;
+          });
           const relevantMobileEligibleRows = currentSelectedBillType
             ? eligibleMobileRows.filter(r => getRowBillType(r) === currentSelectedBillType)
             : eligibleMobileRows;
@@ -901,7 +1219,8 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
               const sheetRowId = Number(row.id ?? row["ลำดับ"] ?? row._sheetRow);
               const isSelected = selectedRows.has(sheetRowId);
               const status = normalizedStatus(row["สถานะ"]);
-              const isSelectable = resendMode ? true : (status === "รอตั้งเบิก" || status === "รออนุมัติ");
+              const creditInfo = getRowCreditDueDateInfo(row, todayIso);
+              const isSelectable = resendMode ? true : ((status === "รอตั้งเบิก" || status === "รออนุมัติ") && !creditInfo.isLocked);
               const rowBillType = getRowBillType(row);
               const isTypeMismatch = Boolean(currentSelectedBillType && rowBillType !== currentSelectedBillType && !isSelected);
               const seq = String(row.id || row["ลำดับ"] || row._sheetRow || index + 1);
@@ -912,6 +1231,12 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
                 <div
                   key={`withdraw-mob-${sheetRowId}-${index}`}
                   onClick={() => {
+                    if (creditInfo.isLocked && !resendMode) {
+                      const msg = `⚠️ บิลนี้มีเครดิตจ่าย ยังไม่ถึงกำหนดวันจ่าย (${creditInfo.formattedDueDate} - อีก ${creditInfo.daysRemaining} วัน)`;
+                      showToast("warning", msg);
+                      setActionError(msg);
+                      return;
+                    }
                     if (isTypeMismatch) {
                       const msg = `⚠️ การแจ้งตั้งเบิกต้องเป็นประเภทบิลเดียวกันเท่านั้น (ไม่สามารถเลือก "บิล${rowBillType}" ปนกับ "บิล${currentSelectedBillType}" ได้)`;
                       showToast("warning", msg);
@@ -946,6 +1271,11 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
                       className={`w-5 h-5 rounded border-slate-300 ${resendMode ? "text-amber-600 accent-amber-600" : "text-sky-600 accent-sky-600"} cursor-pointer ${
                         !isSelectable || isTypeMismatch ? "opacity-30 cursor-not-allowed" : ""
                       }`}
+                      title={
+                        creditInfo.isLocked && !resendMode
+                          ? `บิลนี้มีเครดิตจ่าย ยังไม่ถึงกำหนดวันจ่าย (${creditInfo.formattedDueDate} - อีก ${creditInfo.daysRemaining} วัน) ไม่สามารถตั้งเบิกได้`
+                          : undefined
+                      }
                     />
                   </div>
 
@@ -966,6 +1296,15 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
 
                     <div className="text-xs text-slate-500 truncate flex items-center gap-1.5">
                       <span>{formatDateDisplay(row["ว/ด/ป"])}</span>
+                      {creditInfo.dueDateIso ? (
+                        <>
+                          <span>•</span>
+                          <span className={`inline-flex items-center gap-0.5 font-medium ${creditInfo.isLocked ? "text-amber-700" : "text-slate-600"}`}>
+                            <Clock size={10} className="shrink-0" />
+                            จ่าย {creditInfo.formattedDueDate} {creditInfo.isLocked ? `(อีก ${creditInfo.daysRemaining}ว.)` : ""}
+                          </span>
+                        </>
+                      ) : null}
                       <span>•</span>
                       <span className="truncate">{String(row["สินค้า/ทำงาน"] || "-")}</span>
                       <span>•</span>
@@ -990,6 +1329,14 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
                     ) : status === "เบิกแล้ว" ? (
                       <span className="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-600 border border-slate-200">
                         ปิดงานแล้ว
+                      </span>
+                    ) : creditInfo.isLocked && !resendMode ? (
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-amber-50 text-amber-800 border border-amber-300 font-medium whitespace-nowrap shadow-2xs"
+                        title={`ยังไม่ถึงกำหนดวันจ่าย (${creditInfo.formattedDueDate} - อีก ${creditInfo.daysRemaining} วัน)`}
+                      >
+                        <Clock size={11} className="text-amber-600 shrink-0" />
+                        <span>รอวันจ่าย ({creditInfo.formattedDueDate.slice(0, 5)})</span>
                       </span>
                     ) : (
                       <button
@@ -1027,6 +1374,7 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
             selectedBillType={currentSelectedBillType}
             onSelectRow={toggleRowSelection}
             onSelectAll={handleSelectAll}
+            todayIso={todayIso}
           />
         </div>
 
@@ -1125,7 +1473,8 @@ function WithdrawTable({
   selectedBillType = "",
   onSelectRow,
   onSelectAll,
-  formatVendorDisplay
+  formatVendorDisplay,
+  todayIso
 }: {
   rows: SheetRow[];
   columns: string[];
@@ -1138,14 +1487,16 @@ function WithdrawTable({
   onSelectRow: (rowId: number) => void;
   onSelectAll: (candidateRows: SheetRow[]) => void;
   formatVendorDisplay?: (raw: unknown) => string;
+  todayIso: string;
 }) {
   if (!rows.length) return <div className="p-8 text-center text-slate-400 text-xs font-medium">ไม่พบรายการตั้งเบิก</div>;
 
-  // Filter rows eligible for selection
+  // Filter rows eligible for selection (exclude credit-locked rows)
   const eligibleRows = rows.filter(r => {
     if (resendMode) return true;
     const st = normalizedStatus(r["สถานะ"]);
-    return st === "รอตั้งเบิก" || st === "รออนุมัติ";
+    const creditInfo = getRowCreditDueDateInfo(r, todayIso);
+    return (st === "รอตั้งเบิก" || st === "รออนุมัติ") && !creditInfo.isLocked;
   });
 
   const relevantEligibleRows = selectedBillType
@@ -1189,7 +1540,8 @@ function WithdrawTable({
             const sheetRowId = Number(row.id ?? row["ลำดับ"] ?? row._sheetRow);
             const isSelected = selectedRows.has(sheetRowId);
             const status = normalizedStatus(row["สถานะ"]);
-            const isSelectable = resendMode ? true : (status === "รอตั้งเบิก" || status === "รออนุมัติ");
+            const creditInfo = getRowCreditDueDateInfo(row, todayIso);
+            const isSelectable = resendMode ? true : ((status === "รอตั้งเบิก" || status === "รออนุมัติ") && !creditInfo.isLocked);
             const rowBillType = getRowBillType(row);
             const isTypeMismatch = Boolean(selectedBillType && rowBillType !== selectedBillType && !isSelected);
 
@@ -1207,7 +1559,9 @@ function WithdrawTable({
                       !isSelectable || isTypeMismatch ? "cursor-not-allowed opacity-30 bg-slate-100" : "cursor-pointer"
                     }`}
                     title={
-                      isTypeMismatch
+                      creditInfo.isLocked && !resendMode
+                        ? `บิลนี้มีเครดิตจ่าย ยังไม่ถึงกำหนดวันจ่าย (${creditInfo.formattedDueDate} - อีก ${creditInfo.daysRemaining} วัน) ไม่สามารถตั้งเบิกได้`
+                        : isTypeMismatch
                         ? `ไม่สามารถเลือกได้ เนื่องจากเลือกรายการ "บิล${selectedBillType}" อยู่ (การแจ้งตั้งเบิกต้องเป็นประเภทบิลเดียวกันเท่านั้น)`
                         : !isSelectable
                         ? `รายการสถานะ "${row["สถานะ"] || status}" ตั้งเบิกเรียบร้อยแล้ว (เปิดโหมดส่งซ้ำเพื่อเลือกส่งใหม่)`
@@ -1233,6 +1587,14 @@ function WithdrawTable({
                         <span className="px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200 inline-block">
                           ปิดงานแล้ว
                         </span>
+                      ) : creditInfo.isLocked && !resendMode ? (
+                        <span
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-amber-50 text-amber-800 border border-amber-300 shadow-2xs whitespace-nowrap"
+                          title={`ยังไม่ถึงกำหนดวันจ่าย (${creditInfo.formattedDueDate} - อีก ${creditInfo.daysRemaining} วัน) ไม่สามารถตั้งเบิกได้`}
+                        >
+                          <Clock size={12} className="text-amber-600 shrink-0" />
+                          <span>รอถึงวันจ่าย ({creditInfo.formattedDueDate.slice(0, 5)})</span>
+                        </span>
                       ) : (
                         <button
                           type="button"
@@ -1247,6 +1609,25 @@ function WithdrawTable({
                           )}
                           <span>ตั้งเบิก</span>
                         </button>
+                      )
+                    ) : column === "วันจ่าย" ? (
+                      creditInfo.dueDateIso ? (
+                        creditInfo.isLocked ? (
+                          <span 
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-amber-50 text-amber-800 border border-amber-200 whitespace-nowrap"
+                            title={`ครบกำหนดวันจ่าย ${creditInfo.formattedDueDate} (อีก ${creditInfo.daysRemaining} วัน)`}
+                          >
+                            <Clock size={11} className="text-amber-600 shrink-0" />
+                            <span>{creditInfo.formattedDueDate}</span>
+                            <span className="text-[10px] text-amber-600 font-normal">({creditInfo.daysRemaining}ว.)</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-slate-700 font-medium whitespace-nowrap">
+                            {creditInfo.formattedDueDate}
+                          </span>
+                        )
+                      ) : (
+                        <span className="text-slate-400">-</span>
                       )
                     ) : column === "ยอดเงิน" ? (
                       money(getBillRowAmount(row))

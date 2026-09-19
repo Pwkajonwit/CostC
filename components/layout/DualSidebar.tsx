@@ -12,6 +12,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  Coins,
   Database,
   FileText,
   FolderKanban,
@@ -46,6 +47,7 @@ const ICONS: Record<string, any> = {
   "bill-entry": ReceiptText,
   "withdraw-request": WalletCards,
   "contract-open": BriefcaseBusiness,
+  "petty-cash": Coins,
   "bill-follow": ClipboardList,
   "work-status": FolderKanban,
   documents: FileText,
@@ -72,6 +74,7 @@ function hrefFor(viewId: string) {
   if (viewId === "bill-entry") return "/bills";
   if (viewId === "withdraw-request") return "/withdraw-request";
   if (viewId === "contract-open") return "/contract-open";
+  if (viewId === "petty-cash") return "/petty-cash";
   if (viewId === "bill-follow") return "/bill-follow";
   if (viewId === "work-status") return "/work-status";
   if (viewId === "documents") return "/documents";
