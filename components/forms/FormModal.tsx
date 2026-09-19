@@ -1796,8 +1796,8 @@ export function FormModal({
                                   const customClassName =
                                     section.id === "vendor" && field.name === "ร้านค้า"
                                       ? (isMultiItemMode ? "col-span-1 sm:col-span-2 lg:col-span-2" : "col-span-1")
-                                      : section.id === "vendor" && (field.name === "ผู้รับเหมา" || field.name === "รายละเอียดงาน")
-                                      ? "col-span-1"
+                                      : section.id === "vendor" && field.name === "ผู้รับเหมา"
+                                      ? "col-span-full"
                                       : undefined;
 
                                   return (
@@ -4377,8 +4377,11 @@ function isFieldVisible(field: FieldSchema, values: Record<string, string>) {
   if (field.name === "สินค้า") {
     return true;
   }
-  if (field.name === "ผู้รับเหมา" || field.name === "รายละเอียดงาน" || field.name === "ค่าแรงคงเหลือ") {
+  if (field.name === "ผู้รับเหมา" || field.name === "ค่าแรงคงเหลือ") {
     return vendorType === "ผู้รับเหมา";
+  }
+  if (field.name === "รายละเอียดงาน") {
+    return false; // ค่าแรง รายละเอียดงานไม่ต้องมี เพราะ ใช้ประเภทงาน แทน
   }
   if (field.name === "ชื่อพนักงาน") {
     return vendorType === "พนักงาน" || isStaffCost(cat);
@@ -4457,9 +4460,11 @@ function isFieldVisible(field: FieldSchema, values: Record<string, string>) {
 function getFieldClassName(field: FieldSchema, values?: Record<string, string>) {
   const vendorType = values?.["ร้านค้า/ผู้รับเหมา"];
 
-  if (field.name === "ผู้รับเหมา" || field.name === "รายละเอียดงาน") {
-    // แสดง 1 คอลัมน์ เพื่อให้อยู่ข้างกันในแถวเดียวกับรูปแบบรายการ (1 + 1 + 1 = 3 คอลัมน์)
-    return "col-span-1";
+  if (field.name === "ผู้รับเหมา") {
+    return "col-span-full";
+  }
+  if (field.name === "รายละเอียดงาน") {
+    return "hidden";
   }
   if (
     field.type === "LongText" ||
