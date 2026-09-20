@@ -945,9 +945,13 @@ export async function handleLineCommand(
         if ((isApprove || isReject) && (normSt === "อนุมัติ" || normSt === "เบิกแล้ว" || currentSt.includes("เสร็จ") || currentSt.includes("ปิดงาน") || currentSt.includes("จ่ายแล้ว"))) {
           return false;
         }
-        // When performing close, only bills that are ALREADY APPROVED ("อนุมัติ") can be closed!
-        if (!isApprove && !isReject && normSt !== "อนุมัติ") {
-          return false;
+        // When performing close, only bills that are "อนุมัติ" can be closed.
+        // If the user explicitly specified bill ID(s) (e.g. from the LINE "ปิดงานทั้งหมด" button)
+        // and the bill is already "เบิกแล้ว", also allow it through so closing can finish gracefully.
+        if (!isApprove && !isReject) {
+          if (normSt !== "อนุมัติ" && !(isExplicitIdList && normSt === "เบิกแล้ว")) {
+            return false;
+          }
         }
 
         if (isSubBatch && !checkIsSubBill(b)) return false;
@@ -984,17 +988,39 @@ export async function handleLineCommand(
 
       if (targetBills.length === 0) {
         if (!isApprove && !isReject && isExplicitIdList) {
-          const unapprovedMatches = rawBills.filter(b => {
+          const matchedBills = rawBills.filter(b => {
             const bId = String(b.id || b["ลำดับ"] || b._sheetRow || "").trim();
             return targetIdList.includes(bId);
           });
-          if (unapprovedMatches.length > 0) {
-            const stList = unapprovedMatches.map(b => `#${b.id || b["ลำดับ"] || b._sheetRow} (${b["สถานะ"] || b.status || "ตั้งเบิก"})`).join(", ");
-            await replyTextMessage(
-              replyToken,
-              `⚠️ ไม่สามารถปิดงานได้ เนื่องจากบิล ${stList} ยังไม่ได้รับการอนุมัติจากผู้อนุมัติบิล\n\n(ฝ่ายการเงินสามารถปิดงานได้เฉพาะบิลที่มีสถานะ "อนุมัติ" แล้วเท่านั้นครับ)`
-            );
-            return true;
+          if (matchedBills.length > 0) {
+            const alreadyClosedBills = matchedBills.filter(b => {
+              const currentSt = String(b["สถานะ"] || b.status || "").trim();
+              const normSt = normalizeBillStatus(currentSt);
+              return normSt === "เบิกแล้ว" || currentSt.includes("เสร็จ") || currentSt.includes("ปิดงาน") || currentSt.includes("จ่ายแล้ว");
+            });
+            const unapprovedBills = matchedBills.filter(b => {
+              const currentSt = String(b["สถานะ"] || b.status || "").trim();
+              const normSt = normalizeBillStatus(currentSt);
+              return normSt !== "อนุมัติ" && normSt !== "เบิกแล้ว" && !currentSt.includes("เสร็จ") && !currentSt.includes("ปิดงาน") && !currentSt.includes("จ่ายแล้ว");
+            });
+
+            if (alreadyClosedBills.length > 0 && unapprovedBills.length === 0) {
+              const closedList = alreadyClosedBills.map(b => `#${b.id || b["ลำดับ"] || b._sheetRow}`).join(", ");
+              await replyTextMessage(
+                replyToken,
+                `ℹ️ บิล ${closedList} ได้รับการปิดงาน/จ่ายเงินเรียบร้อยแล้วครับ`
+              );
+              return true;
+            }
+
+            if (unapprovedBills.length > 0) {
+              const stList = unapprovedBills.map(b => `#${b.id || b["ลำดับ"] || b._sheetRow} (${b["สถานะ"] || b.status || "ตั้งเบิก"})`).join(", ");
+              await replyTextMessage(
+                replyToken,
+                `⚠️ ไม่สามารถปิดงานได้ เนื่องจากบิล ${stList} ยังไม่ได้รับการอนุมัติจากผู้อนุมัติบิล\n\n(ฝ่ายการเงินสามารถปิดงานได้เฉพาะบิลที่มีสถานะ "อนุมัติ" แล้วเท่านั้นครับ)`
+              );
+              return true;
+            }
           }
         }
 
@@ -1024,7 +1050,7 @@ export async function handleLineCommand(
         totalAmount += Number(b["ยอดเงิน"] || b.amount || 0);
 
         const isSub = checkIsSubBill(b) || isSubBill(b);
-        const finalStatus = (isSub && isApprove) ? "เบิกแล้ว" : newStatus;
+        const finalStatus = newStatus;
 
         const patchPayload: Record<string, any> = {
           "สถานะ": finalStatus,
@@ -1033,12 +1059,9 @@ export async function handleLineCommand(
 
         if (isApprove) {
           patchPayload.approved_at = nowIso;
-          if (isSub) {
-            patchPayload.paid_at = nowIso;
-            patchPayload.paid_date = todayDate;
-            patchPayload["วันจ่าย"] = todayDate;
-          }
-        } else if (!isReject) {
+        } else if (isReject) {
+          patchPayload.rejected_at = nowIso;
+        } else {
           // Closed / Paid
           patchPayload.paid_at = nowIso;
           patchPayload.paid_date = todayDate;

@@ -315,16 +315,19 @@ export async function PATCH(request: NextRequest) {
           if (!existing) return null;
           const values = { ...existing, ...patch };
 
-          // 🪙 Sub-bill auto clear handling:
-          // When a sub-bill is approved, mark it "เบิกแล้ว" (paid & closed) and queue petty cash auto-clear
+          // 🪙 Sub-bill handling:
+          // Preserve 'อนุมัติ' upon approval, and queue petty cash auto-clear when closed/paid ('เบิกแล้ว')
           if (isBillTable && patch["สถานะ"] !== undefined) {
             const targetSt = normalizeBillStatus(patch["สถานะ"]);
-            if ((targetSt === "อนุมัติ" || targetSt === "เบิกแล้ว") && (isSubBill(existing) || isSubBill(values))) {
-              const nowIso = new Date().toISOString();
-              const todayDate = nowIso.split("T")[0];
+            const nowIso = new Date().toISOString();
+            const todayDate = nowIso.split("T")[0];
+            if (targetSt === "อนุมัติ") {
+              values["สถานะ"] = "อนุมัติ";
+              values.status = "อนุมัติ";
+              values.approved_at = nowIso;
+            } else if (targetSt === "เบิกแล้ว" && (isSubBill(existing) || isSubBill(values))) {
               values["สถานะ"] = "เบิกแล้ว";
               values.status = "เบิกแล้ว";
-              values.approved_at = nowIso;
               values.paid_at = nowIso;
               values.paid_date = todayDate;
               values["วันจ่าย"] = todayDate;
@@ -517,13 +520,16 @@ export async function PATCH(request: NextRequest) {
     let isApprovedSubBill = false;
     if (isBillTable && (patch["สถานะ"] !== undefined || values["สถานะ"] !== undefined)) {
       const targetSt = normalizeBillStatus(patch["สถานะ"] ?? values["สถานะ"]);
-      if ((targetSt === "อนุมัติ" || targetSt === "เบิกแล้ว") && (isSubBill(existing) || isSubBill(values))) {
+      const nowIso = new Date().toISOString();
+      const todayDate = nowIso.split("T")[0];
+      if (targetSt === "อนุมัติ") {
+        output["สถานะ"] = "อนุมัติ";
+        output.status = "อนุมัติ";
+        output.approved_at = nowIso;
+      } else if (targetSt === "เบิกแล้ว" && (isSubBill(existing) || isSubBill(values))) {
         isApprovedSubBill = true;
-        const nowIso = new Date().toISOString();
-        const todayDate = nowIso.split("T")[0];
         output["สถานะ"] = "เบิกแล้ว";
         output.status = "เบิกแล้ว";
-        output.approved_at = nowIso;
         output.paid_at = nowIso;
         output.paid_date = todayDate;
         output["วันจ่าย"] = todayDate;
