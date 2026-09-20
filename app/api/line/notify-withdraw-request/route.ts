@@ -18,6 +18,8 @@ import {
   getPettyCashSummaryMap
 } from "@/lib/line/line";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
+import { getTodayDateIso, normalizeDateToIso } from "@/lib/utils/dates";
+import { isCreditActive, parseCreditDays } from "@/lib/project-summary";
 
 export async function POST(req: NextRequest) {
   try {
@@ -45,6 +47,34 @@ export async function POST(req: NextRequest) {
       if (billTypes.size > 1) {
         return NextResponse.json({
           error: "การแจ้งตั้งเบิกจะต้องเป็นประเภทบิลเดียวกันเท่านั้น (ไม่สามารถส่งบิลหลักและบิลย่อยปนกันในชุดเดียวกันได้)"
+        }, { status: 400 });
+      }
+    }
+
+    // Safety guard: Cannot submit withdrawal request for bills with future credit due date
+    const targetRoleCheck = body.targetRole || "requester";
+    if (targetRoleCheck === "requester") {
+      const todayIso = getTodayDateIso();
+      const lockedBills = bills.filter((b: any) => {
+        const rawDueDate = b["วันจ่าย"] || b.due_date || b.paid_date || b.data?.["วันจ่าย"] || b.data?.due_date;
+        let dueDateIso = normalizeDateToIso(rawDueDate);
+        const hasCreditTerm = isCreditActive(b["เครดิต"]) || b.data?.["เครดิต"];
+        if (!dueDateIso && hasCreditTerm) {
+          const cDays = parseCreditDays(b["เครดิต"] || b.data?.["เครดิต"]);
+          const billDateIso = normalizeDateToIso(b["ว/ด/ป"] || b["วันที่"] || b.bill_date);
+          if (billDateIso && cDays > 0) {
+            const bDate = new Date(billDateIso);
+            bDate.setDate(bDate.getDate() + cDays);
+            dueDateIso = getTodayDateIso(bDate);
+          }
+        }
+        return Boolean(dueDateIso && dueDateIso > todayIso);
+      });
+
+      if (lockedBills.length > 0) {
+        const lockedIds = lockedBills.map((b: any) => `#${b.id || b["ลำดับ"] || b._sheetRow}`).join(", ");
+        return NextResponse.json({
+          error: `ไม่สามารถส่งตั้งเบิกรายการที่มีเครดิตและยังไม่ถึงกำหนดวันจ่ายได้ (${lockedIds}) โปรดรอจนถึงวันจ่ายตามเงื่อนไขเครดิต`
         }, { status: 400 });
       }
     }
