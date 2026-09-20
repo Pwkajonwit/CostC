@@ -15,9 +15,10 @@ export async function GET(request: NextRequest) {
     clearCache("dashboard");
   }
 
-  const [dataRows, projectRows] = await Promise.all([
+  const [dataRows, projectRows, pettyCashRows] = await Promise.all([
     getRows(TABLES.DATA),
-    getRows(TABLES.PROJECT)
+    getRows(TABLES.PROJECT),
+    getRows(TABLES.PETTY_CASH).catch(() => []),
   ]);
 
   const validDataRows = dataRows.filter(isCommittedBill);
@@ -29,9 +30,17 @@ export async function GET(request: NextRequest) {
         return !yr || String(yr) === String(yearParam);
       });
 
+  const yearFilteredPettyCash = (!yearParam || yearParam === "all")
+    ? pettyCashRows
+    : pettyCashRows.filter((r) => {
+        const yr = getRowYear(r);
+        return !yr || String(yr) === String(yearParam);
+      });
+
   const response = NextResponse.json({
     dataRows: yearFilteredRows,
     projectRows,
+    pettyCashRows: yearFilteredPettyCash,
     totalRows: yearFilteredRows.length,
     projectRowsCount: projectRows.length
   });

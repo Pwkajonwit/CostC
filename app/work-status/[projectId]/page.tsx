@@ -13,6 +13,7 @@ export const revalidate = 0;
 
 type ProjectDetailPageProps = {
   params: Promise<{ projectId: string }>;
+  searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
 };
 
 const DETAIL_FIELDS = [
@@ -44,8 +45,10 @@ const RELATED_COLUMNS = [
   "สถานะ"
 ];
 
-export default async function ProjectDetailPage({ params }: ProjectDetailPageProps) {
+export default async function ProjectDetailPage({ params, searchParams }: ProjectDetailPageProps) {
   const { projectId } = await params;
+  const query = searchParams ? await searchParams : {};
+  const initialTab = typeof query.tab === "string" ? query.tab : undefined;
   const decodedProjectId = decodeURIComponent(projectId);
 
   const [projectRows, dataRows, customerRows, companyRows, peopleRows] = await Promise.all([
@@ -101,6 +104,7 @@ export default async function ProjectDetailPage({ params }: ProjectDetailPagePro
       summaryRows={summaryRows}
       detailFields={DETAIL_FIELDS}
       relatedColumns={RELATED_COLUMNS}
+      initialTab={initialTab}
     />
   );
 }

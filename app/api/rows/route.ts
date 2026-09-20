@@ -10,7 +10,7 @@ import { getFormSchema } from "@/lib/schemas";
 import { isVatActive, isDeductActive, parseDeductPercent, parseCreditDays, parseBillItems } from "@/lib/project-summary";
 import { appendAuditLog, appendRow, bulkAppendRows, deleteRows, getRows, getSystemOptions, invalidateTableCache, updateRow } from "@/lib/db";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
-import { getNextBillSequence, syncContractWorkPaidAmount } from "@/lib/supabase/supabase-db";
+import { getDbTableName, getNextBillSequence, syncContractWorkPaidAmount } from "@/lib/supabase/supabase-db";
 import { extractMemberPermissions, type UserPermissions } from "@/lib/user-permissions";
 import type { SheetRow } from "@/lib/types";
 
@@ -85,6 +85,27 @@ async function verifyDeletePermission(request: NextRequest): Promise<boolean> {
   const perms = await getUserPermissionsFromRequest(request);
   if (!perms) return false;
   return Boolean(perms.isOwner || perms.canDelete || perms.role === "Owner" || perms.role === "Admin");
+}
+
+function isMasterTable(tableName: string): boolean {
+  if (!tableName) return false;
+  const t = tableName.trim().toLowerCase();
+  const canonical = getDbTableName(tableName)?.toLowerCase() || t;
+
+  return (
+    canonical === "stores" || t === "ร้านค้า" || t === "stores" ||
+    canonical === "contractors" || t === "รับเหมา" || t === "contractors" ||
+    canonical === "banks" || t === "ธนาคาร" || t === "banks" ||
+    canonical === "categories" || t === "ประเภท" || t === "categories" ||
+    canonical === "companies" || t === "บริษัท" || t === "companies" ||
+    canonical === "customers" || t === "ลูกค้า" || t === "customers" ||
+    canonical === "cars" || t === "ทะเบียนรถ" || t === "ทะเบียน" || t === "cars" ||
+    canonical === "master_members" || t === "รายชื่อ" || t === "ชื่อพนักงาน" || t === "people" ||
+    canonical === "projects" || t === "project" || t === "1. project รวม" ||
+    canonical === "loans" || t === "ยืมเงิน" || t === "loans" ||
+    canonical === "products" || t === "สินค้า" || t === "products" ||
+    canonical === "system_options" || t === "ตัวเลือกระบบ" || t === "system_options"
+  );
 }
 
 export async function GET(request: NextRequest) {
@@ -210,6 +231,10 @@ export async function POST(request: NextRequest) {
       const amt = Number(output["จำนวนเงิน"] || 0);
       const clr = Number(output["ยอดเคลียร์แล้ว"] || 0);
       output["ยอดคงเหลือ"] = String(Math.max(0, amt - clr));
+      const currentStatus = String(output["สถานะ"] || "").trim();
+      if (amt > 0 && clr >= amt && currentStatus !== "ยกเลิก") {
+        output["สถานะ"] = "เคลียร์บิลแล้ว";
+      }
     }
     await appendRow(tableName, output);
     await appendAuditLog({
@@ -294,6 +319,18 @@ export async function PATCH(request: NextRequest) {
             values.line_user_id = lineVal;
             values["LINE User ID"] = lineVal;
             values["LINE"] = lineVal;
+          }
+          const isPettyCash = tableName === TABLES.PETTY_CASH || tableName === "เปิดเงินสดย่อย" || tableName === "petty_cash";
+          if (isPettyCash) {
+            const amt = Number(values["จำนวนเงิน"] !== undefined ? values["จำนวนเงิน"] : existing["จำนวนเงิน"] || 0);
+            const clr = Number(values["ยอดเคลียร์แล้ว"] !== undefined ? values["ยอดเคลียร์แล้ว"] : existing["ยอดเคลียร์แล้ว"] || 0);
+            values["ยอดคงเหลือ"] = String(Math.max(0, amt - clr));
+            const currentStatus = String(values["สถานะ"] !== undefined ? values["สถานะ"] : existing["สถานะ"] || "").trim();
+            if (amt > 0 && clr >= amt && currentStatus !== "ยกเลิก") {
+              values["สถานะ"] = "เคลียร์บิลแล้ว";
+            } else if (amt > 0 && clr < amt && currentStatus === "เคลียร์บิลแล้ว") {
+              values["สถานะ"] = "จ่ายเงินแล้ว";
+            }
           }
           const originalTarget = existing.id || (keyCol && existing[keyCol] ? existing[keyCol] : undefined) || targetIdentifier || existing._sheetRow;
           return updateRow(tableName, originalTarget, values);
@@ -446,9 +483,15 @@ export async function PATCH(request: NextRequest) {
             ? await applyBillFormulas(values)
             : values;
     if (isPettyCash) {
-      const amt = Number(output["จำนวนเงิน"] || 0);
-      const clr = Number(output["ยอดเคลียร์แล้ว"] || 0);
+      const amt = Number(output["จำนวนเงิน"] !== undefined ? output["จำนวนเงิน"] : existing["จำนวนเงิน"] || 0);
+      const clr = Number(output["ยอดเคลียร์แล้ว"] !== undefined ? output["ยอดเคลียร์แล้ว"] : existing["ยอดเคลียร์แล้ว"] || 0);
       output["ยอดคงเหลือ"] = String(Math.max(0, amt - clr));
+      const currentStatus = String(output["สถานะ"] !== undefined ? output["สถานะ"] : existing["สถานะ"] || "").trim();
+      if (amt > 0 && clr >= amt && currentStatus !== "ยกเลิก") {
+        output["สถานะ"] = "เคลียร์บิลแล้ว";
+      } else if (amt > 0 && clr < amt && currentStatus === "เคลียร์บิลแล้ว") {
+        output["สถานะ"] = "จ่ายเงินแล้ว";
+      }
     }
     console.log(`[PATCH /api/rows] tableName: "${tableName}", targetRowKey: "${targetRowKey}", values:`, patch);
     const originalTarget = existing.id || (keyCol && existing[keyCol] ? existing[keyCol] : undefined) || targetRowKey || existing._sheetRow;
@@ -501,11 +544,6 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const isAllowed = await verifyDeletePermission(request);
-    if (!isAllowed) {
-      return NextResponse.json({ error: "⛔ คุณไม่มีสิทธิ์ในการลบข้อมูลในระบบ (กรุณาติดต่อผู้ดูแลระบบเพื่อขอสิทธิ์ลบข้อมูล)" }, { status: 403 });
-    }
-
     let tableName = "";
     let rawKeys: (string | number)[] = [];
     try {
@@ -520,6 +558,17 @@ export async function DELETE(request: NextRequest) {
       if (idParam) rawKeys = [idParam];
     }
     if (!canManageTable(tableName)) return NextResponse.json({ error: "Table is not manageable" }, { status: 403 });
+
+    // จำกัดการลบเฉพาะข้อมูลมาสเตอร์ เมนูย่อย (ร้านค้า, ผู้รับเหมา, พนักงาน, ธนาคาร, ทะเบียนรถ, บริษัท, ลูกค้า, โครงการ ฯลฯ)
+    // ในส่วนของเมนูหลัก (บิล/Data, เปิดเงินสดย่อย, เปิดจ้าง, งาน) ผู้ใช้งานสามารถลบและแก้ไขได้ปกติ
+    if (isMasterTable(tableName)) {
+      const isAllowed = await verifyDeletePermission(request);
+      if (!isAllowed) {
+        return NextResponse.json({
+          error: "⛔ การลบข้อมูลมาสเตอร์ (เช่น ร้านค้า, ผู้รับเหมา, พนักงาน, ธนาคาร, โครงการ ฯลฯ) จำกัดเฉพาะผู้ดูแลระบบหรือผู้ได้รับสิทธิ์ลบข้อมูลเท่านั้น เพื่อป้องกันผลกระทบต่อรายการบิลและสัญญาในระบบ"
+        }, { status: 403 });
+      }
+    }
 
     const keySet = new Set(rawKeys.map(k => String(k).trim()));
     const keyCol = TABLE_KEYS[tableName] || "id";
