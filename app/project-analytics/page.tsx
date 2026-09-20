@@ -4,7 +4,7 @@ import { isCommittedBill } from "@/lib/bills/bill-status";
 import { ProjectAnalyticsDashboardClient } from "@/components/dashboards/ProjectAnalyticsDashboardClient";
 
 import { cookies } from "next/headers";
-import { getRowYear } from "@/lib/utils/dates";
+import { isRowMatchingYearOrPeriod } from "@/lib/fiscal-periods/fiscal-period-types";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -23,12 +23,7 @@ export default async function ProjectAnalyticsPage() {
   const selectedYear = cookieStore.get("costlab_selected_year")?.value;
 
   const validDataRows = dataRows.filter(isCommittedBill);
-  const yearFilteredDataRows = (!selectedYear || selectedYear === "all")
-    ? validDataRows
-    : validDataRows.filter((r) => {
-        const yr = getRowYear(r);
-        return !yr || String(yr) === String(selectedYear);
-      });
+  const yearFilteredDataRows = validDataRows.filter((r) => isRowMatchingYearOrPeriod(r, selectedYear));
 
   const lightStoreRows = storeRows.map((s) => ({
     id_store: String(s["id_store"] || s.id || "").trim(),

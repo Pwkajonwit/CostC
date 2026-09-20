@@ -12,6 +12,7 @@ import { appendAuditLog, appendRow, bulkAppendRows, deleteRows, getRows, getSyst
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 import { getDbTableName, getNextBillSequence, syncContractWorkPaidAmount } from "@/lib/supabase/supabase-db";
 import { extractMemberPermissions, type UserPermissions } from "@/lib/user-permissions";
+import { autoClearPettyCashOnSubBillApproval, isSubBill } from "@/lib/petty-cash/petty-cash-clear";
 import type { SheetRow } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -290,6 +291,9 @@ export async function PATCH(request: NextRequest) {
       }
       const existingRows = await getRows(tableName);
       const keyCol = TABLE_KEYS[tableName] || "id";
+      const isBillTable = tableName === TABLES.DATA || tableName === "Data" || tableName === "bills";
+      const approvedSubBillsList: SheetRow[] = [];
+
       const results = await Promise.all(
         patches.map(async item => {
           const targetIdentifier = item.id !== undefined && item.id !== null && String(item.id).trim() !== "" ? item.id : item.sheetRow;
@@ -310,6 +314,24 @@ export async function PATCH(request: NextRequest) {
           );
           if (!existing) return null;
           const values = { ...existing, ...patch };
+
+          // 🪙 Sub-bill auto clear handling:
+          // When a sub-bill is approved, mark it "เบิกแล้ว" (paid & closed) and queue petty cash auto-clear
+          if (isBillTable && patch["สถานะ"] !== undefined) {
+            const targetSt = normalizeBillStatus(patch["สถานะ"]);
+            if ((targetSt === "อนุมัติ" || targetSt === "เบิกแล้ว") && (isSubBill(existing) || isSubBill(values))) {
+              const nowIso = new Date().toISOString();
+              const todayDate = nowIso.split("T")[0];
+              values["สถานะ"] = "เบิกแล้ว";
+              values.status = "เบิกแล้ว";
+              values.approved_at = nowIso;
+              values.paid_at = nowIso;
+              values.paid_date = todayDate;
+              values["วันจ่าย"] = todayDate;
+              approvedSubBillsList.push({ ...existing, ...values });
+            }
+          }
+
           if (patch["LINE User ID"] !== undefined || patch["LINE"] !== undefined || patch["line_user_id"] !== undefined) {
             const lineVal = patch["LINE User ID"] !== undefined
               ? String(patch["LINE User ID"] ?? "").trim()
@@ -336,6 +358,14 @@ export async function PATCH(request: NextRequest) {
           return updateRow(tableName, originalTarget, values);
         })
       );
+
+      // Trigger automatic clearance of petty cash for approved sub-bills
+      if (approvedSubBillsList.length > 0) {
+        autoClearPettyCashOnSubBillApproval(approvedSubBillsList).catch(err => {
+          console.warn("Failed autoClearPettyCashOnSubBillApproval in batch patches:", err);
+        });
+      }
+
       invalidateTableCache(tableName);
       try {
         revalidatePath("/views", "layout");
@@ -482,6 +512,24 @@ export async function PATCH(request: NextRequest) {
           : tableName === TABLES.DATA
             ? await applyBillFormulas(values)
             : values;
+
+    const isBillTable = tableName === TABLES.DATA || tableName === "Data" || tableName === "bills";
+    let isApprovedSubBill = false;
+    if (isBillTable && (patch["สถานะ"] !== undefined || values["สถานะ"] !== undefined)) {
+      const targetSt = normalizeBillStatus(patch["สถานะ"] ?? values["สถานะ"]);
+      if ((targetSt === "อนุมัติ" || targetSt === "เบิกแล้ว") && (isSubBill(existing) || isSubBill(values))) {
+        isApprovedSubBill = true;
+        const nowIso = new Date().toISOString();
+        const todayDate = nowIso.split("T")[0];
+        output["สถานะ"] = "เบิกแล้ว";
+        output.status = "เบิกแล้ว";
+        output.approved_at = nowIso;
+        output.paid_at = nowIso;
+        output.paid_date = todayDate;
+        output["วันจ่าย"] = todayDate;
+      }
+    }
+
     if (isPettyCash) {
       const amt = Number(output["จำนวนเงิน"] !== undefined ? output["จำนวนเงิน"] : existing["จำนวนเงิน"] || 0);
       const clr = Number(output["ยอดเคลียร์แล้ว"] !== undefined ? output["ยอดเคลียร์แล้ว"] : existing["ยอดเคลียร์แล้ว"] || 0);
@@ -498,11 +546,18 @@ export async function PATCH(request: NextRequest) {
     const row = await updateRow(tableName, originalTarget, output);
     console.log(`[PATCH /api/rows SUCCESS] updated "${tableName}" row key: "${originalTarget}"`);
 
-    if (tableName === TABLES.DATA || tableName === "Data" || tableName === "bills") {
+    if (isBillTable) {
       const cRef = String(row._rawContractor || row["_rawContractor"] || row.conwork_id || row["สัญญา"] || row.contractor_id || row["ผู้รับเหมา"] || existing._rawContractor || existing.conwork_id || existing["ผู้รับเหมา"] || "").trim();
       const pId = String(row.project_id || row["ID Project"] || existing.project_id || existing["ID Project"] || "").trim();
       if (cRef) {
         syncContractWorkPaidAmount(cRef, pId).catch(() => null);
+      }
+
+      // 🪙 Trigger auto-clear petty cash when sub-bill is approved
+      if (isApprovedSubBill || ((isSubBill(existing) || isSubBill(row)) && (normalizeBillStatus(patch["สถานะ"] ?? row["สถานะ"]) === "อนุมัติ" || normalizeBillStatus(patch["สถานะ"] ?? row["สถานะ"]) === "เบิกแล้ว"))) {
+        autoClearPettyCashOnSubBillApproval([{ ...existing, ...row, ...output }]).catch(err => {
+          console.warn("Failed autoClearPettyCashOnSubBillApproval in single PATCH:", err);
+        });
       }
     }
     await appendAuditLog({

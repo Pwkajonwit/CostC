@@ -6,7 +6,7 @@ import { getViewColumns } from "@/lib/views";
 import { getFormPayload } from "@/lib/form";
 
 import { cookies } from "next/headers";
-import { getRowYear } from "@/lib/utils/dates";
+import { isRowMatchingYearOrPeriod, extractTargetYear } from "@/lib/fiscal-periods/fiscal-period-types";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -23,25 +23,17 @@ export default async function ContractOpenPage() {
   const cookieStore = await cookies();
   const selectedYear = cookieStore.get("costlab_selected_year")?.value;
 
-  const yearFilteredRawRows = (!selectedYear || selectedYear === "all")
-    ? rawRows
-    : rawRows.filter((r) => {
-        const yr = getRowYear(r);
-        return !yr || String(yr) === String(selectedYear);
-      });
+  const yearFilteredRawRows = rawRows.filter((r) => isRowMatchingYearOrPeriod(r, selectedYear));
+  const yearFilteredDataRows = dataRows.filter((r) => isRowMatchingYearOrPeriod(r, selectedYear));
 
-  const yearFilteredDataRows = (!selectedYear || selectedYear === "all")
-    ? dataRows
-    : dataRows.filter((r) => {
-        const yr = getRowYear(r);
-        return !yr || String(yr) === String(selectedYear);
-      });
+  const targetYrStr = selectedYear && selectedYear !== "all" ? extractTargetYear(selectedYear) : "";
+  const targetYearNum = targetYrStr ? parseInt(targetYrStr, 10) : undefined;
 
   const hydratedRows = await hydrateContractRows(yearFilteredRawRows, {
     projects: projectRows,
     contractors: contractorRows,
     dataRows: yearFilteredDataRows,
-    targetYear: selectedYear && selectedYear !== "all" ? parseInt(selectedYear, 10) : undefined,
+    targetYear: isNaN(targetYearNum as number) ? undefined : targetYearNum,
   });
 
   const fallback = hydratedRows[0] ? Object.keys(hydratedRows[0]).filter((column) => !column.startsWith("_")) : [];

@@ -4,6 +4,7 @@ import { TABLES } from "@/lib/config";
 import { getRows } from "@/lib/db";
 import { isCommittedBill } from "@/lib/bills/bill-status";
 import { getRowYear } from "@/lib/utils/dates";
+import { isRowMatchingYearOrPeriod } from "@/lib/fiscal-periods/fiscal-period-types";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -25,17 +26,11 @@ export async function GET(request: NextRequest) {
   const yearParam = request.nextUrl.searchParams.get("year")?.trim() || request.cookies.get("costlab_selected_year")?.value?.trim();
   const yearFilteredRows = (!yearParam || yearParam === "all")
     ? validDataRows
-    : validDataRows.filter((r) => {
-        const yr = getRowYear(r);
-        return !yr || String(yr) === String(yearParam);
-      });
+    : validDataRows.filter((r) => isRowMatchingYearOrPeriod(r, yearParam));
 
   const yearFilteredPettyCash = (!yearParam || yearParam === "all")
     ? pettyCashRows
-    : pettyCashRows.filter((r) => {
-        const yr = getRowYear(r);
-        return !yr || String(yr) === String(yearParam);
-      });
+    : pettyCashRows.filter((r) => isRowMatchingYearOrPeriod(r, yearParam));
 
   const response = NextResponse.json({
     dataRows: yearFilteredRows,

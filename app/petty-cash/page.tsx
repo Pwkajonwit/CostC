@@ -5,6 +5,7 @@ import { getViewColumns } from "@/lib/views";
 import { getFormPayload } from "@/lib/form";
 import { cookies } from "next/headers";
 import { getRowYear } from "@/lib/utils/dates";
+import { isRowMatchingYearOrPeriod } from "@/lib/fiscal-periods/fiscal-period-types";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -23,10 +24,7 @@ export default async function PettyCashPage() {
 
   const yearFilteredRawRows = (!selectedYear || selectedYear === "all")
     ? rawRows
-    : rawRows.filter((r) => {
-        const yr = getRowYear(r);
-        return !yr || String(yr) === String(selectedYear);
-      });
+    : rawRows.filter((r) => isRowMatchingYearOrPeriod(r, selectedYear));
 
   const fallback = yearFilteredRawRows[0]
     ? Object.keys(yearFilteredRawRows[0]).filter((column) => !column.startsWith("_"))

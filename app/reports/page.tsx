@@ -5,6 +5,7 @@ import { ReportsDashboardClient } from "@/components/dashboards/ReportsDashboard
 
 import { cookies } from "next/headers";
 import { getRowYear } from "@/lib/utils/dates";
+import { isRowMatchingYearOrPeriod } from "@/lib/fiscal-periods/fiscal-period-types";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -25,17 +26,11 @@ export default async function ReportsPage() {
   const validDataRows = dataRows.filter(isCommittedBill);
   const yearFilteredDataRows = (!selectedYear || selectedYear === "all")
     ? validDataRows
-    : validDataRows.filter((r) => {
-        const yr = getRowYear(r);
-        return !yr || String(yr) === String(selectedYear);
-      });
+    : validDataRows.filter((r) => isRowMatchingYearOrPeriod(r, selectedYear));
 
   const yearFilteredContractWorks = (!selectedYear || selectedYear === "all")
     ? contractWorkRows
-    : contractWorkRows.filter((r) => {
-        const yr = getRowYear(r);
-        return !yr || String(yr) === String(selectedYear);
-      });
+    : contractWorkRows.filter((r) => isRowMatchingYearOrPeriod(r, selectedYear));
 
   // Trim storeRows and contractorRows to only fields needed for dropdowns and name resolution
   // to avoid serializing 1,100 full rows of metadata into the HTML payload

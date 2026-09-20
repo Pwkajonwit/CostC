@@ -7,6 +7,7 @@ import { cookies } from "next/headers";
 import { formatBillConditions } from "@/lib/bills/bill-status";
 import { extractMemberPermissions, findMemberInPeopleRows } from "@/lib/user-permissions";
 import { getRowYear } from "@/lib/utils/dates";
+import { isRowMatchingYearOrPeriod } from "@/lib/fiscal-periods/fiscal-period-types";
 import type { SheetRow } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -64,10 +65,7 @@ export default async function BillsPage({ searchParams }: BillsPageProps) {
   const selectedYear = cookieStore.get("costlab_selected_year")?.value;
   const yearFilteredRows = (!selectedYear || selectedYear === "all")
     ? allRows
-    : allRows.filter((r) => {
-        const yr = getRowYear(r);
-        return !yr || String(yr) === String(selectedYear);
-      });
+    : allRows.filter((r) => isRowMatchingYearOrPeriod(r, selectedYear));
 
   const sortedRows = sortBillRows(yearFilteredRows, sort || "latest");
   const rows = nonEmptyRows(sortedRows, columns);
