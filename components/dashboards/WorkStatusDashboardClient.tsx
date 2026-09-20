@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
@@ -8,16 +8,22 @@ import {
   Building2,
   CheckCircle2,
   Clock3,
+  ExternalLink,
   FolderKanban,
   LayoutGrid,
   List,
+  PieChart,
   Search,
+  Sliders,
   User,
   Users,
   Wallet,
+  X,
 } from "lucide-react";
 import { money, toNumber } from "@/lib/utils/numbers";
 import type { SheetRow } from "@/lib/types";
+import { ALLOCATED_BUDGET_ITEMS } from "@/lib/project-budget-control";
+import { ProjectBudgetAllocationManager } from "@/components/dashboards/ProjectBudgetAllocationManager";
 
 type WorkStatusDashboardClientProps = {
   projects: SheetRow[];
@@ -56,6 +62,7 @@ export function WorkStatusDashboardClient({ projects }: WorkStatusDashboardClien
   const [searchTerm, setSearchTerm] = useState(urlSearch);
   const [filterTab, setFilterTab] = useState<"all" | "red" | "green" | "complete">("all");
   const [viewMode, setViewMode] = useState<"table" | "grid">("table");
+  const [selectedProjectForAllocation, setSelectedProjectForAllocation] = useState<SheetRow | null>(null);
 
   useEffect(() => {
     setSearchTerm(urlSearch);
@@ -327,11 +334,26 @@ export function WorkStatusDashboardClient({ projects }: WorkStatusDashboardClien
 
                 {/* Footer: Remaining & Detail Link */}
                 <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-100">
-                  <div className="text-slate-500">
-                    คงเหลือ:{" "}
-                    <span className={`${remaining < 0 ? "text-rose-600 font-medium" : "text-emerald-700 font-medium"}`}>
-                      {money(remaining)} ฿
+                  <div className="text-slate-500 flex items-center gap-1.5">
+                    <span>
+                      คงเหลือ:{" "}
+                      <span className={`${remaining < 0 ? "text-rose-600 font-medium" : "text-emerald-700 font-medium"}`}>
+                        {money(remaining)} ฿
+                      </span>
                     </span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setSelectedProjectForAllocation(p);
+                      }}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-[11px] font-semibold transition"
+                      title="เปิดการจัดสรรงบประมาณโครงการนี้"
+                    >
+                      <PieChart size={11} />
+                      <span>จัดสรรงบ</span>
+                    </button>
                   </div>
 
                   <span className="text-slate-600 text-xs flex items-center gap-0.5 group-hover:text-slate-900">
@@ -360,6 +382,7 @@ export function WorkStatusDashboardClient({ projects }: WorkStatusDashboardClien
                     <th className="py-3 px-3.5">บริษัท</th>
                     <th className="py-3 px-3.5">ผู้รับผิดชอบ</th>
                     <th className="py-3 px-3.5 w-36 text-center">สถานะ (Color)</th>
+                    <th className="py-3 px-3.5 text-center whitespace-nowrap">การจัดสรรงบ</th>
                     <th className="py-3 px-3.5 text-right">ยอดเบิกจ่ายจริง</th>
                     <th className="py-3 px-3.5 text-right">งบไม่เกิน</th>
                     <th className="py-3 px-3.5 text-right">คงเหลือ</th>
@@ -412,6 +435,46 @@ export function WorkStatusDashboardClient({ projects }: WorkStatusDashboardClien
                           </span>
                         </td>
 
+                        {/* Budget Allocation Column */}
+                        <td className="py-2.5 px-3.5 text-center whitespace-nowrap">
+                          {(() => {
+                            const allocatedTotal = ALLOCATED_BUDGET_ITEMS.reduce((sum, item) => sum + toNumber(p[item.field]), 0);
+                            const hasAllocation = allocatedTotal > 0;
+                            const allocPercent = budget > 0 ? Math.round((allocatedTotal / budget) * 100) : 0;
+
+                            return (
+                              <div className="inline-flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedProjectForAllocation(p)}
+                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold shadow-2xs transition cursor-pointer active:scale-95 border ${
+                                    hasAllocation
+                                      ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300"
+                                      : "bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200"
+                                  }`}
+                                  title={hasAllocation ? `จัดสรรงบแล้ว ฿${money(allocatedTotal)} (${allocPercent}%) - คลิกเพื่อเปิดแก้ไข` : "คลิกเพื่อเปิดการจัดสรรงบประมาณโครงการ"}
+                                >
+                                  <PieChart size={13} className={hasAllocation ? "text-emerald-700 shrink-0" : "text-indigo-600 shrink-0"} />
+                                  <span>{hasAllocation ? "จัดสรรแล้ว" : "เปิดจัดสรรงบ"}</span>
+                                  {hasAllocation && (
+                                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-600 text-white font-mono font-bold">
+                                      {budget > 0 ? `${allocPercent}%` : "✓"}
+                                    </span>
+                                  )}
+                                </button>
+                                <Link
+                                  href={`/work-status/${encodeURIComponent(id)}?tab=allocation`}
+                                  className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+                                  title="เปิดในหน้ารายละเอียดโครงการเต็ม"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <ExternalLink size={12} />
+                                </Link>
+                              </div>
+                            );
+                          })()}
+                        </td>
+
                         {/* Paid Amount */}
                         <td className="py-2.5 px-3.5 text-right text-slate-900">
                           <div>{money(paid)}</div>
@@ -441,7 +504,7 @@ export function WorkStatusDashboardClient({ projects }: WorkStatusDashboardClien
 
                   {!displayList.length && (
                     <tr>
-                      <td colSpan={9} className="py-10 text-center text-slate-400">
+                      <td colSpan={10} className="py-10 text-center text-slate-400">
                         ไม่พบโครงการที่ค้นหา
                       </td>
                     </tr>
@@ -518,6 +581,68 @@ export function WorkStatusDashboardClient({ projects }: WorkStatusDashboardClien
         </div>
       )}
       </div>
+
+      {/* ALLOCATION MODAL POPUP */}
+      {selectedProjectForAllocation && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-150"
+          onClick={() => setSelectedProjectForAllocation(null)}
+        >
+          <div
+            className="bg-slate-50 w-full max-w-5xl max-h-[92vh] rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="bg-white px-5 py-3.5 border-b border-slate-200 flex items-center justify-between gap-3 shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="p-2 bg-emerald-100 text-emerald-800 rounded-xl shrink-0">
+                  <PieChart size={18} />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-mono bg-slate-900 text-white px-1.5 py-0.2 rounded font-semibold">
+                      #{String(selectedProjectForAllocation["ID Project"] || selectedProjectForAllocation.id || "-")}
+                    </span>
+                    <h2 className="text-sm font-bold text-slate-900 truncate">
+                      {String(selectedProjectForAllocation["ชื่อ Project"] || selectedProjectForAllocation.name || "โครงการ")}
+                    </h2>
+                  </div>
+                  <p className="text-xs text-slate-500 truncate mt-0.5">
+                    {String(selectedProjectForAllocation["ชื่อลูกค้า"] || selectedProjectForAllocation.customer_name || "-")} · งบโครงการ: <strong>{money(toNumber(selectedProjectForAllocation["งบไม่เกิน"]))} ฿</strong>
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <Link
+                  href={`/work-status/${encodeURIComponent(String(selectedProjectForAllocation["ID Project"] || selectedProjectForAllocation.id || "-"))}?tab=allocation`}
+                  className="hidden sm:inline-flex items-center gap-1 px-3 py-1.5 text-xs text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition"
+                >
+                  <span>เปิดหน้าเต็ม</span>
+                  <ExternalLink size={12} />
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => setSelectedProjectForAllocation(null)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+                  title="ปิดหน้าต่าง"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body: ProjectBudgetAllocationManager */}
+            <div className="p-4 sm:p-6 overflow-y-auto flex-1">
+              <ProjectBudgetAllocationManager
+                project={selectedProjectForAllocation}
+                projectId={String(selectedProjectForAllocation["ID Project"] || selectedProjectForAllocation.id || "-")}
+                initialEditing={false}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

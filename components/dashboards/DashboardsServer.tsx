@@ -36,11 +36,22 @@ function filterProjectsByCookieYear(projects: SheetRow[], billsInYear: SheetRow[
 export async function MainDashboard() {
   const cookieStore = await cookies();
   const selectedYear = cookieStore.get("costlab_selected_year")?.value;
-  const [dataRows, projectRows] = await Promise.all([safeRows(TABLES.DATA), safeRows(TABLES.PROJECT)]);
+  const [dataRows, projectRows, pettyCashRows] = await Promise.all([
+    safeRows(TABLES.DATA),
+    safeRows(TABLES.PROJECT),
+    safeRows(TABLES.PETTY_CASH),
+  ]);
   const validDataRows = dataRows.filter(isCommittedBill);
   const yearFilteredData = filterRowsByCookieYear(validDataRows, selectedYear);
   const yearFilteredProjects = filterProjectsByCookieYear(projectRows, yearFilteredData, selectedYear);
-  return <MainDashboardClient initialDataRows={yearFilteredData} initialProjectRows={yearFilteredProjects} />;
+  const yearFilteredPettyCash = filterRowsByCookieYear(pettyCashRows, selectedYear);
+  return (
+    <MainDashboardClient
+      initialDataRows={yearFilteredData}
+      initialProjectRows={yearFilteredProjects}
+      initialPettyCashRows={yearFilteredPettyCash}
+    />
+  );
 }
 
 export async function WithdrawDashboard({ filters = {} }: { filters?: WithdrawFilters }) {

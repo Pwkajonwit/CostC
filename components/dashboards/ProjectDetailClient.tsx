@@ -59,6 +59,7 @@ type ProjectDetailClientProps = {
   summaryRows: SheetRow[];
   detailFields: string[];
   relatedColumns: string[];
+  initialTab?: string;
 };
 
 export function ProjectDetailClient({
@@ -72,8 +73,13 @@ export function ProjectDetailClient({
   summaryRows,
   detailFields,
   relatedColumns,
+  initialTab,
 }: ProjectDetailClientProps) {
-  const [activeTab, setActiveTab] = useState<"bills" | "budget-control" | "allocation" | "edit">("bills");
+  const validInitialTab: "bills" | "budget-control" | "allocation" | "edit" =
+    initialTab === "allocation" || initialTab === "budget-control" || initialTab === "edit" || initialTab === "bills"
+      ? initialTab
+      : "bills";
+  const [activeTab, setActiveTab] = useState<"bills" | "budget-control" | "allocation" | "edit">(validInitialTab);
   const [budgetViewMode, setBudgetViewMode] = useState<"grouped" | "table">("table");
   const [hideEmptyBudgets, setHideEmptyBudgets] = useState(false);
   const [billFilterTerm, setBillFilterTerm] = useState<string>("");

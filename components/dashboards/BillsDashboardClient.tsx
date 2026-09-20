@@ -1075,7 +1075,7 @@ export function BillsDashboardClient({
             setSelectedDetailIndex(null);
             window.dispatchEvent(new CustomEvent("open-bill-edit-form", { detail: { row: bill } }));
           }}
-          onDelete={isAdmin ? async (bill) => {
+          onDelete={async (bill) => {
             const currentStatus = normalizeBillStatus(bill["สถานะ"]);
             if (currentStatus !== "รออนุมัติ") {
               showToast("error", "สามารถลบได้เฉพาะบิลที่มีสถานะรออนุมัติเท่านั้น");
@@ -1101,7 +1101,7 @@ export function BillsDashboardClient({
             } catch (e: any) {
               showToast("error", `เกิดข้อผิดพลาด: ${e.message}`);
             }
-          } : undefined}
+          }}
           onPrev={() => setSelectedDetailIndex((i) => (i !== null && i > 0 ? i - 1 : i))}
           onNext={() => setSelectedDetailIndex((i) => (i !== null && i < visibleRows.length - 1 ? i + 1 : i))}
           hasPrev={selectedDetailIndex > 0}

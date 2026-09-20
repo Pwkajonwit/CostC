@@ -554,12 +554,12 @@ export function BillFollowDashboardClient({
 
   return (
     <div className="w-full flex flex-col gap-4 p-4 sm:p-5 max-w-[1600px] mx-auto font-sans text-sm text-slate-800 relative">
-      {/* Toast Notification Banner */}
+      {/* Toast Notification Banner (Light Theme) */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white border border-slate-700 px-4 py-3 rounded-md shadow-lg flex items-center gap-3 animate-in fade-in duration-200">
-          <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
-          <span className="text-xs ">{toastMessage}</span>
-          <button type="button" onClick={() => setToastMessage(null)} className="text-slate-400 hover:text-white ml-2">
+        <div className="fixed bottom-6 right-6 z-50 bg-white text-slate-900 border border-slate-200/90 px-4 py-3 rounded-xl shadow-xl flex items-center gap-3 animate-in fade-in duration-200 ring-1 ring-slate-900/10">
+          <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+          <span className="text-xs font-medium text-slate-800">{toastMessage}</span>
+          <button type="button" onClick={() => setToastMessage(null)} className="text-slate-400 hover:text-slate-700 ml-2 cursor-pointer">
             <X size={15} />
           </button>
         </div>
@@ -572,18 +572,18 @@ export function BillFollowDashboardClient({
           onClick={() => handleTabChange("all")}
           className={`min-w-[140px] sm:min-w-0 flex-1 rounded-xl p-2.5 sm:p-3 border transition cursor-pointer shadow-2xs shrink-0 active:scale-95 ${
             activeTab === "all" || activeTab === "vat"
-              ? "border-2 border-[#0b3531] bg-[#f2f9f6] shadow-sm"
+              ? "border-2 border-emerald-600 bg-emerald-50/70 shadow-sm"
               : "bg-white border-slate-200 hover:border-slate-300 text-slate-800"
           }`}
         >
           <div className="flex items-center justify-between text-xs sm:text-xs">
-            <span className={`truncate ${activeTab === "all" || activeTab === "vat" ? "text-[#0b3531] font-semibold" : "text-slate-700"}`}>ตาม VAT ทั้งหมด</span>
+            <span className={`truncate ${activeTab === "all" || activeTab === "vat" ? "text-emerald-900 font-semibold" : "text-slate-700"}`}>ตาม VAT ทั้งหมด</span>
             <span className={`shrink-0 ml-1 font-mono text-xs px-1.5 py-0.2 rounded-full ${
-              activeTab === "all" || activeTab === "vat" ? "bg-[#0b3531] text-[#d4f54e]" : "bg-slate-100 text-slate-500"
+              activeTab === "all" || activeTab === "vat" ? "bg-emerald-600 text-white font-bold" : "bg-slate-100 text-slate-500"
             }`}>{vatRows.length}</span>
           </div>
           <div className="flex items-baseline justify-between mt-1">
-            <span className={`text-sm sm:text-lg truncate ${activeTab === "all" || activeTab === "vat" ? "text-[#0b3531] font-bold" : "text-slate-900"}`}>{money(vatTotal)}</span>
+            <span className={`text-sm sm:text-lg truncate ${activeTab === "all" || activeTab === "vat" ? "text-emerald-950 font-bold" : "text-slate-900"}`}>{money(vatTotal)}</span>
           </div>
         </div>
 
@@ -653,18 +653,18 @@ export function BillFollowDashboardClient({
             onClick={() => handleTabChange("credit")}
             className={`min-w-[140px] sm:min-w-0 flex-1 rounded-xl p-2.5 sm:p-3 border transition cursor-pointer shadow-2xs shrink-0 active:scale-95 ${
               activeTab === "credit"
-                ? "border-2 border-[#0b3531] bg-[#f2f9f6] shadow-sm"
+                ? "border-2 border-emerald-600 bg-emerald-50/70 shadow-sm"
                 : "bg-white border-slate-200 hover:border-slate-300 text-slate-800"
             }`}
           >
             <div className="flex items-center justify-between text-xs sm:text-xs">
-              <span className={`truncate ${activeTab === "credit" ? "text-[#0b3531] font-semibold" : "text-slate-700"}`}>ตาม เครดิต</span>
+              <span className={`truncate ${activeTab === "credit" ? "text-emerald-900 font-semibold" : "text-slate-700"}`}>ตาม เครดิต</span>
               <span className={`shrink-0 ml-1 font-mono text-xs px-1.5 py-0.2 rounded-full ${
-                activeTab === "credit" ? "bg-[#0b3531] text-[#d4f54e]" : "bg-slate-100 text-slate-500"
+                activeTab === "credit" ? "bg-emerald-600 text-white font-bold" : "bg-slate-100 text-slate-500"
               }`}>{creditRows?.length || 0}</span>
             </div>
             <div className="flex items-baseline justify-between mt-1">
-              <span className={`text-sm sm:text-lg truncate ${activeTab === "credit" ? "text-[#0b3531] font-bold" : "text-slate-900"}`}>{money(creditTotal)}</span>
+              <span className={`text-sm sm:text-lg truncate ${activeTab === "credit" ? "text-emerald-950 font-bold" : "text-slate-900"}`}>{money(creditTotal)}</span>
             </div>
           </div>
         )}
@@ -1310,22 +1310,22 @@ export function BillFollowDashboardClient({
         )}
       </div>
 
-      {/* Floating Bottom Batch Action Bar */}
+      {/* Floating Bottom Batch Action Bar (Light Theme & Sharp Contrast) */}
       {selectedIds.length > 0 && (
         <aside
           aria-label="แถบจัดการหลายรายการ"
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-[94%] max-w-2xl bg-[#0b3531]/95 backdrop-blur-md text-white px-4 py-3 rounded-2xl shadow-2xl border border-emerald-500/30 flex items-center justify-between gap-3 animate-in slide-in-from-bottom-5 duration-200"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-[94%] max-w-2xl bg-white/95 backdrop-blur-md text-slate-900 px-4 py-3 rounded-2xl shadow-2xl border border-slate-200/90 ring-1 ring-slate-900/10 flex items-center justify-between gap-3 animate-in slide-in-from-bottom-5 duration-200"
         >
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 font-bold text-sm">
+            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-800 font-extrabold text-sm shrink-0 shadow-2xs">
               {selectedIds.length}
             </div>
             <div>
-              <div className="text-xs text-emerald-200/90 font-medium">
-                เลือกแล้ว <span className="text-white font-bold">{selectedIds.length}</span> รายการ
+              <div className="text-xs text-slate-600 font-medium">
+                เลือกแล้ว <span className="text-slate-950 font-bold">{selectedIds.length}</span> รายการ
               </div>
-              <div className="text-sm font-bold text-white tracking-tight">
-                ยอดรวม: <span className="text-emerald-300 font-mono">฿{money(selectedTotalAmount)}</span>
+              <div className="text-sm font-bold text-slate-900 tracking-tight">
+                ยอดรวม: <span className="text-emerald-700 font-mono font-extrabold text-base">฿{money(selectedTotalAmount)}</span>
               </div>
             </div>
           </div>
@@ -1337,7 +1337,7 @@ export function BillFollowDashboardClient({
                   type="button"
                   disabled={isProcessingBatch}
                   onClick={() => setIsBatchConfirming(false)}
-                  className="px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 rounded-lg transition cursor-pointer disabled:opacity-50"
+                  className="px-3.5 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-xl transition cursor-pointer disabled:opacity-50 active:scale-95"
                 >
                   ยกเลิก
                 </button>
@@ -1345,7 +1345,7 @@ export function BillFollowDashboardClient({
                   type="button"
                   disabled={isProcessingBatch}
                   onClick={handleExecuteBatch}
-                  className="px-3.5 py-1.5 text-xs md:text-sm font-semibold rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white shadow-lg flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50 active:scale-95"
+                  className="px-4 py-2 text-xs md:text-sm font-bold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-700/20 flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50 active:scale-95"
                 >
                   {isProcessingBatch ? (
                     <Loader2 size={15} className="animate-spin" />
@@ -1360,14 +1360,14 @@ export function BillFollowDashboardClient({
                 <button
                   type="button"
                   onClick={() => setSelectedIds([])}
-                  className="px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white hover:bg-white/10 rounded-lg transition cursor-pointer active:scale-95"
+                  className="px-3.5 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200 rounded-xl transition cursor-pointer active:scale-95"
                 >
                   ยกเลิกทั้งหมด
                 </button>
                 <button
                   type="button"
                   onClick={() => setIsBatchConfirming(true)}
-                  className="px-4 py-2 text-xs md:text-sm font-semibold rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white shadow-lg shadow-emerald-950/40 flex items-center gap-1.5 transition cursor-pointer active:scale-95"
+                  className="px-4 py-2 text-xs md:text-sm font-bold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-700/25 flex items-center gap-1.5 transition cursor-pointer active:scale-95"
                 >
                   <CheckCircle2 size={16} className="text-white" />
                   <span>อนุมัติได้รับบิล ({selectedIds.length})</span>

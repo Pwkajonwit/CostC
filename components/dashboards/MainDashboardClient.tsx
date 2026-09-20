@@ -23,12 +23,14 @@ import {
   X,
   ExternalLink,
   AlertTriangle,
-  CheckCircle2,
   AlertCircle,
+  CheckCircle2,
   Building2,
   Package,
+  Sliders,
 } from "lucide-react";
 import { money, toNumber } from "@/lib/utils/numbers";
+import { ALLOCATED_BUDGET_ITEMS } from "@/lib/project-budget-control";
 import {
   computeCashFlowBreakdown,
   getBudgetHealthStatus,
@@ -54,6 +56,7 @@ import { useSearchParams } from "next/navigation";
 type MainDashboardClientProps = {
   initialDataRows: SheetRow[];
   initialProjectRows: SheetRow[];
+  initialPettyCashRows?: SheetRow[];
 };
 
 type Preset = "today" | "yesterday" | "month" | "previousMonth" | "all" | "custom";
@@ -79,13 +82,14 @@ export function classifyExpenseItem(categoryStr: string, vendorType: string): "1
   return "100";
 }
 
-export function MainDashboardClient({ initialDataRows, initialProjectRows }: MainDashboardClientProps) {
+export function MainDashboardClient({ initialDataRows, initialProjectRows, initialPettyCashRows = [] }: MainDashboardClientProps) {
   const searchParams = useSearchParams();
   const urlSearch = (searchParams.get("search") || "").trim().toLowerCase();
   const { filterRowsByYear, filterProjectsByYear, activeYearLabel } = useYearFilter();
 
   const [dataRows, setDataRows] = useState<SheetRow[]>(initialDataRows || []);
   const [projectRows, setProjectRows] = useState<SheetRow[]>(initialProjectRows || []);
+  const [pettyCashRows, setPettyCashRows] = useState<SheetRow[]>(initialPettyCashRows || []);
 
   useEffect(() => {
     if (initialDataRows) setDataRows(initialDataRows);
@@ -95,10 +99,15 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows }: Mai
     if (initialProjectRows) setProjectRows(initialProjectRows);
   }, [initialProjectRows]);
 
+  useEffect(() => {
+    if (initialPettyCashRows) setPettyCashRows(initialPettyCashRows);
+  }, [initialPettyCashRows]);
+
   const [preset, setPreset] = useState<Preset>("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [costBreakdownTab, setCostBreakdownTab] = useState<"paid" | "pending">("paid");
+  const [costGroupMode, setCostGroupMode] = useState<"budget-control" | "cost-code">("budget-control");
   const [projectFilterTab, setProjectFilterTab] = useState<"all" | "warning" | "over">("all");
 
   // 1. Filter by Year
@@ -158,12 +167,13 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows }: Mai
       const payload = await response.json();
       if (payload.dataRows) setDataRows(payload.dataRows);
       if (payload.projectRows) setProjectRows(payload.projectRows);
+      if (payload.pettyCashRows) setPettyCashRows(payload.pettyCashRows);
     } catch {}
   }
 
   useRealtimeSync({
     channelName: "main_dashboard_live_sync",
-    tables: ["bills", "projects"],
+    tables: ["bills", "projects", "เปิดเงินสดย่อย"],
     onSync: refreshData,
     debounceMs: 700,
     pollingIntervalMs: 0,
@@ -213,6 +223,35 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows }: Mai
   const summary = useMemo(() => {
     return buildModernSummary(filteredDataRows, filteredProjectRows);
   }, [filteredDataRows, filteredProjectRows]);
+
+  // Petty Cash Statistics
+  const yearFilteredPettyCashRows = useMemo(() => filterRowsByYear(pettyCashRows), [pettyCashRows, filterRowsByYear]);
+  const pettyCashStats = useMemo(() => {
+    const activeRows = yearFilteredPettyCashRows.filter((r) => {
+      const st = String(r["สถานะ"] || "").trim();
+      return st !== "ยกเลิก";
+    });
+
+    const unclearedRows = activeRows.filter((r) => {
+      const amt = toNumber(r["จำนวนเงิน"]);
+      const clr = toNumber(r["ยอดเคลียร์แล้ว"]);
+      const rem = Math.max(0, amt - clr);
+      const st = String(r["สถานะ"] || "").trim();
+      return st !== "เคลียร์บิลแล้ว" && rem > 0;
+    });
+
+    const totalUnclearedAmount = unclearedRows.reduce((sum, r) => {
+      const amt = toNumber(r["จำนวนเงิน"]);
+      const clr = toNumber(r["ยอดเคลียร์แล้ว"]);
+      return sum + Math.max(0, amt - clr);
+    }, 0);
+
+    return {
+      unclearedCount: unclearedRows.length,
+      totalUnclearedAmount,
+      totalCount: activeRows.length,
+    };
+  }, [yearFilteredPettyCashRows]);
 
   // Hydrated active projects for Budget Health table
   const hydratedActiveProjects = useMemo(() => {
@@ -303,6 +342,83 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows }: Mai
 
     return items;
   }, [summary, costBreakdownTab]);
+
+  // Budget Control Groups (แบ่งตาม 2 หมวดควบคุมงบหลัก: ค่าของ vs ค่าแรง)
+  const budgetControlBreakdownData = useMemo(() => {
+    const isPaid = costBreakdownTab === "paid";
+    const total = isPaid ? summary.cashPaid : summary.pendingAP;
+
+    // หมวดค่าของ: รวม 100 ค่าของ + 500 เครื่องจักร/ยานพาหนะ/น้ำมัน
+    const materialPaid = summary.cost100.paid + summary.cost500.paid;
+    const materialPending = summary.cost100.pending + summary.cost500.pending;
+    const materialAmount = isPaid ? materialPaid : materialPending;
+    const materialPercent = total > 0 ? (materialAmount / total) * 100 : 0;
+
+    // หมวดค่าแรง: รวม 200 ค่าแรงผู้รับเหมา + 300 บุคลากร/พนักงาน
+    const laborPaid = summary.cost200.paid + summary.cost300.paid;
+    const laborPending = summary.cost200.pending + summary.cost300.pending;
+    const laborAmount = isPaid ? laborPaid : laborPending;
+    const laborPercent = total > 0 ? (laborAmount / total) * 100 : 0;
+
+    // วงเงินควบคุมงบประมาณรวมจากทุกโครงการ
+    let totalMaterialBudget = 0;
+    let totalLaborBudget = 0;
+    for (const p of filteredProjectRows) {
+      const rawMatCap = toNumber(p["งบไม่เกินค่าของ"]);
+      const subMat = ALLOCATED_BUDGET_ITEMS
+        .filter((i) => i.group === "ค่าของ (Material Cost Code)")
+        .reduce((sum, item) => sum + toNumber(p[item.field]), 0);
+      totalMaterialBudget += Math.max(rawMatCap, subMat);
+
+      const rawLabCap = toNumber(p["งบไม่เกินค่าแรง"]);
+      const staffCap = toNumber(p["งบไม่เกินพนักงาน"]);
+      const subLab = ALLOCATED_BUDGET_ITEMS
+        .filter((i) => i.group === "ค่าแรง (Labor Cost Code)")
+        .reduce((sum, item) => sum + toNumber(p[item.field]), 0);
+      totalLaborBudget += Math.max(rawLabCap, subLab, rawLabCap + staffCap);
+    }
+
+    return [
+      {
+        key: "material",
+        name: "หมวดควบคุมงบ: ค่าของ",
+        subtitle: "วัสดุก่อสร้าง, อุปกรณ์, เครื่องจักร, ยานพาหนะ, น้ำมัน (หมวด 100 & 500)",
+        amount: materialAmount,
+        paidAmt: materialPaid,
+        pendingAmt: materialPending,
+        totalAmt: materialPaid + materialPending,
+        totalBudget: totalMaterialBudget,
+        percent: materialPercent,
+        color: "bg-emerald-600",
+        textColor: "text-emerald-900",
+        badgeBg: "bg-emerald-50 border-emerald-300 text-emerald-900",
+        icon: Package,
+        subItems: [
+          { label: "100 ค่าของ & วัสดุก่อสร้าง", amount: isPaid ? summary.cost100.paid : summary.cost100.pending, totalAmt: summary.cost100.paid + summary.cost100.pending },
+          { label: "500 เครื่องจักร/ยานพาหนะ/น้ำมัน", amount: isPaid ? summary.cost500.paid : summary.cost500.pending, totalAmt: summary.cost500.paid + summary.cost500.pending },
+        ],
+      },
+      {
+        key: "labor",
+        name: "หมวดควบคุมงบ: ค่าแรง",
+        subtitle: "ค่าแรงผู้รับเหมา, ช่างเหมา, ช่างประจำไซต์, พนักงาน (หมวด 200 & 300)",
+        amount: laborAmount,
+        paidAmt: laborPaid,
+        pendingAmt: laborPending,
+        totalAmt: laborPaid + laborPending,
+        totalBudget: totalLaborBudget,
+        percent: laborPercent,
+        color: "bg-amber-600",
+        textColor: "text-amber-900",
+        badgeBg: "bg-amber-50 border-amber-300 text-amber-900",
+        icon: HardHat,
+        subItems: [
+          { label: "200 ค่าแรงผู้รับเหมา/ช่าง", amount: isPaid ? summary.cost200.paid : summary.cost200.pending, totalAmt: summary.cost200.paid + summary.cost200.pending },
+          { label: "300 บุคลากร & พนักงานไซต์", amount: isPaid ? summary.cost300.paid : summary.cost300.pending, totalAmt: summary.cost300.paid + summary.cost300.pending },
+        ],
+      },
+    ];
+  }, [summary, costBreakdownTab, filteredProjectRows]);
 
   return (
     <div className="w-full flex flex-col gap-2.5 sm:gap-3 p-2 sm:p-3 max-w-[1600px] mx-auto font-sans text-slate-800 antialiased pb-10">
@@ -568,7 +684,7 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows }: Mai
         {/* LEFT COLUMN: Modern Cost Distribution & Active Projects Health */}
         <div className="lg:col-span-8 xl:col-span-9 flex flex-col gap-2.5 sm:gap-3 min-w-0">
           {/* ========================================================================= */}
-          {/* SECTION A: MODERN COST DISTRIBUTION BAR (100, 200, 300, 500)             */}
+          {/* SECTION A: COST DISTRIBUTION BAR (หมวดควบคุมงบ หรือ 4 COST CODES)         */}
           {/* ========================================================================= */}
           <section className="bg-white rounded-xl p-3 sm:p-4 border border-slate-200/90 shadow-2xs flex flex-col gap-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
@@ -580,118 +696,257 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows }: Mai
                       : "bg-amber-50 text-amber-700 border-amber-200"
                   }`}
                 >
-                  <PieChart className="w-4 h-4" />
+                  {costGroupMode === "budget-control" ? <Sliders className="w-4 h-4" /> : <PieChart className="w-4 h-4" />}
                 </div>
                 <div>
-                  <h2 className="text-xs sm:text-sm font-black text-slate-900 uppercase tracking-tight">
-                    สัดส่วนต้นทุนตามโครงสร้าง Cost Code
+                  <h2 className="text-xs sm:text-sm font-black text-slate-900 uppercase tracking-tight flex items-center gap-1.5">
+                    <span>{costGroupMode === "budget-control" ? "สัดส่วนต้นทุนตามหมวดควบคุมงบ" : "สัดส่วนต้นทุนตามโครงสร้าง Cost Code"}</span>
                   </h2>
                   <p className="text-[11px] text-slate-500">
-                    แบ่งตาม 4 หมวดหลัก (100 ค่าของ, 200 ค่าแรง, 300 พนักงาน, 500 เครื่องจักร/ยานพาหนะ)
+                    {costGroupMode === "budget-control"
+                      ? "แบ่งตาม 2 หมวดควบคุมงบหลัก: หมวดค่าของ (รวม 100 & 500) และ หมวดค่าแรง (รวม 200 & 300)"
+                      : "แบ่งตาม 4 หมวดหลัก (100 ค่าของ, 200 ค่าแรง, 300 พนักงาน, 500 เครื่องจักร/ยานพาหนะ)"}
                   </p>
                 </div>
               </div>
 
-              {/* Segmented Paid vs Pending Switcher */}
-              <div className="flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs self-start sm:self-auto">
-                <button
-                  type="button"
-                  onClick={() => setCostBreakdownTab("paid")}
-                  className={`px-3 py-1 rounded-md font-bold transition cursor-pointer flex items-center gap-1.5 ${
-                    costBreakdownTab === "paid"
-                      ? "bg-white text-indigo-950 shadow-2xs border border-slate-200/80"
-                      : "text-slate-600 hover:text-slate-900"
-                  }`}
-                >
-                  <Wallet size={13} />
-                  <span>เบิกจ่ายจริง (฿{money(summary.cashPaid)})</span>
-                </button>
-                {summary.pendingAP > 0 && (
+              {/* Controls: Mode Switcher (ควบคุมงบ vs Cost Code) + Paid/Pending Switcher */}
+              <div className="flex items-center gap-1.5 flex-wrap self-start sm:self-auto">
+                {/* Mode Switcher */}
+                <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs">
                   <button
                     type="button"
-                    onClick={() => setCostBreakdownTab("pending")}
-                    className={`px-3 py-1 rounded-md font-bold transition cursor-pointer flex items-center gap-1.5 ${
-                      costBreakdownTab === "pending"
-                        ? "bg-amber-100 text-amber-950 shadow-2xs border border-amber-300"
-                        : "text-amber-800 hover:text-amber-950"
+                    onClick={() => setCostGroupMode("budget-control")}
+                    className={`px-2.5 py-1 rounded-md font-bold transition cursor-pointer flex items-center gap-1 ${
+                      costGroupMode === "budget-control"
+                        ? "bg-white text-slate-900 shadow-2xs border border-slate-200/80"
+                        : "text-slate-600 hover:text-slate-900"
                     }`}
                   >
-                    <Clock3 size={13} />
-                    <span>ยอดรอเบิก (฿{money(summary.pendingAP)})</span>
+                    <Sliders size={12} className={costGroupMode === "budget-control" ? "text-indigo-600" : ""} />
+                    <span>แบ่งตามควบคุมงบ</span>
                   </button>
-                )}
+                  <button
+                    type="button"
+                    onClick={() => setCostGroupMode("cost-code")}
+                    className={`px-2.5 py-1 rounded-md font-bold transition cursor-pointer flex items-center gap-1 ${
+                      costGroupMode === "cost-code"
+                        ? "bg-white text-slate-900 shadow-2xs border border-slate-200/80"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    <PieChart size={12} className={costGroupMode === "cost-code" ? "text-indigo-600" : ""} />
+                    <span>4 Cost Codes</span>
+                  </button>
+                </div>
+
+                {/* Segmented Paid vs Pending Switcher */}
+                <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setCostBreakdownTab("paid")}
+                    className={`px-2.5 py-1 rounded-md font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                      costBreakdownTab === "paid"
+                        ? "bg-white text-indigo-950 shadow-2xs border border-slate-200/80"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    <Wallet size={12} />
+                    <span>เบิกจ่ายจริง (฿{money(summary.cashPaid)})</span>
+                  </button>
+                  {summary.pendingAP > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setCostBreakdownTab("pending")}
+                      className={`px-2.5 py-1 rounded-md font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                        costBreakdownTab === "pending"
+                          ? "bg-amber-100 text-amber-950 shadow-2xs border border-amber-300"
+                          : "text-amber-800 hover:text-amber-950"
+                      }`}
+                    >
+                      <Clock3 size={12} />
+                      <span>ยอดรอเบิก (฿{money(summary.pendingAP)})</span>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
             {/* Visual Precision Progress Bar */}
             <div className="w-full h-5 rounded-lg overflow-hidden flex bg-slate-100 border border-slate-200 p-0.5 gap-0.5 shadow-2xs">
-              {costBreakdownData.some((c) => c.amount > 0) ? (
-                costBreakdownData
-                  .filter((c) => c.amount > 0)
-                  .map((item) => (
-                    <div
-                      key={item.code}
-                      className={`h-full rounded-sm ${item.color} transition-all duration-300 flex items-center justify-center overflow-hidden`}
-                      style={{ width: `${Math.max(4, item.percent)}%` }}
-                      title={`${item.name}: ${item.percent.toFixed(1)}% (฿${money(item.amount)})`}
-                    >
-                      {item.percent >= 10 && (
-                        <span className="text-[10px] font-black text-white px-1 truncate select-none">
-                          {item.percent.toFixed(1)}%
-                        </span>
-                      )}
-                    </div>
-                  ))
-              ) : (
-                <div className="w-full h-full bg-slate-200 flex items-center justify-center text-[10px] text-slate-500 font-semibold">
-                  ยังไม่มีรายการค่าใช้จ่าย
-                </div>
-              )}
-            </div>
-
-            {/* 4 Cost Code Detail Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 pt-1">
-              {costBreakdownData.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <div
-                    key={item.code}
-                    className="p-3 rounded-xl bg-slate-50/70 border border-slate-200/90 shadow-2xs hover:bg-white hover:border-slate-300 transition-all flex flex-col justify-between gap-2"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <div
-                          className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border ${item.badgeBg}`}
-                        >
-                          <Icon size={14} />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-xs font-bold text-slate-900 truncate">{item.name}</div>
-                          <div className="text-[10px] text-slate-400 truncate">{item.subtitle}</div>
-                        </div>
-                      </div>
-                      <span className={`text-[11px] font-black shrink-0 ${item.textColor}`}>
-                        {item.percent.toFixed(1)}%
-                      </span>
-                    </div>
-
-                    <div className="pt-1 border-t border-slate-200/60">
-                      <div className="text-base font-black text-slate-900 tracking-tight">
-                        ฿{money(item.amount)}
-                      </div>
-                      <div className="flex items-center justify-between text-[10px] text-slate-500 mt-0.5">
-                        <span>จ่ายแล้ว: ฿{money(item.paidAmt)}</span>
-                        {item.pendingAmt > 0 && (
-                          <span className="text-amber-700 font-bold">
-                            รอเบิก ฿{money(item.pendingAmt)}
+              {costGroupMode === "budget-control" ? (
+                budgetControlBreakdownData.some((c) => c.amount > 0) ? (
+                  budgetControlBreakdownData
+                    .filter((c) => c.amount > 0)
+                    .map((item) => (
+                      <div
+                        key={item.key}
+                        className={`h-full rounded-sm ${item.color} transition-all duration-300 flex items-center justify-center overflow-hidden`}
+                        style={{ width: `${Math.max(4, item.percent)}%` }}
+                        title={`${item.name}: ${item.percent.toFixed(1)}% (฿${money(item.amount)})`}
+                      >
+                        {item.percent >= 8 && (
+                          <span className="text-[10px] font-black text-white px-1 truncate select-none">
+                            {item.name}: {item.percent.toFixed(1)}%
                           </span>
                         )}
                       </div>
-                    </div>
+                    ))
+                ) : (
+                  <div className="w-full h-full bg-slate-200 flex items-center justify-center text-[10px] text-slate-500 font-semibold">
+                    ยังไม่มีรายการค่าใช้จ่าย
                   </div>
-                );
-              })}
+                )
+              ) : (
+                costBreakdownData.some((c) => c.amount > 0) ? (
+                  costBreakdownData
+                    .filter((c) => c.amount > 0)
+                    .map((item) => (
+                      <div
+                        key={item.code}
+                        className={`h-full rounded-sm ${item.color} transition-all duration-300 flex items-center justify-center overflow-hidden`}
+                        style={{ width: `${Math.max(4, item.percent)}%` }}
+                        title={`${item.name}: ${item.percent.toFixed(1)}% (฿${money(item.amount)})`}
+                      >
+                        {item.percent >= 10 && (
+                          <span className="text-[10px] font-black text-white px-1 truncate select-none">
+                            {item.percent.toFixed(1)}%
+                          </span>
+                        )}
+                      </div>
+                    ))
+                ) : (
+                  <div className="w-full h-full bg-slate-200 flex items-center justify-center text-[10px] text-slate-500 font-semibold">
+                    ยังไม่มีรายการค่าใช้จ่าย
+                  </div>
+                )
+              )}
             </div>
+
+            {/* CARDS DISPLAY */}
+            {costGroupMode === "budget-control" ? (
+              /* 2 BUDGET CONTROL CARDS (Material vs Labor) */
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pt-1">
+                {budgetControlBreakdownData.map((item) => {
+                  const Icon = item.icon;
+                  const hasBudget = item.totalBudget > 0;
+                  const remaining = item.totalBudget - item.totalAmt;
+                  const budgetPercent = hasBudget ? Math.round((item.totalAmt / item.totalBudget) * 100) : 0;
+
+                  return (
+                    <div
+                      key={item.key}
+                      className="p-3.5 rounded-xl bg-slate-50/70 border border-slate-200/90 shadow-2xs hover:bg-white hover:border-slate-300 transition-all flex flex-col justify-between gap-3"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border ${item.badgeBg}`}>
+                              <Icon size={16} />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-xs font-bold text-slate-900 truncate">{item.name}</div>
+                              <div className="text-[10px] text-slate-400 truncate">{item.subtitle}</div>
+                            </div>
+                          </div>
+                          <span className={`text-xs font-black shrink-0 px-2 py-0.5 rounded-md ${item.badgeBg}`}>
+                            {item.percent.toFixed(1)}%
+                          </span>
+                        </div>
+
+                        {/* Amount & Sub-details */}
+                        <div className="mt-2.5 flex items-baseline justify-between gap-2">
+                          <div>
+                            <div className="text-xl font-black text-slate-900 tracking-tight">
+                              ฿{money(item.amount)}
+                            </div>
+                            <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
+                              <span>จ่ายแล้ว: <strong className="text-slate-700">{money(item.paidAmt)}</strong></span>
+                              <span>·</span>
+                              {item.pendingAmt > 0 ? (
+                                <span className="text-amber-700 font-bold">
+                                  รอเบิก ฿{money(item.pendingAmt)}
+                                </span>
+                              ) : (
+                                <span className="text-emerald-700">ไม่มีค้างเบิก</span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Budget Cap Comparison */}
+                          {hasBudget && (
+                            <div className="text-right shrink-0">
+                              <div className="text-[10px] text-slate-400 font-medium">
+                                งบควบคุมรวม: ฿{money(item.totalBudget)}
+                              </div>
+                              <div className={`text-xs font-bold ${remaining < 0 ? "text-rose-600" : "text-emerald-700"}`}>
+                                {remaining < 0 ? `เกินงบ ฿${money(Math.abs(remaining))}` : `คงเหลือ ฿${money(remaining)}`}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Sub-item Pills */}
+                      <div className="pt-2 border-t border-slate-200/70 grid grid-cols-2 gap-2 text-xs">
+                        {item.subItems.map((sub) => (
+                          <div key={sub.label} className="bg-white/80 p-2 rounded-lg border border-slate-200/80">
+                            <div className="text-[10px] text-slate-500 truncate">{sub.label}</div>
+                            <div className="text-xs font-bold text-slate-800 font-mono mt-0.5">
+                              ฿{money(sub.amount)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              /* 4 COST CODE CARDS (100, 200, 300, 500) */
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 pt-1">
+                {costBreakdownData.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <div
+                      key={item.code}
+                      className="p-3 rounded-xl bg-slate-50/70 border border-slate-200/90 shadow-2xs hover:bg-white hover:border-slate-300 transition-all flex flex-col justify-between gap-2"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div
+                            className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border ${item.badgeBg}`}
+                          >
+                            <Icon size={14} />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-xs font-bold text-slate-900 truncate">{item.name}</div>
+                            <div className="text-[10px] text-slate-400 truncate">{item.subtitle}</div>
+                          </div>
+                        </div>
+                        <span className={`text-[11px] font-black shrink-0 ${item.textColor}`}>
+                          {item.percent.toFixed(1)}%
+                        </span>
+                      </div>
+
+                      <div className="pt-1 border-t border-slate-200/60">
+                        <div className="text-base font-black text-slate-900 tracking-tight">
+                          ฿{money(item.amount)}
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] text-slate-500 mt-0.5">
+                          <span>จ่ายแล้ว: ฿{money(item.paidAmt)}</span>
+                          {item.pendingAmt > 0 && (
+                            <span className="text-amber-700 font-bold">
+                              รอเบิก ฿{money(item.pendingAmt)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </section>
 
           {/* ========================================================================= */}
@@ -917,6 +1172,7 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows }: Mai
               </div>
               <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-200/80 text-slate-700 shrink-0">
                 {summary.pendingWithdrawCount +
+                  pettyCashStats.unclearedCount +
                   summary.creditCount +
                   summary.vatFollowCount +
                   summary.naturalDeductCount}{" "}
@@ -962,6 +1218,54 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows }: Mai
                     }`}
                   >
                     {summary.pendingWithdrawCount}
+                  </span>
+                </div>
+              </Link>
+
+              {/* 2. Petty Cash Uncleared Tracker */}
+              <Link
+                href="/petty-cash"
+                className={`p-3 rounded-xl border transition-all active:scale-[0.99] group flex items-center justify-between ${
+                  pettyCashStats.unclearedCount > 0
+                    ? "bg-amber-50/90 border-amber-300 shadow-2xs hover:bg-amber-100/80"
+                    : "bg-white border-slate-200 shadow-2xs hover:border-slate-300"
+                }`}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div
+                    className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border ${
+                      pettyCashStats.unclearedCount > 0
+                        ? "bg-amber-200 text-amber-900 border-amber-400/80"
+                        : "bg-slate-100 text-slate-500 border-slate-200"
+                    }`}
+                  >
+                    <Coins className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-slate-900 text-xs font-bold truncate flex items-center gap-1.5">
+                      <span>เงินสดย่อยค้างเคลียร์</span>
+                      {pettyCashStats.unclearedCount > 0 && (
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-200/80 text-amber-900 font-semibold">
+                          ถือเงินสด
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-500 truncate">
+                      {pettyCashStats.unclearedCount > 0
+                        ? `฿${money(pettyCashStats.totalUnclearedAmount)} (ค้างส่งบิล)`
+                        : "เคลียร์บิลครบทุกรายการแล้ว"}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0 ml-2">
+                  <span
+                    className={`text-xs font-black px-2 py-0.5 rounded-md ${
+                      pettyCashStats.unclearedCount > 0
+                        ? "bg-amber-200 text-amber-950 font-sans"
+                        : "bg-slate-100 text-slate-500 font-sans"
+                    }`}
+                  >
+                    {pettyCashStats.unclearedCount} รายการ
                   </span>
                 </div>
               </Link>

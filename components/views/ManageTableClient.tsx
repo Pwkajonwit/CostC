@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { ChevronLeft, ChevronRight, List, Pencil, Plus, Save, Trash2, X, Search, ArrowDownUp, Download, Upload, FileSpreadsheet, Loader2, Crown, Check, CheckCheck, User, MessageSquare, Building, AlertTriangle, AlertCircle, CheckCircle2, Sparkles, Briefcase } from "lucide-react";
+import { ChevronLeft, ChevronRight, List, Pencil, Plus, Save, Trash2, X, Search, ArrowDownUp, Download, Upload, FileSpreadsheet, Loader2, Crown, Check, CheckCheck, User, MessageSquare, Building, AlertTriangle, AlertCircle, CheckCircle2, Sparkles, Briefcase, Store, CreditCard, Landmark, FileCheck, Phone, Copy } from "lucide-react";
 import { BillImageThumbnail } from "@/components/bills/BillImageThumbnail";
 import { showConfirm, showToast } from "@/components/shared/ToastProvider";
 import type { RowValue, SheetRow } from "@/lib/types";
@@ -80,13 +80,50 @@ export function ManageTableClient({
   const [pageSize, setPageSize] = useState(20);
   const [localSearch, setLocalSearch] = useState(search);
   const [sortDesc, setSortDesc] = useState(true);
+  const [storeFilter, setStoreFilter] = useState<"all" | "credit" | "bank" | "tax">("all");
 
   useEffect(() => {
     setLocalSearch(search);
   }, [search]);
 
+  const isContractorTable = tableName === TABLES.CONTRACTOR || tableName === "contractors" || tableName === "รับเหมา" || viewName.includes("รับเหมา");
+  const isStoreTable = tableName === TABLES.STORE || tableName === "stores" || tableName === "ร้านค้า" || viewName.includes("ร้านค้า") || viewName.includes("4. ร้านค้า");
+
+  // ตรวจสอบสิทธิ์การลบข้อมูลมาสเตอร์ (เฉพาะ Owner, Admin หรือผู้ที่มี can_delete เท่านั้น)
+  const [canDeleteMaster, setCanDeleteMaster] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      const roleMatch = document.cookie.match(/auth_role=([^;]+)/);
+      const role = roleMatch ? decodeURIComponent(roleMatch[1]) : "";
+      const canDelMatch = document.cookie.match(/auth_can_delete=([^;]+)/);
+      const canDel = canDelMatch ? canDelMatch[1] === "true" : false;
+      const isOwnerOrAdmin = role === "Owner" || role === "Admin";
+      setCanDeleteMaster(isOwnerOrAdmin || canDel);
+    }
+  }, []);
+
   const filteredAndSortedRows = useMemo(() => {
     let result = [...rows];
+    if (isStoreTable && storeFilter !== "all") {
+      if (storeFilter === "credit") {
+        result = result.filter(r => {
+          const val = String(r["เครดิตจ่าย"] || r.credit_payment_day || "").trim();
+          return val && val !== "-" && val !== "non";
+        });
+      } else if (storeFilter === "bank") {
+        result = result.filter(r => {
+          const acc = String(r["เลขบัญชี"] || r.bank_account || "").trim();
+          const bName = String(r["ธนาคาร"] || r.bank_name || "").trim();
+          return (acc && acc !== "-" && acc !== "non") || (bName && bName !== "-" && bName !== "non");
+        });
+      } else if (storeFilter === "tax") {
+        result = result.filter(r => {
+          const tax = String(r["เลขที่ผู้เสียภาษี"] || r.tax_id || "").trim();
+          return tax && tax !== "-" && tax !== "non";
+        });
+      }
+    }
     if (localSearch.trim()) {
       const lower = localSearch.toLowerCase();
       result = result.filter(row => Object.values(row).some(val => String(val).toLowerCase().includes(lower)));
@@ -95,9 +132,37 @@ export function ManageTableClient({
       result.reverse();
     }
     return result;
-  }, [rows, localSearch, sortDesc]);
+  }, [rows, localSearch, sortDesc, isStoreTable, storeFilter]);
 
-  const isContractorTable = tableName === TABLES.CONTRACTOR || tableName === "contractors" || tableName === "รับเหมา" || viewName.includes("รับเหมา");
+  const storeStats = useMemo(() => {
+    if (!isStoreTable) return null;
+    const total = rows.length;
+    const creditCount = rows.filter(r => {
+      const val = String(r["เครดิตจ่าย"] || r.credit_payment_day || "").trim();
+      return val && val !== "-" && val !== "non";
+    }).length;
+    const bankCount = rows.filter(r => {
+      const acc = String(r["เลขบัญชี"] || r.bank_account || "").trim();
+      const bName = String(r["ธนาคาร"] || r.bank_name || "").trim();
+      return (acc && acc !== "-" && acc !== "non") || (bName && bName !== "-" && bName !== "non");
+    }).length;
+    const taxCount = rows.filter(r => {
+      const tax = String(r["เลขที่ผู้เสียภาษี"] || r.tax_id || "").trim();
+      return tax && tax !== "-" && tax !== "non";
+    }).length;
+    const phoneCount = rows.filter(r => {
+      const ph = String(r["เบอร์โทร"] || r.phone || "").trim();
+      return ph && ph !== "-" && ph !== "non";
+    }).length;
+
+    return {
+      total,
+      creditCount,
+      bankCount,
+      taxCount,
+      phoneCount
+    };
+  }, [isStoreTable, rows]);
 
   const contractorStats = useMemo(() => {
     if (!isContractorTable) return null;
@@ -601,6 +666,86 @@ export function ManageTableClient({
         </div>
       )}
 
+      {/* STORE STATS KPI STRIP */}
+      {storeStats && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
+          <div
+            onClick={() => { setStoreFilter("all"); setPage(1); }}
+            className={`p-3 bg-white border rounded-lg shadow-2xs flex flex-col justify-between cursor-pointer transition hover:border-emerald-400 ${
+              storeFilter === "all" ? "ring-2 ring-emerald-500 border-emerald-500 bg-emerald-50/20" : "border-slate-200"
+            }`}
+          >
+            <div className="flex items-center justify-between text-slate-500">
+              <span className="text-2xs font-medium">ร้านค้าทั้งหมด</span>
+              <Store size={14} className="text-emerald-600" />
+            </div>
+            <div className="mt-1 flex items-baseline gap-1.5">
+              <span className="text-lg font-bold text-slate-900 font-mono">{storeStats.total}</span>
+              <span className="text-2xs text-slate-400">ร้าน</span>
+            </div>
+          </div>
+
+          <div
+            onClick={() => { setStoreFilter(storeFilter === "credit" ? "all" : "credit"); setPage(1); }}
+            className={`p-3 bg-white border rounded-lg shadow-2xs flex flex-col justify-between cursor-pointer transition hover:border-indigo-400 ${
+              storeFilter === "credit" ? "ring-2 ring-indigo-500 border-indigo-500 bg-indigo-50/20" : "border-indigo-200/80 bg-indigo-50/10"
+            }`}
+          >
+            <div className="flex items-center justify-between text-indigo-700">
+              <span className="text-2xs font-medium">มีรอบเครดิตจ่าย</span>
+              <CreditCard size={14} className="text-indigo-600" />
+            </div>
+            <div className="mt-1 flex items-baseline gap-1.5">
+              <span className="text-lg font-bold text-indigo-950 font-mono">{storeStats.creditCount}</span>
+              <span className="text-2xs text-indigo-600">ร้าน</span>
+            </div>
+          </div>
+
+          <div
+            onClick={() => { setStoreFilter(storeFilter === "bank" ? "all" : "bank"); setPage(1); }}
+            className={`p-3 bg-white border rounded-lg shadow-2xs flex flex-col justify-between cursor-pointer transition hover:border-blue-400 ${
+              storeFilter === "bank" ? "ring-2 ring-blue-500 border-blue-500 bg-blue-50/20" : "border-blue-200/80 bg-blue-50/10"
+            }`}
+          >
+            <div className="flex items-center justify-between text-blue-700">
+              <span className="text-2xs font-medium">มีบัญชีธนาคาร</span>
+              <Landmark size={14} className="text-blue-600" />
+            </div>
+            <div className="mt-1 flex items-baseline gap-1.5">
+              <span className="text-lg font-bold text-blue-950 font-mono">{storeStats.bankCount}</span>
+              <span className="text-2xs text-blue-600">ร้าน</span>
+            </div>
+          </div>
+
+          <div
+            onClick={() => { setStoreFilter(storeFilter === "tax" ? "all" : "tax"); setPage(1); }}
+            className={`p-3 bg-white border rounded-lg shadow-2xs flex flex-col justify-between cursor-pointer transition hover:border-teal-400 ${
+              storeFilter === "tax" ? "ring-2 ring-teal-500 border-teal-500 bg-teal-50/20" : "border-teal-200/80 bg-teal-50/10"
+            }`}
+          >
+            <div className="flex items-center justify-between text-teal-700">
+              <span className="text-2xs font-medium">มีเลขผู้เสียภาษี (Tax ID)</span>
+              <FileCheck size={14} className="text-teal-600" />
+            </div>
+            <div className="mt-1 flex items-baseline gap-1.5">
+              <span className="text-lg font-bold text-teal-950 font-mono">{storeStats.taxCount}</span>
+              <span className="text-2xs text-teal-600">ร้าน</span>
+            </div>
+          </div>
+
+          <div className="p-3 bg-white border border-slate-200 rounded-lg shadow-2xs flex flex-col justify-between">
+            <div className="flex items-center justify-between text-amber-700">
+              <span className="text-2xs font-medium">มีเบอร์ติดต่อ</span>
+              <Phone size={14} className="text-amber-600" />
+            </div>
+            <div className="mt-1 flex items-baseline gap-1.5">
+              <span className="text-lg font-bold text-amber-950 font-mono">{storeStats.phoneCount}</span>
+              <span className="text-2xs text-amber-600">ร้าน</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* FILTER & ACTION TOOLBAR (With View Name & Count) */}
       <div className="border border-slate-200 rounded-md p-2.5 sm:p-3 bg-white flex flex-col lg:flex-row lg:items-center justify-between gap-3 shadow-2xs">
         {/* Left Side: Title & Live Search */}
@@ -611,6 +756,59 @@ export function ManageTableClient({
               {filteredAndSortedRows.length} {rowLabel}
             </span>
           </div>
+
+          {/* Quick Filter Pills for Stores */}
+          {isStoreTable && (
+            <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => { setStoreFilter("all"); setPage(1); }}
+                className={`px-2.5 py-1 rounded-full text-2xs font-medium transition cursor-pointer shrink-0 ${
+                  storeFilter === "all"
+                    ? "bg-slate-900 text-white"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                ทั้งหมด ({storeStats?.total || rows.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => { setStoreFilter("credit"); setPage(1); }}
+                className={`px-2.5 py-1 rounded-full text-2xs font-medium transition cursor-pointer flex items-center gap-1 shrink-0 ${
+                  storeFilter === "credit"
+                    ? "bg-indigo-600 text-white"
+                    : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200/60"
+                }`}
+              >
+                <CreditCard size={11} />
+                <span>มีรอบเครดิต ({storeStats?.creditCount || 0})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setStoreFilter("bank"); setPage(1); }}
+                className={`px-2.5 py-1 rounded-full text-2xs font-medium transition cursor-pointer flex items-center gap-1 shrink-0 ${
+                  storeFilter === "bank"
+                    ? "bg-blue-600 text-white"
+                    : "bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200/60"
+                }`}
+              >
+                <Landmark size={11} />
+                <span>มีบัญชีธนาคาร ({storeStats?.bankCount || 0})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setStoreFilter("tax"); setPage(1); }}
+                className={`px-2.5 py-1 rounded-full text-2xs font-medium transition cursor-pointer flex items-center gap-1 shrink-0 ${
+                  storeFilter === "tax"
+                    ? "bg-teal-600 text-white"
+                    : "bg-teal-50 text-teal-700 hover:bg-teal-100 border border-teal-200/60"
+                }`}
+              >
+                <FileCheck size={11} />
+                <span>มี Tax ID ({storeStats?.taxCount || 0})</span>
+              </button>
+            </div>
+          )}
 
           {/* Live Search Input Box */}
           <div className="relative flex items-center flex-1 min-w-[180px] max-w-xs">
@@ -680,37 +878,39 @@ export function ManageTableClient({
 
 
 
-          {deleteMode ? (
-            <>
-              <button
-                type="button"
-                className="px-3 py-1.5 bg-rose-700 hover:bg-rose-800 text-white rounded-lg text-xs flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap"
-                disabled={busy === "delete" || !selectedRows.length}
-                onClick={confirmDelete}
-              >
-                <Trash2 size={14} />
-                <span>ยืนยันลบ ({selectedRows.length})</span>
-              </button>
+          {canDeleteMaster && (
+            deleteMode ? (
+              <>
+                <button
+                  type="button"
+                  className="px-3 py-1.5 bg-rose-700 hover:bg-rose-800 text-white rounded-lg text-xs flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap"
+                  disabled={busy === "delete" || !selectedRows.length}
+                  onClick={confirmDelete}
+                >
+                  <Trash2 size={14} />
+                  <span>ยืนยันลบ ({selectedRows.length})</span>
+                </button>
+                <button
+                  type="button"
+                  className="px-3 py-1.5 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-xs flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap"
+                  disabled={Boolean(busy)}
+                  onClick={() => { setDeleteMode(false); setSelectedRows([]); }}
+                >
+                  <X size={14} />
+                  <span>ยกเลิก</span>
+                </button>
+              </>
+            ) : (
               <button
                 type="button"
                 className="px-3 py-1.5 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-xs flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap"
-                disabled={Boolean(busy)}
-                onClick={() => { setDeleteMode(false); setSelectedRows([]); }}
+                disabled={Boolean(busy) || !rows.length}
+                onClick={beginDelete}
               >
-                <X size={14} />
-                <span>ยกเลิก</span>
+                <Trash2 size={14} className="text-slate-600 shrink-0" />
+                <span>เลือกลบ</span>
               </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              className="px-3 py-1.5 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-xs flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap"
-              disabled={Boolean(busy) || !rows.length}
-              onClick={beginDelete}
-            >
-              <Trash2 size={14} className="text-slate-600 shrink-0" />
-              <span>เลือกลบ</span>
-            </button>
+            )
           )}
         </div>
       </div>
@@ -859,16 +1059,18 @@ export function ManageTableClient({
                                 <Pencil size={13} />
                               </button>
                             )}
-                            <button
-                              type="button"
-                              className="inline-flex items-center justify-center w-6 h-6 rounded border border-rose-300 bg-white text-rose-700 hover:bg-rose-50 transition cursor-pointer"
-                              disabled={Boolean(busy) || !sheetRow}
-                              onClick={() => deleteSingleRow(sheetRow)}
-                              aria-label="ลบ"
-                              title="ลบ"
-                            >
-                              <Trash2 size={13} />
-                            </button>
+                            {canDeleteMaster && (
+                              <button
+                                type="button"
+                                className="inline-flex items-center justify-center w-6 h-6 rounded border border-rose-300 bg-white text-rose-700 hover:bg-rose-50 transition cursor-pointer"
+                                disabled={Boolean(busy) || !sheetRow}
+                                onClick={() => deleteSingleRow(sheetRow)}
+                                aria-label="ลบ"
+                                title="ลบ"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            )}
                           </div>
                         </td>
                       ) : null}
@@ -1356,24 +1558,132 @@ function renderDisplayCell(column: string, value: RowValue | undefined, displayL
   const rawValue = stringify(value);
   const lookup = displayLookups[column];
   if (lookup && rawValue) return lookup[rawValue] || rawValue.replace(/^Ba\d+\s*[-–—]?\s*/i, "");
-  if ((column === "ธนาคาร" || column === "bank" || column === "bank_name") && rawValue) {
-    return rawValue.replace(/^Ba\d+\s*[-–—]?\s*/i, "").trim() || rawValue;
+
+  // Store & Master Table specific rich cell formatters
+  if (column === "ชื่อร้านค้า" || column === "ชื่อร้าน") {
+    return (
+      <span className="inline-flex items-center gap-1.5 font-medium text-slate-900">
+        <Store size={13} className="text-emerald-600 shrink-0" />
+        <span>{rawValue}</span>
+      </span>
+    );
   }
-  if (column === "เครดิตจ่าย" && rawValue && rawValue !== "-") {
+
+  if (column === "เครดิตจ่าย" || column === "credit_payment_day") {
+    if (!rawValue || rawValue === "-" || rawValue.toLowerCase() === "non") {
+      return <span className="text-slate-300 font-mono">-</span>;
+    }
     const match = rawValue.match(/\d+/);
+    let displayText = rawValue;
     if (match) {
       const dayNum = parseInt(match[0], 10);
       if (dayNum >= 1 && dayNum <= 31) {
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md font-medium text-[11px] bg-amber-50 text-amber-900 border border-amber-200/80 shadow-2xs">
-            <span>🗓️</span>
-            <span>วันที่ {dayNum} ของเดือน</span>
-          </span>
-        );
+        displayText = `ตัดรอบวันที่ ${dayNum}`;
       }
+    } else if (rawValue.includes("สิ้นเดือน") || rawValue.includes("end")) {
+      displayText = "ทุกสิ้นเดือน";
     }
-    return rawValue;
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200/80 text-xs font-semibold shadow-2xs whitespace-nowrap">
+        <CreditCard size={12} className="text-indigo-600 shrink-0" />
+        <span>{displayText}</span>
+      </span>
+    );
   }
+
+  if (column === "เลขบัญชี" || column === "bank_account") {
+    if (!rawValue || rawValue === "-" || rawValue.toLowerCase() === "non") {
+      return <span className="text-slate-300 font-mono">-</span>;
+    }
+    return (
+      <div className="inline-flex items-center gap-1.5 font-mono text-xs text-slate-800 bg-slate-50 px-2 py-0.5 rounded border border-slate-200 group">
+        <span className="select-all">{rawValue}</span>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (typeof navigator !== "undefined" && navigator.clipboard) {
+              navigator.clipboard.writeText(rawValue);
+              showToast("success", `คัดลอกเลขบัญชี ${rawValue} แล้ว`);
+            }
+          }}
+          className="text-slate-400 hover:text-slate-700 p-0.5 rounded hover:bg-slate-200 transition cursor-pointer"
+          title="คัดลอกเลขบัญชี"
+        >
+          <Copy size={11} />
+        </button>
+      </div>
+    );
+  }
+
+  if (column === "ธนาคาร" || column === "bank" || column === "bank_name") {
+    const rawBank = rawValue.replace(/^Ba\d+\s*[-–—]?\s*/i, "").trim() || rawValue;
+    if (!rawBank || rawBank === "-" || rawBank.toLowerCase() === "non") {
+      return <span className="text-slate-300 font-mono">-</span>;
+    }
+    let colorClasses = "bg-slate-50 text-slate-700 border-slate-200";
+    if (rawBank.includes("กสิกร")) colorClasses = "bg-emerald-50 text-emerald-800 border-emerald-200";
+    else if (rawBank.includes("กรุงเทพ")) colorClasses = "bg-blue-50 text-blue-800 border-blue-200";
+    else if (rawBank.includes("ไทยพาณิชย์")) colorClasses = "bg-purple-50 text-purple-800 border-purple-200";
+    else if (rawBank.includes("กรุงไทย")) colorClasses = "bg-sky-50 text-sky-800 border-sky-200";
+    else if (rawBank.includes("กรุงศรี")) colorClasses = "bg-amber-50 text-amber-800 border-amber-200";
+    else if (rawBank.includes("ทหารไทย") || rawBank.includes("ttb") || rawBank.includes("ทีทีบี")) colorClasses = "bg-orange-50 text-orange-800 border-orange-200";
+    else if (rawBank.includes("ออมสิน")) colorClasses = "bg-pink-50 text-pink-800 border-pink-200";
+
+    return (
+      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-2xs font-medium border shadow-2xs whitespace-nowrap ${colorClasses}`}>
+        <Landmark size={11} className="shrink-0" />
+        <span>{rawBank}</span>
+      </span>
+    );
+  }
+
+  if (column === "เบอร์โทร" || column === "เบอร์โทรศัพท์" || column === "phone") {
+    if (!rawValue || rawValue === "-" || rawValue.toLowerCase() === "non") {
+      return <span className="text-slate-300 font-mono">-</span>;
+    }
+    const cleanPhone = rawValue.split(/[,/]/)[0].replace(/[^\d+]/g, "");
+    return (
+      <div className="inline-flex items-center gap-1 text-xs">
+        {cleanPhone ? (
+          <a
+            href={`tel:${cleanPhone}`}
+            onClick={e => e.stopPropagation()}
+            className="inline-flex items-center gap-1 text-emerald-700 hover:text-emerald-900 hover:underline"
+            title={`โทร ${rawValue}`}
+          >
+            <Phone size={11} className="text-emerald-600 shrink-0" />
+            <span>{rawValue}</span>
+          </a>
+        ) : (
+          <span>{rawValue}</span>
+        )}
+      </div>
+    );
+  }
+
+  if (column === "เลขที่ผู้เสียภาษี" || column === "tax_id" || column === "เลขที่สียภาษี ") {
+    if (!rawValue || rawValue === "-" || rawValue.toLowerCase() === "non") {
+      return <span className="text-slate-300 font-mono">-</span>;
+    }
+    return (
+      <span className="font-mono text-2xs text-slate-700 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200/80 tracking-wide whitespace-nowrap">
+        {rawValue}
+      </span>
+    );
+  }
+
+  if (column === "ที่อยู่" || column === "address") {
+    if (!rawValue || rawValue === "-" || rawValue.toLowerCase() === "non") {
+      return <span className="text-slate-300 font-mono">-</span>;
+    }
+    return (
+      <span className="max-w-[220px] truncate block text-slate-600" title={rawValue}>
+        {rawValue}
+      </span>
+    );
+  }
+
   if (isDateColumn(column) && rawValue) return formatDateDisplay(rawValue);
   return formatValue(value, column);
 }

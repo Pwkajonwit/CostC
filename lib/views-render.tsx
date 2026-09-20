@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, Building2, Store, User, Briefcase, Truck, Users, Building, FileText, ClipboardList } from "lucide-react";
+import { ArrowLeft, Building2, Store, User, Briefcase, Truck, Users, Building, FileText, ClipboardList, CreditCard, Calendar, Landmark, Phone } from "lucide-react";
 import { notFound } from "next/navigation";
 import { BillFollowDashboard, MainDashboard, WithdrawDashboard, WorkStatusDashboard } from "@/components/dashboards/DashboardsServer";
 import { DataTable } from "@/components/tables/DataTable";
@@ -17,6 +17,7 @@ import { getSystemOptionsFromSupabase } from "@/lib/supabase/supabase-db";
 import { hydrateProjectRowsForList } from "@/lib/project-summary";
 import { DetailEditTrigger } from "@/components/forms/DetailEditTrigger";
 import { getFormPayload } from "@/lib/form";
+import { formatDateDisplay } from "@/lib/utils/dates";
 import type { SheetRow } from "@/lib/types";
 
 export async function renderViewForId(id: string, query?: Record<string, string | string[] | undefined>) {
@@ -84,6 +85,24 @@ export async function renderRowDetailPage(id: string, rowKey: string) {
   const schemaEditEventName = isSchemaForm ? `open-${id}-detail-edit-form` : undefined;
   const initialForm = isSchemaForm ? await getFormPayload(view.table).catch(() => null) : null;
 
+  const isStoreDetail = id === "stores";
+  let storePurchasesSummary: { totalAmount: number; billCount: number; lastDate: string } | null = null;
+  if (isStoreDetail) {
+    const storeRelatedBills = relatedSections[0]?.rows || [];
+    const totalAmount = storeRelatedBills.reduce((sum, b) => sum + (toNumber(b["ยอดเงิน"]) || 0), 0);
+    const billCount = storeRelatedBills.length;
+    let lastDate = "";
+    storeRelatedBills.forEach(b => {
+      const d = String(b["ว/ด/ป"] || b["วันที่"] || "").trim();
+      if (d && (!lastDate || d > lastDate)) lastDate = d;
+    });
+    storePurchasesSummary = {
+      totalAmount,
+      billCount,
+      lastDate: lastDate ? formatDateDisplay(lastDate) : "-"
+    };
+  }
+
   return (
     <div className="w-full flex flex-col gap-3 font-sans text-xs">
       {/* COMPACT PAGE HEADER */}
@@ -120,6 +139,45 @@ export async function renderRowDetailPage(id: string, rowKey: string) {
       </header>
 
       <section className="p-3 sm:p-4 max-w-[1600px] w-full mx-auto space-y-4">
+        {/* STORE PURCHASE SUMMARY CARDS */}
+        {storePurchasesSummary && (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="p-3.5 bg-gradient-to-br from-emerald-50 to-emerald-100/40 border border-emerald-200 rounded-lg shadow-2xs flex flex-col justify-between">
+              <div className="flex items-center justify-between text-emerald-800">
+                <span className="text-xs font-semibold">ยอดซื้อสะสมทั้งหมด</span>
+                <Store size={16} className="text-emerald-600" />
+              </div>
+              <div className="mt-2 flex items-baseline gap-1">
+                <span className="text-xl font-bold text-emerald-950 font-mono">฿{storePurchasesSummary.totalAmount.toLocaleString("th-TH")}</span>
+              </div>
+              <span className="text-2xs text-emerald-600 mt-1">คำนวณจากประวัติบิลทั้งหมดในระบบ</span>
+            </div>
+
+            <div className="p-3.5 bg-gradient-to-br from-indigo-50 to-indigo-100/40 border border-indigo-200 rounded-lg shadow-2xs flex flex-col justify-between">
+              <div className="flex items-center justify-between text-indigo-800">
+                <span className="text-xs font-semibold">จำนวนบิลที่เคยสั่งซื้อ</span>
+                <FileText size={16} className="text-indigo-600" />
+              </div>
+              <div className="mt-2 flex items-baseline gap-1">
+                <span className="text-xl font-bold text-indigo-950 font-mono">{storePurchasesSummary.billCount}</span>
+                <span className="text-xs text-indigo-600">บิล</span>
+              </div>
+              <span className="text-2xs text-indigo-600 mt-1">รายการบิลที่ผูกกับร้านค้านี้</span>
+            </div>
+
+            <div className="p-3.5 bg-gradient-to-br from-amber-50 to-amber-100/40 border border-amber-200 rounded-lg shadow-2xs flex flex-col justify-between">
+              <div className="flex items-center justify-between text-amber-800">
+                <span className="text-xs font-semibold">วันที่สั่งซื้อล่าสุด</span>
+                <Calendar size={16} className="text-amber-600" />
+              </div>
+              <div className="mt-2 flex items-baseline gap-1">
+                <span className="text-base font-bold text-amber-950 font-mono">{storePurchasesSummary.lastDate}</span>
+              </div>
+              <span className="text-2xs text-amber-600 mt-1">วันที่ของบิลล่าสุด</span>
+            </div>
+          </div>
+        )}
+
         {/* MAIN INFO CARD */}
         <article className="bg-white border border-slate-200 rounded-md overflow-hidden">
           <header className="p-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
@@ -332,7 +390,7 @@ function formatDetailValue(field: string, value: unknown, lookups?: { banks?: Re
     if (match) {
       const dayNum = parseInt(match[0], 10);
       if (dayNum >= 1 && dayNum <= 31) {
-        return `วันที่ ${dayNum} ของเดือน`;
+        return `ตัดรอบวันที่ ${dayNum} ของเดือน`;
       }
     }
     return strVal;

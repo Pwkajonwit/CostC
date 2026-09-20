@@ -75,7 +75,7 @@ export function BillWorkflowActions({
   const isOwner = Boolean(clientPerms?.isOwner || clientPerms?.role === "Owner" || clientPerms?.role === "Admin");
   const canApproveBill = isOwner || Boolean(clientPerms?.canCloseBill) || clientPerms?.role === "Approver" || clientPerms?.role === "Admin_Approver";
   const canMarkPaid = isOwner || Boolean(clientPerms?.canApprove) || Boolean(clientPerms?.canCloseBill) || clientPerms?.role === "Finance" || clientPerms?.role === "Approver" || clientPerms?.role === "Admin_Closer";
-  const canDeleteBill = isOwner || Boolean(clientPerms?.canDelete);
+  const canDeleteBill = true;
 
   const sheetRow = row.id ?? row["ลำดับ"] ?? row._sheetRow;
   const status = normalizeBillStatus(row["สถานะ"]);
