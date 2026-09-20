@@ -140,6 +140,15 @@ export function invalidateTableCache(tableName: string) {
     clearCache("rows:products");
     clearCache("rows:สินค้า");
     clearCache("headers:products");
+  } else if (canonical === "petty_cash" || normalized === "เปิดเงินสดย่อย" || normalized === "petty_cash" || normalized === "PETTY_CASH") {
+    clearCache("rows:petty_cash");
+    clearCache("rows:เปิดเงินสดย่อย");
+    clearCache("rows:PETTY_CASH");
+    clearCache("headers:petty_cash");
+    clearCache("headers:เปิดเงินสดย่อย");
+    clearCache("sys_opt:petty_cash_records");
+    clearCache("dashboard");
+    clearCache("summary");
   }
 }
 
@@ -354,6 +363,7 @@ export async function deleteRows(tableName: string, targetKeys: (number | string
         String(r[keyColumn]) === itemKey ||
         String(r["ลำดับ"]) === itemKey ||
         String(r.id) === itemKey ||
+        String(r.id_petty_cash) === itemKey ||
         String(r.id_Conwork) === itemKey ||
         String(r.id_store) === itemKey ||
         String(r.id_bank) === itemKey ||
@@ -363,16 +373,19 @@ export async function deleteRows(tableName: string, targetKeys: (number | string
         String(r.id_Company) === itemKey
       );
       if (foundRow) {
-        const imgField = foundRow["รูปถ่ายบิล"] || foundRow["รูปถ่าย"] || foundRow["รูปภาพ"] || foundRow.image || foundRow.image_url;
+        const imgField = foundRow["รูปถ่ายบิล"] || foundRow["รูปถ่าย"] || foundRow["รูปภาพ"] || foundRow.image || foundRow.image_url || foundRow["สลิป"];
         if (typeof imgField === "string" && imgField.trim()) {
           imageUrls.push(imgField.trim());
         }
       }
-      const targetVal = foundRow?.id ?? foundRow?.[keyColumn] ?? foundRow?.id_Conwork ?? foundRow?.id_bank ?? foundRow?.id_store ?? foundRow?.id_Contractor ?? foundRow?.id_cus ?? foundRow?.id_Company ?? foundRow?.id_car ?? itemKey;
+      const targetVal = foundRow?.[keyColumn] ?? foundRow?.id_petty_cash ?? foundRow?.id ?? foundRow?.id_Conwork ?? foundRow?.id_bank ?? foundRow?.id_store ?? foundRow?.id_Contractor ?? foundRow?.id_cus ?? foundRow?.id_Company ?? foundRow?.id_car ?? itemKey;
       if (typeof targetVal === "string" || typeof targetVal === "number") {
         if (String(targetVal).trim() !== "") {
           idsToDelete.add(targetVal);
         }
+      }
+      if (itemKey) {
+        idsToDelete.add(itemKey);
       }
     }
 

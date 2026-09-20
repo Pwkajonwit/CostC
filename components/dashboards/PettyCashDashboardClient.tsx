@@ -164,21 +164,29 @@ export function PettyCashDashboardClient({
   };
 
   const handleDeleteRow = async (row: SheetRow) => {
-    const rowId = row["id_petty_cash"] || row["id"];
+    const rowId = row["id_petty_cash"] || row["id"] || row["_sheetRow"];
     if (!rowId || !confirm(`ต้องการลบรายการเปิดเงินสดย่อย "${rowId}" หรือไม่?`)) return;
 
     setDeletingId(String(rowId));
     try {
-      const res = await fetch(`/api/rows?tableName=${encodeURIComponent(TABLES.PETTY_CASH)}&id=${encodeURIComponent(rowId)}`, {
+      const allPossibleIds = Array.from(new Set([
+        rowId,
+        row["id_petty_cash"],
+        row["id"],
+        row["_sheetRow"]
+      ].filter(Boolean)));
+
+      const res = await fetch(`/api/rows?tableName=${encodeURIComponent(TABLES.PETTY_CASH)}&id=${encodeURIComponent(String(rowId))}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tableName: TABLES.PETTY_CASH, ids: [rowId] })
+        body: JSON.stringify({ tableName: TABLES.PETTY_CASH, ids: allPossibleIds })
       });
       if (res.ok) {
         window.dispatchEvent(new CustomEvent("data-updated"));
         router.refresh();
       } else {
-        alert("ไม่สามารถลบรายการได้ กรุณาลองใหม่อีกครั้ง");
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || "ไม่สามารถลบรายการได้ กรุณาลองใหม่อีกครั้ง");
       }
     } catch {
       alert("เกิดข้อผิดพลาดในการลบ");

@@ -799,16 +799,6 @@ export function createBillNotificationFlex(bill: {
                 ],
               }
             ] : []),
-            ...(!isContractor && billDescription && billDescription !== "-" && lineItems.length === 0 ? [
-              {
-                type: "box",
-                layout: "baseline",
-                contents: [
-                  { type: "text", text: "รายละเอียด:", color: "#64748B", size: "xs", flex: 2 },
-                  { type: "text", text: billDescription, color: "#1E293B", size: "xs", flex: 5, wrap: true },
-                ],
-              }
-            ] : []),
             {
               type: "box",
               layout: "baseline",
@@ -817,7 +807,7 @@ export function createBillNotificationFlex(bill: {
                 { type: "text", text: requesterName, color: "#1E293B", size: "xs", flex: 5 },
               ],
             },
-            ...(lineItems.length === 0 && (isContractor || rawCategory) ? [
+            ...(lineItems.length === 0 && (isContractor || rawCategory || billDescription) ? [
               { type: "separator", margin: "xs" },
               {
                 type: "box",
@@ -842,7 +832,7 @@ export function createBillNotificationFlex(bill: {
                     contents: [
                       {
                         type: "text",
-                        text: isContractor ? `• ${rawCategory || (bill as any)["สินค้า"] || "ค่าแรง"}` : `• ${rawCategory || "รายการ"}`,
+                        text: isContractor ? `• ${rawCategory || (bill as any)["สินค้า"] || "ค่าแรง"}` : `• ${rawCategory || billDescription || "รายการ"}`,
                         size: "xs",
                         color: "#1E293B",
                         weight: "bold",
@@ -859,7 +849,22 @@ export function createBillNotificationFlex(bill: {
                         flex: 3
                       }
                     ]
-                  }
+                  },
+                  ...(!isContractor && billDescription && billDescription !== "-" && rawCategory && !rawCategory.includes(billDescription) && !billDescription.includes(rawCategory) ? [
+                    {
+                      type: "box",
+                      layout: "horizontal",
+                      contents: [
+                        {
+                          type: "text",
+                          text: `  ${billDescription}`,
+                          size: "xs",
+                          color: "#64748B",
+                          wrap: true
+                        }
+                      ]
+                    }
+                  ] : [])
                 ]
               }
             ] : []),
@@ -1713,25 +1718,22 @@ export function createBillSearchResultFlex(
                 ]
               },
               ...(() => {
-                const billDate = (b as any)["ว/ด/ป"] || (b as any)["วันที่"] || b.date || (b as any).data?.["ว/ด/ป"] || (b as any).data?.["วันที่"] || (b as any).data?.date;
                 const dueDate = (b as any)["วันจ่าย"] || (b as any).due_date || (b as any).data?.["วันจ่าย"] || (b as any).data?.due_date;
                 const creditVal = (b as any)["เครดิต"] || (b as any).credit || (b as any).data?.["เครดิต"] || (b as any).data?.credit || (b as any)["เครดิตจ่าย"] || (b as any).credit_payment_day;
-                if (!billDate && !dueDate) return [];
+                if (!dueDate) return [];
                 return [
                   {
                     type: "box",
                     layout: "baseline",
                     margin: "xs",
                     contents: [
-                      { type: "text", text: dueDate ? "กำหนดชำระ:" : "วันที่:", size: "xxs", color: "#64748B", flex: 3 },
+                      { type: "text", text: "กำหนดชำระ:", size: "xxs", color: "#64748B", flex: 3 },
                       {
                         type: "text",
-                        text: dueDate
-                          ? `${dueDate}${creditVal ? ` (เครดิต ${creditVal})` : ""}${billDate ? ` [บิล: ${billDate}]` : ""}`
-                          : String(billDate),
+                        text: `${dueDate}${creditVal ? ` (เครดิต ${creditVal})` : ""}`,
                         size: "xxs",
-                        color: dueDate ? "#0284C7" : "#334155",
-                        weight: dueDate ? "bold" : "regular",
+                        color: "#0284C7",
+                        weight: "bold",
                         flex: 7,
                         wrap: true
                       }
@@ -1870,18 +1872,7 @@ export function createBillSearchResultFlex(
                   ]
                 }
               ] : []),
-              ...(!isContractor && cleanDesc && cleanDesc !== "-" && lineItems.length === 0 ? [
-                {
-                  type: "box",
-                  layout: "baseline",
-                  margin: "xs",
-                  contents: [
-                    { type: "text", text: "รายละเอียด:", size: "xxs", color: "#64748B", flex: 3 },
-                    { type: "text", text: cleanDesc, size: "xxs", color: "#334155", flex: 7, wrap: true }
-                  ]
-                }
-              ] : []),
-              ...(lineItems.length === 0 && isContractor ? [
+              ...(lineItems.length === 0 ? [
                 {
                   type: "box",
                   layout: "vertical",
@@ -1895,7 +1886,7 @@ export function createBillSearchResultFlex(
                       type: "box",
                       layout: "horizontal",
                       contents: [
-                        { type: "text", text: `• ${rawCatName || (b as any)["สินค้า"] || (b as any)["ประเภท"] || "ค่าแรง"}`, size: "xxs", color: "#1E293B", weight: "bold", flex: 7, wrap: true },
+                        { type: "text", text: `• ${cleanDesc && cleanDesc !== "-" ? cleanDesc : (rawCatName || (b as any)["สินค้า"] || (b as any)["ประเภท"] || (isContractor ? "ค่าแรง" : "สินค้า"))}`, size: "xxs", color: "#1E293B", weight: "bold", flex: 7, wrap: true },
                         { type: "text", text: `฿${amt}`, size: "xxs", color: "#059669", weight: "bold", align: "end", flex: 3 }
                       ]
                     }
@@ -5231,28 +5222,25 @@ export function createMultiBillFlex(
               ]
             }
           ] : []),
-          // Row 2.2: Payment Due Date / Bill Date (กำหนดชำระ / วันที่บิล)
+          // Row 2.2: Payment Due Date (กำหนดชำระเฉพาะบิลเครดิต เอาวันที่บิลออกทั้งหมดตามที่ผู้ใช้ร้องขอ)
           ...(() => {
             const rawDueDate = b["วันจ่าย"] || b.due_date || b.data?.["วันจ่าย"] || b.data?.due_date;
             const rawCredit = b["เครดิต"] || b.credit || b.data?.["เครดิต"] || b.data?.credit || b["เครดิตจ่าย"] || b.credit_payment_day;
-            const rawBillDate = b["ว/ด/ป"] || b["วันที่"] || b.date || b.data?.["ว/ด/ป"] || b.data?.["วันที่"] || b.data?.date;
 
-            if (!rawDueDate && !rawBillDate) return [];
+            if (!rawDueDate) return [];
             return [
               {
                 type: "box",
                 layout: "baseline",
                 margin: "xs",
                 contents: [
-                  { type: "text", text: rawDueDate ? "กำหนดชำระ:" : "วันที่บิล:", size: "xxs", color: "#64748B", flex: 3 },
+                  { type: "text", text: "กำหนดชำระ:", size: "xxs", color: "#64748B", flex: 3 },
                   {
                     type: "text",
-                    text: rawDueDate
-                      ? `${rawDueDate}${rawCredit ? ` (เครดิต ${rawCredit})` : ""}${rawBillDate ? ` [บิล: ${rawBillDate}]` : ""}`
-                      : String(rawBillDate),
+                    text: `${rawDueDate}${rawCredit ? ` (เครดิต ${rawCredit})` : ""}`,
                     size: "xxs",
-                    color: rawDueDate ? "#0284C7" : "#334155",
-                    weight: rawDueDate ? "bold" : "regular",
+                    color: "#0284C7",
+                    weight: "bold",
                     flex: 9,
                     wrap: true
                   }
@@ -5260,18 +5248,6 @@ export function createMultiBillFlex(
               }
             ];
           })(),
-          // Row 2.5: Work Details / รายละเอียดงาน (Hide for contractor/labor bills as requested by user)
-          ...(!isContractor && !isLaborBill && cleanWorkDesc && cleanWorkDesc !== "-" && cleanWorkDesc !== "non" ? [
-            {
-              type: "box",
-              layout: "baseline",
-              margin: "xs",
-              contents: [
-                { type: "text", text: "รายละเอียด:", size: "xxs", color: "#64748B", flex: 3 },
-                { type: "text", text: cleanWorkDesc, size: "xxs", color: "#334155", flex: 9, wrap: true }
-              ]
-            }
-          ] : []),
           // Row 3: Labor Breakdown (3 Clean Lines as requested by user)
           ...(isLaborBill ? [
             {

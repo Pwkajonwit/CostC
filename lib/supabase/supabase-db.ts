@@ -491,9 +491,10 @@ export function mapSupabaseRowToSheetRow(dbTable: string, row: Record<string, an
     res["จำนวนเงิน"] = row.amount ?? row["จำนวนเงิน"];
   } else if (dbTable === "petty_cash") {
     const dataObj = (row.data && typeof row.data === "object") ? row.data : {};
-    res["id_petty_cash"] = row.id ?? row.id_petty_cash ?? dataObj["id_petty_cash"] ?? row._sheetRow;
-    res["id"] = res["id_petty_cash"];
-    res["_sheetRow"] = res["id_petty_cash"];
+    const resolvedPettyId = row.id_petty_cash ?? dataObj["id_petty_cash"] ?? (String(row.id).startsWith("PC") ? row.id : (dataObj.id ?? row.id ?? row._sheetRow));
+    res["id_petty_cash"] = resolvedPettyId;
+    res["id"] = resolvedPettyId;
+    res["_sheetRow"] = resolvedPettyId;
     res["ผู้เบิก"] = row.requester ?? row["ผู้เบิก"] ?? dataObj["ผู้เบิก"] ?? "";
     res["ID Project"] = row.project_id ?? row["ID Project"] ?? dataObj["ID Project"] ?? "";
     res["ชื่อ Project"] = row.project_name ?? row["ชื่อ Project"] ?? dataObj["ชื่อ Project"] ?? "";
@@ -1592,6 +1593,33 @@ export async function deleteRowsFromSupabase(tableName: string, targetVals: (str
       numVals.length ? supabaseAdmin.from(dbTable).delete().in("id", numVals) : Promise.resolve(),
       strVals.length ? supabaseAdmin.from(dbTable).delete().in("id", strVals) : Promise.resolve(),
     ]);
+
+    if (dbTable === "petty_cash") {
+      try {
+        const { data: opt } = await supabaseAdmin.from("system_options").select("*").eq("id", "petty_cash_records").maybeSingle();
+        let records: any[] = Array.isArray(opt?.data) ? [...opt.data] : [];
+        const targetStrs = new Set(targetVals.map(v => String(v).trim()).filter(Boolean));
+        records = records.filter(r => {
+          const matchId = String(r.id || "").trim();
+          const matchDataId = String(r.data?.id || "").trim();
+          const matchPettyId = String(r.id_petty_cash || r.data?.id_petty_cash || "").trim();
+          const matchSheetRow = String(r._sheetRow || r.data?._sheetRow || "").trim();
+          return !targetStrs.has(matchId) && !targetStrs.has(matchDataId) && !targetStrs.has(matchPettyId) && !targetStrs.has(matchSheetRow);
+        });
+        await supabaseAdmin.from("system_options").upsert({
+          id: "petty_cash_records",
+          data: records,
+          updated_at: new Date().toISOString()
+        });
+        clearCache("sys_opt:petty_cash_records");
+        clearCache("rows:petty_cash");
+        clearCache("rows:เปิดเงินสดย่อย");
+        clearCache("rows:PETTY_CASH");
+        clearCache("rows:");
+      } catch (err) {
+        console.warn("Exception deleting batch from system_options petty_cash:", err);
+      }
+    }
   } catch (err) {
     console.warn(`Exception deleting batch from Supabase '${dbTable}':`, err);
   }
@@ -1601,7 +1629,7 @@ export async function deleteRowFromSupabase(tableName: string, keyColumn: string
   if (!isSupabaseConfigured()) return null;
 
   const dbTable = getDbTableName(tableName);
-  const rawVal = row?.id ?? row?.[keyColumn] ?? row?.id_Conwork ?? row?.id_bank ?? row?.id_store ?? row?.id_Contractor ?? row?.id_cus ?? row?.id_Company ?? row?.id_car ?? keyValue;
+  const rawVal = row?.id ?? row?.[keyColumn] ?? row?.id_petty_cash ?? row?.id_Conwork ?? row?.id_bank ?? row?.id_store ?? row?.id_Contractor ?? row?.id_cus ?? row?.id_Company ?? row?.id_car ?? keyValue;
   const numId = Number(rawVal);
   const targetVal = Number.isFinite(numId) && String(rawVal).trim() !== "" ? numId : rawVal;
 
@@ -1621,13 +1649,24 @@ export async function deleteRowFromSupabase(tableName: string, keyColumn: string
       try {
         const { data: opt } = await supabaseAdmin.from("system_options").select("*").eq("id", "petty_cash_records").maybeSingle();
         let records: any[] = Array.isArray(opt?.data) ? [...opt.data] : [];
-        records = records.filter(r => String(r.id) !== String(targetVal));
+        const targetStr = String(targetVal || "").trim();
+        records = records.filter(r => {
+          const matchId = String(r.id || "").trim();
+          const matchDataId = String(r.data?.id || "").trim();
+          const matchPettyId = String(r.id_petty_cash || r.data?.id_petty_cash || "").trim();
+          const matchSheetRow = String(r._sheetRow || r.data?._sheetRow || "").trim();
+          return matchId !== targetStr && matchDataId !== targetStr && matchPettyId !== targetStr && matchSheetRow !== targetStr;
+        });
         await supabaseAdmin.from("system_options").upsert({
           id: "petty_cash_records",
           data: records,
           updated_at: new Date().toISOString()
         });
         clearCache("sys_opt:petty_cash_records");
+        clearCache("rows:petty_cash");
+        clearCache("rows:เปิดเงินสดย่อย");
+        clearCache("rows:PETTY_CASH");
+        clearCache("rows:");
       } catch {}
     }
   } catch (err) {
