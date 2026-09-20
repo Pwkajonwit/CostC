@@ -11,18 +11,17 @@ import { getUsersListFromSupabase } from "@/lib/supabase/supabase-db";
 import { cookies } from "next/headers";
 import { extractMemberPermissions, findMemberInPeopleRows } from "@/lib/user-permissions";
 import { getRowYear, isProjectInYear } from "@/lib/utils/dates";
+import { isRowMatchingYearOrPeriod, extractTargetYear } from "@/lib/fiscal-periods/fiscal-period-types";
 import type { SheetRow } from "@/lib/types";
 
 function filterRowsByCookieYear(rows: SheetRow[], year?: string): SheetRow[] {
   if (!year || year === "all") return rows;
-  return rows.filter((r) => {
-    const yr = getRowYear(r);
-    return !yr || String(yr) === String(year);
-  });
+  return rows.filter((r) => isRowMatchingYearOrPeriod(r, year));
 }
 
 function filterProjectsByCookieYear(projects: SheetRow[], billsInYear: SheetRow[], year?: string): SheetRow[] {
-  const list = (!year || year === "all") ? projects : projects.filter((p) => isProjectInYear(p, year, billsInYear));
+  const targetYear = extractTargetYear(year);
+  const list = (!targetYear || targetYear === "all") ? projects : projects.filter((p) => isProjectInYear(p, targetYear, billsInYear));
   const seen = new Set<string>();
   return list.filter((p) => {
     const id = String(p["ID Project"] || p.id || "").trim();

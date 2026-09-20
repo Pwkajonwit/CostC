@@ -1080,60 +1080,75 @@ export function DataHubClient() {
   }, [backupConfig]);
 
   return (
-    <div className="p-3 sm:p-5 max-w-6xl mx-auto space-y-5 font-sans text-xs text-slate-800">
-      {/* 1. PAGE HEADER & MAIN NAVIGATION TABS */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-start gap-3.5">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-800 text-white flex items-center justify-center shadow-sm shrink-0">
-            <Shield className="w-6 h-6" />
-          </div>
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-base font-bold text-slate-900 tracking-tight">
-                ศูนย์จัดการข้อมูล & ระบบสำรองข้อมูลมาตรฐาน (Enterprise Data & Backup Center)
-              </h1>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                12 ตารางระบบ
-              </span>
+    <div className="w-full max-w-6xl mx-auto flex flex-col gap-3 p-2.5 sm:p-4 font-sans text-slate-800 antialiased pb-12">
+      {/* ========================================================================= */}
+      {/* 1. TOP COMMAND RIBBON & HEADER                                             */}
+      {/* ========================================================================= */}
+      <section className="bg-white rounded-xl px-3.5 py-3 sm:px-4 sm:py-3.5 border border-slate-200/90 shadow-2xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          {/* Title & Badges */}
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-[#0b3531] text-[#34d399] flex items-center justify-center shrink-0 shadow-2xs border border-emerald-700/50">
+              <HardDrive className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
             </div>
-            <p className="text-xs text-slate-500">
-              ตั้งเวลาสำรองข้อมูลอัตโนมัติประจำสัปดาห์ เก็บประวัติ Snapshots พร้อมกู้คืน 1-คลิก และจัดการไฟล์ CSV
-            </p>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-xs sm:text-sm font-black text-slate-900 tracking-tight uppercase flex items-center gap-1.5">
+                  ศูนย์จัดการข้อมูล & ระบบสำรองข้อมูลมาตรฐาน
+                  <span className="text-[11px] font-bold text-slate-400 tracking-normal hidden sm:inline">
+                    / DATA HUB & ENTERPRISE BACKUP
+                  </span>
+                </h1>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-[#0b3531] text-[#d4f54e] border border-[#144d47] shrink-0 shadow-2xs">
+                  <Database className="w-3 h-3 text-[#d4f54e]" />
+                  <span>12 ตารางระบบ</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 shrink-0">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>พร้อมใช้งาน</span>
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 font-medium mt-0.5 truncate">
+                ตั้งเวลาสำรองข้อมูลอัตโนมัติประจำสัปดาห์ บันทึกประวัติ Snapshots กู้คืนระบบแบบ 1-คลิก และนำเข้า/ส่งออกไฟล์ CSV
+              </p>
+            </div>
+          </div>
+
+          {/* Global Action Toolbar */}
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                loadTableCounts();
+                loadBackupMetadata();
+              }}
+              disabled={loadingCounts || loadingBackupMeta}
+              className="px-3.5 py-1.5 sm:px-4 sm:py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs disabled:opacity-50"
+              title="รีเฟรชข้อมูล"
+            >
+              <RefreshCw size={13} className={loadingCounts ? "animate-spin text-emerald-600" : "text-slate-500"} />
+              <span>{loadingCounts ? "กำลังนับ..." : "รีเฟรชข้อมูล"}</span>
+            </button>
           </div>
         </div>
+      </section>
 
-        {/* Global Action Toolbar */}
-        <div className="flex items-center gap-2 flex-wrap shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              loadTableCounts();
-              loadBackupMetadata();
-            }}
-            disabled={loadingCounts || loadingBackupMeta}
-            className="px-3.5 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-medium flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
-            title="รีเฟรชข้อมูล"
-          >
-            <RefreshCw size={13} className={loadingCounts ? "animate-spin text-emerald-600" : "text-slate-500"} />
-            <span>{loadingCounts ? "กำลังนับ..." : "รีเฟรช"}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* 2. TOP-LEVEL SUB-TABS NAVIGATION */}
-      <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+      {/* ========================================================================= */}
+      {/* 2. TOP-LEVEL SUB-TABS NAVIGATION PILLS                                    */}
+      {/* ========================================================================= */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1">
         <button
           type="button"
           onClick={() => setActiveMainTab("standard_backup")}
-          className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition cursor-pointer ${
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer shadow-2xs whitespace-nowrap ${
             activeMainTab === "standard_backup"
-              ? "bg-slate-900 text-white shadow-sm"
-              : "bg-white text-slate-600 hover:text-slate-900 border border-slate-200"
+              ? "bg-[#0b3531] text-white border border-[#144d47]"
+              : "bg-white text-slate-700 hover:text-slate-900 border border-slate-200/90 hover:bg-slate-50"
           }`}
         >
-          <Shield className="w-4 h-4 text-emerald-400" />
+          <Shield className="w-4 h-4 text-[#d4f54e]" />
           <span>ระบบสำรองข้อมูลมาตรฐาน (Standard Backup & Recovery)</span>
-          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 font-mono">
+          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 font-mono font-bold">
             {backupHistory.length}
           </span>
         </button>
@@ -1141,13 +1156,13 @@ export function DataHubClient() {
         <button
           type="button"
           onClick={() => setActiveMainTab("table_csv")}
-          className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition cursor-pointer ${
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer shadow-2xs whitespace-nowrap ${
             activeMainTab === "table_csv"
-              ? "bg-slate-900 text-white shadow-sm"
-              : "bg-white text-slate-600 hover:text-slate-900 border border-slate-200"
+              ? "bg-[#0b3531] text-white border border-[#144d47]"
+              : "bg-white text-slate-700 hover:text-slate-900 border border-slate-200/90 hover:bg-slate-50"
           }`}
         >
-          <FileSpreadsheet className="w-4 h-4 text-teal-500" />
+          <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
           <span>นำเข้าและส่งออก CSV แยกตาราง (12 Tables)</span>
         </button>
       </div>

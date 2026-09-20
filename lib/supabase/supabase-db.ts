@@ -1533,7 +1533,24 @@ export async function updateRowInSupabase(tableName: string, keyColumn: string, 
       if (dbTable === "petty_cash" && isTableMissing) {
         const { data: opt } = await supabaseAdmin.from("system_options").select("*").eq("id", "petty_cash_records").maybeSingle();
         let records: any[] = Array.isArray(opt?.data) ? [...opt.data] : [];
-        records = records.map(r => (String(r.id) === String(primaryVal) ? { ...r, ...dbPatch, data: { ...(r.data || {}), ...dbPatch.data } } : r));
+        const targetStr = String(primaryVal || "").trim();
+        records = records.map(r => {
+          const matchId = String(r.id || "").trim();
+          const matchDataId = String(r.data?.id || "").trim();
+          const matchPettyId = String(r.id_petty_cash || r.data?.id_petty_cash || "").trim();
+          const matchSheetRow = String(r._sheetRow || r.data?._sheetRow || "").trim();
+          const isMatch = targetStr !== "" && (matchId === targetStr || matchDataId === targetStr || matchPettyId === targetStr || matchSheetRow === targetStr);
+          if (!isMatch) return r;
+          const mergedData = { ...(r.data || {}), ...(dbPatch.data || {}), ...dbPatch };
+          return {
+            ...r,
+            ...dbPatch,
+            status: dbPatch.status || dbPatch["สถานะ"] || r.status,
+            cleared_amount: dbPatch.cleared_amount !== undefined ? dbPatch.cleared_amount : (dbPatch["ยอดเคลียร์แล้ว"] !== undefined ? Number(dbPatch["ยอดเคลียร์แล้ว"]) : r.cleared_amount),
+            remaining_amount: dbPatch.remaining_amount !== undefined ? dbPatch.remaining_amount : (dbPatch["ยอดคงเหลือ"] !== undefined ? Number(dbPatch["ยอดคงเหลือ"]) : r.remaining_amount),
+            data: mergedData
+          };
+        });
         await supabaseAdmin.from("system_options").upsert({
           id: "petty_cash_records",
           data: records,
@@ -1543,7 +1560,12 @@ export async function updateRowInSupabase(tableName: string, keyColumn: string, 
         clearCache("rows:เปิดเงินสดย่อย");
         clearCache("rows:petty_cash");
         clearCache("rows:");
-        return records.filter(r => String(r.id) === String(primaryVal));
+        return records.filter(r => {
+          const matchId = String(r.id || "").trim();
+          const matchDataId = String(r.data?.id || "").trim();
+          const matchPettyId = String(r.id_petty_cash || r.data?.id_petty_cash || "").trim();
+          return matchId === targetStr || matchDataId === targetStr || matchPettyId === targetStr;
+        });
       }
       console.error(`[Supabase UPDATE ERROR '${dbTable}'] id "${primaryVal}":`, res.error.message);
       throw new Error(res.error.message);

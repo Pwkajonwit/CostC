@@ -1017,17 +1017,27 @@ export async function handleLineCommand(
       const nowIso = new Date().toISOString();
       const todayDate = nowIso.split("T")[0];
 
+      const { autoClearPettyCashOnSubBillApproval, isSubBill } = await import("@/lib/petty-cash/petty-cash-clear");
+
       for (const b of targetBills) {
         const bId = b.id || b["ลำดับ"] || b._sheetRow;
         totalAmount += Number(b["ยอดเงิน"] || b.amount || 0);
 
+        const isSub = checkIsSubBill(b) || isSubBill(b);
+        const finalStatus = (isSub && isApprove) ? "เบิกแล้ว" : newStatus;
+
         const patchPayload: Record<string, any> = {
-          "สถานะ": newStatus,
-          status: newStatus
+          "สถานะ": finalStatus,
+          status: finalStatus
         };
 
         if (isApprove) {
           patchPayload.approved_at = nowIso;
+          if (isSub) {
+            patchPayload.paid_at = nowIso;
+            patchPayload.paid_date = todayDate;
+            patchPayload["วันจ่าย"] = todayDate;
+          }
         } else if (!isReject) {
           // Closed / Paid
           patchPayload.paid_at = nowIso;
@@ -1036,8 +1046,16 @@ export async function handleLineCommand(
         }
 
         await updateRowInSupabase("bills", "id", bId, patchPayload);
-        b["สถานะ"] = newStatus;
-        b.status = newStatus;
+        b["สถานะ"] = finalStatus;
+        b.status = finalStatus;
+      }
+
+      // 🪙 Auto-clear Petty Cash when sub-bills are approved or closed
+      const subBillsToClear = targetBills.filter(b => checkIsSubBill(b) || isSubBill(b));
+      if (subBillsToClear.length > 0) {
+        autoClearPettyCashOnSubBillApproval(subBillsToClear).catch(err => {
+          console.warn("Failed autoClearPettyCashOnSubBillApproval in LINE command:", err);
+        });
       }
 
       // Sync contract_works paid amount when bills are closed/paid

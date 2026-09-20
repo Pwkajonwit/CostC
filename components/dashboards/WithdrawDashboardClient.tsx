@@ -239,7 +239,7 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
   const [pettyCashRows, setPettyCashRows] = useState<SheetRow[]>([]);
   const [pettyCashLoading, setPettyCashLoading] = useState(false);
 
-  useEffect(() => {
+  const fetchPettyCashRows = useCallback(() => {
     if (filters.bill !== "ย่อย") return;
     setPettyCashLoading(true);
     fetch(`/api/rows?tableName=${encodeURIComponent("เปิดเงินสดย่อย")}&limit=1000`)
@@ -251,6 +251,18 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
       .catch(() => {})
       .finally(() => setPettyCashLoading(false));
   }, [filters.bill]);
+
+  useEffect(() => {
+    fetchPettyCashRows();
+  }, [fetchPettyCashRows]);
+
+  useEffect(() => {
+    const handleDataUpdate = () => {
+      fetchPettyCashRows();
+    };
+    window.addEventListener("data-updated", handleDataUpdate);
+    return () => window.removeEventListener("data-updated", handleDataUpdate);
+  }, [fetchPettyCashRows]);
 
   // สร้าง reverse map: ชื่อเล่น / ชื่อ-นามสกุล → รหัสพนักงาน (สำหรับ match petty_cash ที่เก็บชื่อ vs filters.requester ที่เก็บ ID)
   const nameToIdMap = useMemo(() => {
@@ -565,6 +577,8 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
         body: JSON.stringify({ row: updatedRow, targetRole: "requester", actor: getCurrentActor() })
       }).catch(err => console.warn("Failed sending LINE withdraw notification:", err));
 
+      window.dispatchEvent(new CustomEvent("data-updated"));
+      fetchPettyCashRows();
       router.refresh();
     } catch (error) {
       // 🔄 Rollback optimistic change on network/API failure
@@ -656,6 +670,8 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
         }).catch(err => console.warn("Failed sending LINE withdraw notification:", err));
       }
 
+      window.dispatchEvent(new CustomEvent("data-updated"));
+      fetchPettyCashRows();
       setSelectedRows(new Set());
       router.refresh();
     } catch (error) {

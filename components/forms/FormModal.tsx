@@ -1801,6 +1801,48 @@ export function FormModal({
                                   <SectionHeaderIcon name={section.iconName} />
                                   <h4 className="text-xs text-slate-800 m-0 font-semibold">{section.title}</h4>
                                 </div>
+                                {section.id === "tax" && (() => {
+                                  const storeOption = (activeForm?.refOptions?.["ร้านค้า"] || []).find(opt => opt.value === values["ร้านค้า"]);
+                                  const storeCutoffRaw = storeOption?.row?.["เครดิตจ่าย"] || storeOption?.row?.["credit_payment_day"];
+                                  const storeCutoffDay = parseCreditCutoffDay(storeCutoffRaw);
+                                  const hasStoreCredit = storeCutoffDay > 0 || (hasValue(storeCutoffRaw) && storeCutoffRaw !== "-" && storeCutoffRaw !== "0");
+
+                                  if (hasStoreCredit) {
+                                    return (
+                                      <span className="text-[11px] font-medium text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/80 flex items-center gap-1">
+                                        <span>💳 เครดิตร้านค้า (รอบจ่ายวันที่ {storeCutoffDay})</span>
+                                      </span>
+                                    );
+                                  }
+                                  if (!values["วันจ่าย"]) {
+                                    return (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const today = values["ว/ด/ป"] || values["วันที่"] || getTodayDateIso();
+                                          updateValue({ name: "วันจ่าย" } as FieldSchema, today);
+                                        }}
+                                        className="text-[11px] font-medium text-slate-500 hover:text-slate-800 hover:bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200/80 transition cursor-pointer"
+                                        title="ระบุวันจ่ายสำหรับบิลนี้เป็นกรณีพิเศษ"
+                                      >
+                                        + กำหนดวันจ่ายเอง
+                                      </button>
+                                    );
+                                  }
+                                  return (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        updateValue({ name: "วันจ่าย" } as FieldSchema, "");
+                                        updateValue({ name: "เครดิต" } as FieldSchema, "");
+                                      }}
+                                      className="text-[10px] text-slate-400 hover:text-rose-600 hover:bg-rose-50 px-1.5 py-0.5 rounded transition cursor-pointer"
+                                      title="ยกเลิกวันจ่าย (ชำระเงินสดทันที)"
+                                    >
+                                      ยกเลิกวันจ่าย (จ่ายสด)
+                                    </button>
+                                  );
+                                })()}
                               </div>
                               <div className={sectionGridClass}>
                                 {sectionFields.map(field => {
@@ -4027,16 +4069,26 @@ function normalizeDependentValues(values: Record<string, string>, changedField: 
   }
 
   // หากเลือกร้านค้า และร้านค้านั้นมี "เครดิตจ่าย" (วันตัดรอบประจำเดือน เช่น วันที่ 16)
-  if (changedField === "ร้านค้า" && hasValue(values["ร้านค้า"])) {
-    const storeOption = (form.refOptions?.["ร้านค้า"] || []).find(opt => opt.value === values["ร้านค้า"]);
-    const storeCutoffRaw = storeOption?.row?.["เครดิตจ่าย"] || storeOption?.row?.["credit_payment_day"];
-    const storeCutoffDay = parseCreditCutoffDay(storeCutoffRaw);
-    if (storeCutoffDay > 0) {
-      const baseDate = values["ว/ด/ป"] || values["วันที่"] || getTodayDateIso();
-      const cutoffDueDate = calculateMonthlyCutoffDueDate(baseDate, storeCutoffDay);
-      if (cutoffDueDate) {
-        values["วันจ่าย"] = cutoffDueDate;
+  if (changedField === "ร้านค้า") {
+    if (hasValue(values["ร้านค้า"])) {
+      const storeOption = (form.refOptions?.["ร้านค้า"] || []).find(opt => opt.value === values["ร้านค้า"]);
+      const storeCutoffRaw = storeOption?.row?.["เครดิตจ่าย"] || storeOption?.row?.["credit_payment_day"];
+      const storeCutoffDay = parseCreditCutoffDay(storeCutoffRaw);
+      if (storeCutoffDay > 0) {
+        const baseDate = values["ว/ด/ป"] || values["วันที่"] || getTodayDateIso();
+        const cutoffDueDate = calculateMonthlyCutoffDueDate(baseDate, storeCutoffDay);
+        if (cutoffDueDate) {
+          values["วันจ่าย"] = cutoffDueDate;
+        }
+        values["เครดิต"] = "";
+      } else {
+        // ร้านค้านี้ไม่มีเครดิตจ่าย (เป็นร้านเงินสด) ให้เคลียร์วันจ่ายออก
+        if (!hasValue(values["เครดิต"])) {
+          values["วันจ่าย"] = "";
+        }
       }
+    } else {
+      values["วันจ่าย"] = "";
     }
   }
 
@@ -4396,12 +4448,12 @@ function pruneHiddenConditionalValues(values: Record<string, string>, form: Form
     if (field.type === "Hidden" || field.name === "ประเภท" || field.name.startsWith("งบไม่เกิน") || field.name === "คุมงบประเภทงาน") return;
     if (field.name === "วันจ่าย" && hasValue(values["วันจ่าย"])) return;
     if (field.name === "เครดิต" && hasValue(values["เครดิต"])) return;
-    if (isFieldVisible(field, values)) return;
+    if (isFieldVisible(field, values, form)) return;
     values[field.name] = "";
   });
 }
 
-function isFieldVisible(field: FieldSchema, values: Record<string, string>) {
+function isFieldVisible(field: FieldSchema, values: Record<string, string>, form?: FormPayload) {
   const vendorType = values["ร้านค้า/ผู้รับเหมา"] || "ร้านค้า";
   const cat = values["ประเภท"] || "";
 
@@ -4461,19 +4513,27 @@ function isFieldVisible(field: FieldSchema, values: Record<string, string>) {
   }
 
   // 3. Tax / Credit
+  const storeOption = (form?.refOptions?.["ร้านค้า"] || []).find(opt => opt.value === values["ร้านค้า"]);
+  const storeCutoffRaw = storeOption?.row?.["เครดิตจ่าย"] || storeOption?.row?.["credit_payment_day"];
+  const storeCutoffDay = parseCreditCutoffDay(storeCutoffRaw);
+  const hasStoreCredit = storeCutoffDay > 0 || (hasValue(storeCutoffRaw) && storeCutoffRaw !== "-" && storeCutoffRaw !== "0");
+
   if (field.name === "วันได้บิล") {
     const hasVat = isVatActive(values["vat"]);
-    const hasCredit = parseCreditDays(values["เครดิต"]) > 0;
+    const hasCredit = parseCreditDays(values["เครดิต"]) > 0 || hasStoreCredit || Boolean(values["วันจ่าย"]);
     return hasVat && !hasCredit;
   }
   if (field.name === "vat") {
     return vendorType === "ร้านค้า" || (vendorType === "ผู้รับเหมา" && values["statusค่าแรง"] === "บริษัท");
   }
   if (field.name === "เครดิต") {
-    return vendorType === "ร้านค้า" || isVatActive(values["vat"]) || parseCreditDays(values["เครดิต"]) > 0;
+    // ซ่อนปุ่มเครดิต [30] [45] [60] ในการใช้งานปกติ เพราะเครดิตถูกกำหนดที่ข้อมูลร้านค้าอยู่แล้ว
+    // แสดงเฉพาะกรณีที่บิลเดิมเคยมีค่าเครดิตบันทึกไว้อยู่แล้วเท่านั้น
+    return hasValue(values["เครดิต"]) && parseCreditDays(values["เครดิต"]) > 0;
   }
   if (field.name === "วันจ่าย") {
-    return Boolean(values["วันจ่าย"] || parseCreditDays(values["เครดิต"]) > 0 || hasValue(values["เครดิต"]));
+    // แสดงวันจ่ายเมื่อ: ร้านค้ามีเครดิตจ่ายที่กำหนดไว้ หรือบิลนี้มีวันจ่ายถูกระบุไว้
+    return Boolean(hasStoreCredit || values["วันจ่าย"] || parseCreditDays(values["เครดิต"]) > 0);
   }
   if (field.name === "หัก") {
     return vendorType === "ผู้รับเหมา" || isLaborCost(cat) || isOtherExpense(cat);

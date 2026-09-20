@@ -536,7 +536,7 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows, initi
               <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-700 flex items-center justify-center shrink-0 border border-indigo-200/80 shadow-2xs">
                 <Wallet className="w-4 h-4" />
               </div>
-              <span className="text-xs font-extrabold text-slate-700 tracking-tight uppercase truncate">
+              <span className="text-xs sm:text-sm font-black text-slate-900 tracking-tight uppercase truncate">
                 ยอดเบิกจ่ายจริง
               </span>
             </div>
@@ -576,7 +576,7 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows, initi
               <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-800 flex items-center justify-center shrink-0 border border-emerald-200/80 shadow-2xs">
                 <TrendingUp className="w-4 h-4" />
               </div>
-              <span className="text-xs font-extrabold text-slate-700 tracking-tight uppercase truncate">
+              <span className="text-xs sm:text-sm font-black text-slate-900 tracking-tight uppercase truncate">
                 ยอดงานรวมสัญญา
               </span>
             </div>
@@ -607,7 +607,7 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows, initi
               >
                 <Coins className="w-4 h-4" />
               </div>
-              <span className="text-xs font-extrabold text-slate-700 tracking-tight uppercase truncate">
+              <span className="text-xs sm:text-sm font-black text-slate-900 tracking-tight uppercase truncate">
                 กำไรสุทธิ (PROFIT)
               </span>
             </div>
@@ -650,7 +650,7 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows, initi
               <div className="w-7 h-7 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center shrink-0 border border-slate-200/80 shadow-2xs">
                 <FolderKanban className="w-4 h-4" />
               </div>
-              <span className="text-xs font-extrabold text-slate-700 tracking-tight uppercase truncate">
+              <span className="text-xs sm:text-sm font-black text-slate-900 tracking-tight uppercase truncate">
                 สถานะโครงการ
               </span>
             </div>
@@ -662,14 +662,14 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows, initi
             <div className="flex-1 flex items-center justify-between px-3 py-1.5 rounded-lg bg-emerald-50/70 border border-emerald-200">
               <div className="flex items-center gap-1.5">
                 <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-xs font-bold text-slate-700">กำลังทำ</span>
+                <span className="text-xs font-black text-slate-800">กำลังทำ</span>
               </div>
               <span className="text-base font-black text-emerald-800">{summary.activeProjects}</span>
             </div>
             <div className="flex-1 flex items-center justify-between px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200">
               <div className="flex items-center gap-1.5">
                 <span className="h-2 w-2 rounded-full bg-slate-400" />
-                <span className="text-xs font-bold text-slate-600">เสร็จสิ้น</span>
+                <span className="text-xs font-black text-slate-800">เสร็จสิ้น</span>
               </div>
               <span className="text-base font-black text-slate-800">{summary.completeProjects}</span>
             </div>
@@ -699,10 +699,10 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows, initi
                   {costGroupMode === "budget-control" ? <Sliders className="w-4 h-4" /> : <PieChart className="w-4 h-4" />}
                 </div>
                 <div>
-                  <h2 className="text-xs sm:text-sm font-black text-slate-900 uppercase tracking-tight flex items-center gap-1.5">
+                  <h2 className="text-xs sm:text-sm font-black text-slate-950 uppercase tracking-tight flex items-center gap-1.5">
                     <span>{costGroupMode === "budget-control" ? "สัดส่วนต้นทุนตามหมวดควบคุมงบ" : "สัดส่วนต้นทุนตามโครงสร้าง Cost Code"}</span>
                   </h2>
-                  <p className="text-[11px] text-slate-500">
+                  <p className="text-[11px] font-medium text-slate-600">
                     {costGroupMode === "budget-control"
                       ? "แบ่งตาม 2 หมวดควบคุมงบหลัก: หมวดค่าของ (รวม 100 & 500) และ หมวดค่าแรง (รวม 200 & 300)"
                       : "แบ่งตาม 4 หมวดหลัก (100 ค่าของ, 200 ค่าแรง, 300 พนักงาน, 500 เครื่องจักร/ยานพาหนะ)"}
@@ -845,8 +845,8 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows, initi
                               <Icon size={16} />
                             </div>
                             <div className="min-w-0">
-                              <div className="text-xs font-bold text-slate-900 truncate">{item.name}</div>
-                              <div className="text-[10px] text-slate-400 truncate">{item.subtitle}</div>
+                              <div className="text-xs sm:text-sm font-black text-slate-950 tracking-tight truncate">{item.name}</div>
+                              <div className="text-[11px] font-medium text-slate-500 truncate">{item.subtitle}</div>
                             </div>
                           </div>
                           <span className={`text-xs font-black shrink-0 px-2 py-0.5 rounded-md ${item.badgeBg}`}>
@@ -920,8 +920,8 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows, initi
                             <Icon size={14} />
                           </div>
                           <div className="min-w-0">
-                            <div className="text-xs font-bold text-slate-900 truncate">{item.name}</div>
-                            <div className="text-[10px] text-slate-400 truncate">{item.subtitle}</div>
+                            <div className="text-xs sm:text-sm font-black text-slate-950 tracking-tight truncate">{item.name}</div>
+                            <div className="text-[11px] font-medium text-slate-500 truncate">{item.subtitle}</div>
                           </div>
                         </div>
                         <span className={`text-[11px] font-black shrink-0 ${item.textColor}`}>
@@ -960,10 +960,10 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows, initi
                   <Building2 size={15} />
                 </div>
                 <div>
-                  <h2 className="text-xs sm:text-sm font-black text-slate-900 uppercase tracking-tight">
-                    สถานะคุมงบประมาณโครงการที่กำลังทำอยู่ (Active Projects)
+                  <h2 className="text-sm sm:text-base font-black text-slate-950 uppercase tracking-tight">
+                    สถานะคุมงบประมาณโครงการที่กำลังทำอยู่ (ACTIVE PROJECTS)
                   </h2>
-                  <p className="text-[11px] text-slate-500">
+                  <p className="text-[11px] font-medium text-slate-600">
                     ติดตามยอดใช้จ่ายเทียบงบประมาณ และเตือนโครงการที่ใกล้เต็มหรือเกินงบ
                   </p>
                 </div>
@@ -1013,7 +1013,7 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows, initi
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
-                  <tr className="bg-slate-100/90 text-slate-700 font-bold border-b border-slate-200">
+                  <tr className="bg-slate-100 text-slate-900 font-black border-b border-slate-200">
                     <th className="py-2.5 px-3 border-r border-slate-200">โครงการ / ลูกค้า</th>
                     <th className="py-2.5 px-3 border-r border-slate-200 text-right">งบประมาณ (฿)</th>
                     <th className="py-2.5 px-3 border-r border-slate-200 text-right">เบิกสะสมรวม (฿)</th>
@@ -1166,7 +1166,7 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows, initi
                 <div className="w-6 h-6 rounded-md bg-slate-200 text-slate-700 flex items-center justify-center shrink-0">
                   <Clock3 className="w-3.5 h-3.5" />
                 </div>
-                <h2 className="text-xs font-black text-slate-900 uppercase tracking-tight truncate">
+                <h2 className="text-sm font-black text-slate-950 uppercase tracking-tight truncate">
                   งานที่ต้องติดตาม / จัดการ
                 </h2>
               </div>
@@ -1201,7 +1201,7 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows, initi
                     <Clock3 className="w-4 h-4" />
                   </div>
                   <div className="min-w-0">
-                    <div className="text-slate-900 text-xs font-bold truncate">บิลรอตั้งเบิก / รอจ่าย</div>
+                    <div className="text-slate-950 text-xs sm:text-sm font-black truncate">บิลรอตั้งเบิก / รอจ่าย</div>
                     <div className="text-[11px] text-slate-500 truncate">
                       {summary.pendingWithdrawCount > 0
                         ? `฿${money(summary.pendingAP)} (ยังไม่ได้โอน)`
@@ -1242,7 +1242,7 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows, initi
                     <Coins className="w-4 h-4" />
                   </div>
                   <div className="min-w-0">
-                    <div className="text-slate-900 text-xs font-bold truncate flex items-center gap-1.5">
+                    <div className="text-slate-950 text-xs sm:text-sm font-black truncate flex items-center gap-1.5">
                       <span>เงินสดย่อยค้างเคลียร์</span>
                       {pettyCashStats.unclearedCount > 0 && (
                         <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-200/80 text-amber-900 font-semibold">
@@ -1290,7 +1290,7 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows, initi
                     <Wallet className="w-4 h-4" />
                   </div>
                   <div className="min-w-0">
-                    <div className="text-slate-900 text-xs font-bold truncate">ตามบิลเครดิต (รอจ่าย)</div>
+                    <div className="text-slate-950 text-xs sm:text-sm font-black truncate">ตามบิลเครดิต (รอจ่าย)</div>
                     <div className="text-[11px] text-slate-500 truncate">บิลเครดิตที่ยังไม่ได้ลงวันจ่าย</div>
                   </div>
                 </div>
@@ -1327,7 +1327,7 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows, initi
                     <FileCheck className="w-4 h-4" />
                   </div>
                   <div className="min-w-0">
-                    <div className="text-slate-900 text-xs font-bold truncate">ตาม VAT (รอได้บิล)</div>
+                    <div className="text-slate-950 text-xs sm:text-sm font-black truncate">ตาม VAT (รอได้บิล)</div>
                     <div className="text-[11px] text-slate-500 truncate">บิลภาษีที่ยังไม่ได้ใบเสร็จ</div>
                   </div>
                 </div>
@@ -1364,7 +1364,7 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows, initi
                     <UserCheck className="w-4 h-4" />
                   </div>
                   <div className="min-w-0">
-                    <div className="text-slate-900 text-xs font-bold truncate">ตาม หัก 3% บุคคล</div>
+                    <div className="text-slate-950 text-xs sm:text-sm font-black truncate">ตาม หัก 3% บุคคล</div>
                     <div className="text-[11px] text-slate-500 truncate">ค่าแรงช่าง / บุคคลธรรมดา</div>
                   </div>
                 </div>

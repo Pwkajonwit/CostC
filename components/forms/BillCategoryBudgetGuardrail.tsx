@@ -86,9 +86,9 @@ export function BillCategoryBudgetGuardrail({ values, projectRows = [], existing
   if (budgetStatus && budgetStatus.hasBudgetCap && budgetStatus.isSpecificSubBudget) {
     return (
       <div className="space-y-1.5 w-full">
-        <BudgetStatusCard check={budgetStatus} prefix="คุมงบหมวดย่อย" />
+        <BudgetStatusCard check={budgetStatus} />
         {overallStatus && (
-          <BudgetStatusCard check={overallStatus} prefix="คุมงบภาพรวม" />
+          <BudgetStatusCard check={overallStatus} />
         )}
       </div>
     );
@@ -100,14 +100,16 @@ export function BillCategoryBudgetGuardrail({ values, projectRows = [], existing
       <div className="w-full min-w-0 max-w-full h-10 sm:h-9 px-3 rounded-lg border border-dashed border-slate-300 bg-slate-50/70 text-slate-500 text-xs font-sans flex items-center justify-between gap-2 shadow-2xs">
         <div className="flex items-center gap-1.5 min-w-0 truncate">
           <Info size={14} className="text-slate-400 shrink-0" />
-          <span className="truncate">หมวด '{label}': ไม่ได้ตั้งวงเงินคุมงบย่อย</span>
+          <span className="truncate" title={`หมวด '${label}': ไม่ได้ตั้งวงเงินคุมงบย่อย`}>
+            หมวด '{label}': ไม่ได้ตั้งวงเงินคุมงบย่อย
+          </span>
         </div>
         <span className="text-[11px] text-slate-400 shrink-0 bg-slate-200/60 px-1.5 py-0.5 rounded">
           ไม่คุมงบย่อย
         </span>
       </div>
       {overallStatus && (
-        <BudgetStatusCard check={overallStatus} prefix="คุมงบภาพรวม" />
+        <BudgetStatusCard check={overallStatus} />
       )}
     </div>
   );
@@ -128,7 +130,7 @@ export function BudgetStatusCard({
     isWarning,
   } = check;
 
-  const displayTitle = prefix ? `${prefix}: ${categoryLabel}` : `คุมงบ: ${categoryLabel}`;
+  const displayTitle = prefix ? `${prefix}: ${categoryLabel}` : categoryLabel;
 
   return (
     <div
@@ -150,7 +152,9 @@ export function BudgetStatusCard({
         )}
 
         <div className="flex items-center gap-1.5 min-w-0 truncate">
-          <span className="font-semibold text-xs truncate">{displayTitle}</span>
+          <span className="font-semibold text-xs truncate" title={categoryLabel}>
+            {displayTitle}
+          </span>
           <span
             className={`text-[10px] font-semibold px-1.5 py-0.2 rounded shrink-0 ${
               isOverBudget
@@ -165,7 +169,7 @@ export function BudgetStatusCard({
         </div>
       </div>
 
-      <div className="text-right shrink-0 text-xs font-semibold pl-1">
+      <div className="text-right shrink-0 text-xs font-semibold pl-1 whitespace-nowrap">
         {remainingAfterBill < 0 ? (
           <span className="text-rose-700 font-bold">เกินงบ {money(Math.abs(remainingAfterBill))} ฿</span>
         ) : (
@@ -231,7 +235,6 @@ export function MultiItemsBudgetGuardrail({
       <BudgetStatusCard
         key={overallCheck.categoryLabel}
         check={overallCheck}
-        prefix={isContractor ? "" : "คุมงบภาพรวม"}
       />
     </div>
   );
