@@ -791,16 +791,24 @@ export function FormModal({
   const [resetKey, setResetKey] = useState(0);
   const formBodyRef = useRef<HTMLDivElement>(null);
 
-  const productOptions = useMemo(() => {
+  const productOptions: { label: string; value: string }[] = useMemo(() => {
+    const productField = activeForm?.schema.find(f => f.name === "สินค้า");
+    if (productField && activeForm) {
+      return getFieldOptions(productField, activeForm, values).map(opt => ({
+        label: String(opt.label || opt.value || ""),
+        value: String(opt.value ?? "")
+      }));
+    }
     const isContractor = values["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา";
     if (isContractor) {
-      return ALL_CONTRACTOR_CATEGORIES.map((c: string) => ({ label: c, value: c }));
+      return LABOR_CATEGORY_OPTIONS.map((c: string) => ({ label: c, value: c }));
     }
-    const field = activeForm?.schema.find(f => f.name === "สินค้า");
-    const rawList: string[] = Array.isArray(field?.values) ? field.values : [];
-    if (rawList.length > 0) return rawList.map((v: string) => ({ label: String(v), value: String(v) }));
-    return (activeForm?.refOptions?.["สินค้า"] || []).map(opt => ({ label: String(opt.label || opt.value || ""), value: String(opt.value || "") }));
-  }, [activeForm, values["ร้านค้า/ผู้รับเหมา"]]);
+    const isStaff = values["ร้านค้า/ผู้รับเหมา"] === "พนักงาน";
+    if (isStaff) {
+      return STAFF_CATEGORY_OPTIONS.map((c: string) => ({ label: c, value: c }));
+    }
+    return ALL_STORE_CATEGORIES.map((c: string) => ({ label: c, value: c }));
+  }, [activeForm, values]);
 
   const vehicleOptions = useMemo(() => {
     const fromRef = activeForm?.refOptions?.["ทะเบียน"] || activeForm?.refOptions?.["ทะเบียนรถ"] || [];

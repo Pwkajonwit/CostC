@@ -160,18 +160,11 @@ async function getFormSchemaWithSheetOptions(tableName: string): Promise<FieldSc
       }
     }
 
-    if (field.name === "สินค้า") {
-      const coreProducts = ["101 น้ำมัน", "102 ค่าขนส่ง", "103 เครื่องจักร", "104 ซ่อมรถ", "105 เครื่องมือ", "200 ดำเนินการ(อื่นๆ)"];
-      for (const cp of coreProducts) {
-        if (!fieldValues.some(v => v === cp || v.includes(cp.split(" ")[1]) || v.startsWith(cp.split(" ")[0]))) {
-          const nonIdx = fieldValues.indexOf("non");
-          if (nonIdx >= 0) {
-            fieldValues.splice(nonIdx, 0, cp);
-          } else {
-            fieldValues.push(cp);
-          }
-        }
-      }
+    if (field.name === "สินค้า" || field.dynamicValues === "productCategoryOptions") {
+      return {
+        ...field,
+        values: ALL_STORE_CATEGORIES
+      };
     }
 
     if (field.dynamicValues === "billTypeOptions") {
@@ -188,35 +181,6 @@ async function getFormSchemaWithSheetOptions(tableName: string): Promise<FieldSc
         ...field,
         values: combinedValues.length > 0 ? combinedValues : baseValues,
         dynamicOptionSets: billTypeOptionSets
-      };
-    }
-
-    if (field.dynamicValues === "productCategoryOptions") {
-      let masterProducts: string[] = [];
-      const masterData = (systemOptions as any)["PRODUCT_MASTER_DATA"];
-      if (Array.isArray(masterData) && masterData.length > 0) {
-        masterProducts = masterData
-          .filter((item: any) => item && item.active !== false)
-          .map((item: any) => {
-            const code = String(item.code || item.id || "").trim();
-            const name = String(item.name || "").trim();
-            return code ? `${code} ${name}` : name;
-          })
-          .filter(Boolean);
-      }
-
-      const productOptions = (Array.isArray(systemOptions["สินค้า"]) && systemOptions["สินค้า"].length > 1)
-        ? systemOptions["สินค้า"]
-        : undefined;
-
-      const defaultProducts = DEFAULT_SYSTEM_OPTIONS["สินค้า"] || [];
-      const finalProducts = masterProducts.length > 0
-        ? masterProducts
-        : (productOptions && productOptions.length > 0 ? productOptions : defaultProducts);
-
-      return {
-        ...field,
-        values: unique(finalProducts)
       };
     }
 
