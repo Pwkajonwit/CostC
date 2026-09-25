@@ -148,6 +148,18 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "ยังไม่ได้ระบุผู้อนุมัติตั้งเบิก (Approvers) ในระบบ (โปรดตั้งค่าสิทธิ์อนุมัติบิลในหน้าพนักงาน)" }, { status: 400 });
       }
 
+      // Safety guard: Reject bills that are still "รอตั้งเบิก" (not yet requested for withdrawal)
+      const unsubmittedBills = bills.filter((b: any) => {
+        const rawSt = String(b["สถานะ"] || b.status || "").trim();
+        return rawSt === "รอตั้งเบิก";
+      });
+      if (unsubmittedBills.length > 0) {
+        const unsubmittedIds = unsubmittedBills.map((b: any) => `#${b.id || b["ลำดับ"] || b._sheetRow}`).join(", ");
+        return NextResponse.json({
+          error: `ไม่สามารถส่งขออนุมัติรายการที่ยังไม่ตั้งเบิกได้ (${unsubmittedIds}) กรุณาทำรายการตั้งเบิกก่อนส่งให้ผู้อนุมัติ`
+        }, { status: 400 });
+      }
+
       const flex = createWithdrawOwnerFlex(bills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap, pettyCashMap);
       const altText = bills.length === 1
         ? `📋 คำขออนุมัติเบิกเงิน #${bills[0]._sheetRow || bills[0].id || bills[0]["ลำดับ"] || ""} (฿${amountStr})`
