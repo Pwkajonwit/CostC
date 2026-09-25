@@ -29,11 +29,44 @@ type WorkStatusDashboardClientProps = {
   projects: SheetRow[];
 };
 
+export const PROJECT_COLOR_OPTIONS = [
+  {
+    value: "Red",
+    name: "Red",
+    icon: "🔴",
+    description: "งานใหญ่",
+    badgeClass: "bg-rose-50 text-rose-700 border-rose-200",
+    activeClass: "bg-rose-50 text-rose-700 border-rose-300 ring-2 ring-rose-400/30 font-semibold shadow-2xs",
+    dotClass: "bg-rose-500",
+  },
+  {
+    value: "Green",
+    name: "Green",
+    icon: "🟢",
+    description: "งานเล็ก",
+    badgeClass: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    activeClass: "bg-emerald-50 text-emerald-700 border-emerald-300 ring-2 ring-emerald-400/30 font-semibold shadow-2xs",
+    dotClass: "bg-emerald-500",
+  },
+  {
+    value: "Black",
+    name: "Black",
+    icon: "⚫",
+    description: "เสร็จแล้ว",
+    badgeClass: "bg-slate-100 text-slate-700 border-slate-200",
+    activeClass: "bg-slate-100 text-slate-800 border-slate-300 ring-2 ring-slate-400/30 font-semibold shadow-2xs",
+    dotClass: "bg-slate-700",
+  },
+] as const;
+
 export function getProjectColorInfo(colorVal: unknown) {
   const c = String(colorVal || "").toLowerCase().trim();
   if (c === "red" || c.includes("แดง") || c.includes("ใหญ่")) {
     return {
       key: "red" as const,
+      name: "Red",
+      icon: "🔴",
+      description: "งานใหญ่",
       label: "🔴 (งานใหญ่)",
       badgeClass: "bg-rose-50 text-rose-700 border border-rose-200",
       dotClass: "bg-rose-600",
@@ -42,6 +75,9 @@ export function getProjectColorInfo(colorVal: unknown) {
   if (c === "black" || c.includes("ดำ") || c.includes("เสร็จ") || c === "completed") {
     return {
       key: "black" as const,
+      name: "Black",
+      icon: "⚫",
+      description: "เสร็จแล้ว",
       label: "⚫ (เสร็จแล้ว)",
       badgeClass: "bg-slate-100 text-slate-700 border border-slate-200",
       dotClass: "bg-slate-700",
@@ -49,6 +85,9 @@ export function getProjectColorInfo(colorVal: unknown) {
   }
   return {
     key: "green" as const,
+    name: "Green",
+    icon: "🟢",
+    description: "งานเล็ก",
     label: "🟢 (งานเล็ก)",
     badgeClass: "bg-emerald-50 text-emerald-700 border border-emerald-200",
     dotClass: "bg-emerald-600",
@@ -91,12 +130,17 @@ export function WorkStatusDashboardClient({ projects }: WorkStatusDashboardClien
     return filteredProjects.filter((p) => getProjectColorInfo(p.color).key === "black");
   }, [filteredProjects]);
 
+  // งานที่ยังดำเนินการอยู่ (ไม่รวมงานที่เสร็จแล้ว)
+  const activeProjects = useMemo(() => {
+    return filteredProjects.filter((p) => getProjectColorInfo(p.color).key !== "black");
+  }, [filteredProjects]);
+
   const displayList = useMemo(() => {
     if (filterTab === "red") return redProjects;
     if (filterTab === "green") return greenProjects;
     if (filterTab === "complete") return completeProjects;
-    return filteredProjects;
-  }, [filterTab, redProjects, greenProjects, completeProjects, filteredProjects]);
+    return activeProjects;
+  }, [filterTab, redProjects, greenProjects, completeProjects, activeProjects]);
 
   // Overall financial statistics
   const totalBudget = useMemo(() => {
@@ -201,7 +245,7 @@ export function WorkStatusDashboardClient({ projects }: WorkStatusDashboardClien
                 : "text-slate-600 hover:bg-slate-100 bg-slate-50 border border-slate-200/60"
             }`}
           >
-            ทั้งหมด ({filteredProjects.length})
+            ทั้งหมด ({activeProjects.length})
           </button>
           <button
             type="button"

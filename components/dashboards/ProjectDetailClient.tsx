@@ -22,7 +22,8 @@ import {
   TrendingUp,
   Filter,
   Sparkles,
-  ExternalLink
+  ExternalLink,
+  X
 } from "lucide-react";
 import { DataTable } from "@/components/tables/DataTable";
 import { ProjectDetailEditor } from "@/components/forms/ProjectDetailEditor";
@@ -31,6 +32,8 @@ import { getProjectColorInfo } from "@/components/dashboards/WorkStatusDashboard
 import { money, toNumber } from "@/lib/utils/numbers";
 import { formatDateDisplay } from "@/lib/utils/dates";
 import { isPaidBill } from "@/lib/bills/bill-status";
+import { BillStatusBadge } from "@/components/bills/BillStatusBadge";
+import { getCostCodeBadgeStyle } from "@/lib/cost-codes";
 import type { SheetRow } from "@/lib/types";
 import {
   calculateProjectBudgetControl,
@@ -83,6 +86,8 @@ export function ProjectDetailClient({
   const [budgetViewMode, setBudgetViewMode] = useState<"grouped" | "table">("table");
   const [hideEmptyBudgets, setHideEmptyBudgets] = useState(false);
   const [billFilterTerm, setBillFilterTerm] = useState<string>("");
+  const [selectedBillType, setSelectedBillType] = useState<string>("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("");
   const [autoEditMode, setAutoEditMode] = useState(false);
   const [autoEditAllocation, setAutoEditAllocation] = useState(false);
 
@@ -110,17 +115,51 @@ export function ProjectDetailClient({
   const date = formatDateDisplay(hydratedProject["วันที่"]);
   const location = String(hydratedProject["สถานที่"] || "-");
 
-  // Filter summary rows if user clicked on an item filter
-  const displayedSummaryRows = useMemo(() => {
-    if (!billFilterTerm) return summaryRows;
-    const term = billFilterTerm.toLowerCase().trim();
-    return summaryRows.filter(r => {
-      const item = String(r["สินค้า/ทำงาน"] || r["สินค้า"] || r["รายการ"] || "").toLowerCase();
-      const type = String(r["ประเภท"] || "").toLowerCase();
-      const contractor = String(r["ร้าน/บุคคล"] || "").toLowerCase();
-      return item.includes(term) || type.includes(term) || contractor.includes(term);
+  // Distinct filter options extracted from summaryRows
+  const availableBillTypes = useMemo(() => {
+    const set = new Set<string>();
+    summaryRows.forEach(r => {
+      const val = String(r["บิล"] || "").trim();
+      if (val) set.add(val);
     });
-  }, [summaryRows, billFilterTerm]);
+    return Array.from(set).sort();
+  }, [summaryRows]);
+
+  const availableCategories = useMemo(() => {
+    const set = new Set<string>();
+    summaryRows.forEach(r => {
+      const val = String(r["ประเภท"] || "").trim();
+      if (val) set.add(val);
+    });
+    return Array.from(set).sort();
+  }, [summaryRows]);
+
+  // Filter summary rows by bill type, category, or search term
+  const displayedSummaryRows = useMemo(() => {
+    return summaryRows.filter(r => {
+      // 1. Filter by Bill Type ("บิล")
+      if (selectedBillType) {
+        const rowBill = String(r["บิล"] || "").trim();
+        if (rowBill !== selectedBillType) return false;
+      }
+      // 2. Filter by Category ("ประเภท")
+      if (selectedCategory) {
+        const rowCat = String(r["ประเภท"] || "").trim();
+        if (rowCat !== selectedCategory) return false;
+      }
+      // 3. Filter by item filter term (if clicked from budget item)
+      if (billFilterTerm) {
+        const term = billFilterTerm.toLowerCase().trim();
+        const item = String(r["สินค้า/ทำงาน"] || r["สินค้า"] || r["รายการ"] || "").toLowerCase();
+        const type = String(r["ประเภท"] || "").toLowerCase();
+        const contractor = String(r["ร้าน/บุคคล"] || "").toLowerCase();
+        if (!item.includes(term) && !type.includes(term) && !contractor.includes(term)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [summaryRows, selectedBillType, selectedCategory, billFilterTerm]);
 
   function toggleGroup(groupName: string) {
     setExpandedGroups(prev => ({
@@ -405,7 +444,7 @@ export function ProjectDetailClient({
               : "border-transparent text-slate-500 hover:text-slate-800 font-medium"
           }`}
         >
-          รายการบิลเบิกจ่าย ({summaryRows.length})
+          รายการบิลเบิกจ่าย ({displayedSummaryRows.length !== summaryRows.length ? `${displayedSummaryRows.length}/${summaryRows.length}` : summaryRows.length})
         </button>
 
         <button
@@ -463,6 +502,96 @@ export function ProjectDetailClient({
       {/* 5. TAB 1: BILLS TABLE */}
       {activeTab === "bills" && (
         <div className="space-y-3">
+          {/* Filters for บิล (Bill Type) & ประเภท (Category) */}
+          <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-2xs flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2 flex-wrap min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 text-slate-500 font-medium">
+                <Filter size={14} className="text-slate-400 shrink-0" />
+                <span>ตัวกรอง:</span>
+              </div>
+
+              {/* Bill Type Filter (บิล) */}
+              <div className="relative flex items-center">
+                <select
+                  value={selectedBillType}
+                  onChange={(e) => setSelectedBillType(e.target.value)}
+                  className={`h-8 text-xs pl-2.5 pr-7 rounded-lg border appearance-none cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500/20 flex items-center ${
+                    selectedBillType
+                      ? "bg-indigo-50 border-indigo-300 text-indigo-900 font-semibold shadow-2xs"
+                      : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700 hover:border-slate-300"
+                  }`}
+                  title="กรองตามประเภทบิล (บิลหลัก/บิลย่อย)"
+                >
+                  <option value="">บิล: ทั้งหมด</option>
+                  {availableBillTypes.map(bt => (
+                    <option key={bt} value={bt}>บิล: {bt}</option>
+                  ))}
+                </select>
+                <ChevronDown size={13} className="absolute right-2 pointer-events-none text-slate-400" />
+              </div>
+
+              {/* Category Filter (ประเภท) */}
+              <div className="relative flex items-center">
+                <select
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  className={`h-8 text-xs pl-2.5 pr-7 rounded-lg border appearance-none cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500/20 flex items-center max-w-[240px] truncate ${
+                    selectedCategory
+                      ? "bg-indigo-50 border-indigo-300 text-indigo-900 font-semibold shadow-2xs"
+                      : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700 hover:border-slate-300"
+                  }`}
+                  title="กรองตามประเภทงาน"
+                >
+                  <option value="">ประเภท: ทั้งหมด</option>
+                  {availableCategories.map(cat => (
+                    <option key={cat} value={cat}>ประเภท: {cat}</option>
+                  ))}
+                </select>
+                <ChevronDown size={13} className="absolute right-2 pointer-events-none text-slate-400" />
+              </div>
+
+              {/* Quick Bill Type Pills */}
+              <div className="flex items-center gap-1">
+                {availableBillTypes.map(bt => (
+                  <button
+                    key={bt}
+                    type="button"
+                    onClick={() => setSelectedBillType(selectedBillType === bt ? "" : bt)}
+                    className={`h-8 px-2.5 rounded-lg text-xs font-medium border transition cursor-pointer active:scale-95 ${
+                      selectedBillType === bt
+                        ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs font-semibold"
+                        : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                    }`}
+                  >
+                    บิล{bt}
+                  </button>
+                ))}
+              </div>
+
+              {/* Reset Filter Button */}
+              {(selectedBillType || selectedCategory || billFilterTerm) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedBillType("");
+                    setSelectedCategory("");
+                    setBillFilterTerm("");
+                  }}
+                  className="h-8 px-2.5 text-xs text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg flex items-center gap-1 transition cursor-pointer whitespace-nowrap font-medium shadow-2xs ml-auto sm:ml-0"
+                  title="ล้างตัวกรองทั้งหมด"
+                >
+                  <X size={12} />
+                  <span>ล้างตัวกรอง</span>
+                </button>
+              )}
+            </div>
+
+            {/* Filter Result Counter */}
+            <div className="text-xs text-slate-500 whitespace-nowrap font-medium">
+              แสดง <strong>{displayedSummaryRows.length}</strong> จาก <strong>{summaryRows.length}</strong> รายการ
+            </div>
+          </div>
+
           {billFilterTerm && (
             <div className="bg-indigo-50 border border-indigo-200 px-3.5 py-2 rounded-lg flex items-center justify-between text-xs">
               <span className="text-indigo-800">
@@ -473,7 +602,7 @@ export function ProjectDetailClient({
                 onClick={() => setBillFilterTerm("")}
                 className="text-indigo-700 hover:text-indigo-900 font-semibold underline cursor-pointer"
               >
-                ล้างตัวกรอง
+                ล้างตัวกรองนี้
               </button>
             </div>
           )}
@@ -491,6 +620,14 @@ export function ProjectDetailClient({
               cellFormatters={{
                 "ว/ด/ป": (v) => formatDateDisplay(v),
                 "วันที่": (v) => formatDateDisplay(v),
+                "ประเภท": (v) => v ? (
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium border ${getCostCodeBadgeStyle(String(v))}`}>
+                    {String(v)}
+                  </span>
+                ) : "-",
+                "สถานะ": (v) => <BillStatusBadge status={v} />,
+                "ยอดเงิน": (v) => <span className="font-mono font-medium">{money(v)}</span>,
+                "ยอดโอน": (v) => <span className="font-mono font-medium">{money(v)}</span>,
               }}
             />
           </div>

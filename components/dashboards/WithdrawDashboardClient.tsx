@@ -11,6 +11,7 @@ import { useRealtimeSync } from "@/lib/use-realtime-sync";
 import { getCostCodeBadgeStyle } from "@/lib/cost-codes";
 import { isVatActive, isDeductActive, parseDeductPercent, isCreditActive, parseCreditDays } from "@/lib/project-summary";
 import { useYearFilter } from "@/lib/context/YearFilterContext";
+import { BillStatusBadge } from "@/components/bills/BillStatusBadge";
 
 export type WithdrawFilters = {
   requester?: string;
@@ -672,8 +673,8 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
               พร้อมเบิก: <strong>{readyToWithdrawCount}</strong>
             </span>
             {creditLockedCount > 0 && (
-              <span className="text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 flex items-center gap-1 font-medium">
-                <Clock size={11} className="text-amber-600" />
+              <span className="text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 flex items-center gap-1 font-medium">
+                <Clock size={11} className="text-indigo-600" />
                 รอวันจ่าย: <strong>{creditLockedCount}</strong>
               </span>
             )}
@@ -844,12 +845,12 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
                     onClick={() => setCreditFilter(creditFilter === "locked" ? "all" : "locked")}
                     className={`h-8 px-2.5 rounded-lg text-xs font-medium border transition cursor-pointer active:scale-95 flex items-center gap-1 justify-center shadow-2xs ${
                       creditFilter === "locked"
-                        ? "bg-amber-600 text-white border-amber-600 font-semibold"
-                        : "bg-white text-amber-800 border-amber-300 hover:bg-amber-50"
+                        ? "bg-indigo-700 text-white border-indigo-700 font-semibold"
+                        : "bg-white text-indigo-800 border-indigo-300 hover:bg-indigo-50"
                     }`}
                     title="แสดงเฉพาะบิลเครดิตที่ยังไม่ถึงกำหนดวันจ่าย"
                   >
-                    <Clock size={12} className={creditFilter === "locked" ? "text-white" : "text-amber-600"} />
+                    <Clock size={12} className={creditFilter === "locked" ? "text-white" : "text-indigo-600"} />
                     <span>รอวันจ่าย ({creditLockedCount})</span>
                   </button>
                 )}
@@ -1159,7 +1160,7 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
                       {creditInfo.dueDateIso ? (
                         <>
                           <span>•</span>
-                          <span className={`inline-flex items-center gap-0.5 font-medium ${creditInfo.isLocked ? "text-amber-700" : "text-slate-600"}`}>
+                          <span className={`inline-flex items-center gap-0.5 font-medium ${creditInfo.isLocked ? "text-indigo-700" : "text-slate-600"}`}>
                             <Clock size={10} className="shrink-0" />
                             จ่าย {creditInfo.formattedDueDate} {creditInfo.isLocked ? `(อีก ${creditInfo.daysRemaining}ว.)` : ""}
                           </span>
@@ -1179,23 +1180,26 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
                     </span>
 
                     {status === "ตั้งเบิก" ? (
-                      <span className="px-2 py-0.5 rounded text-xs bg-amber-50 text-amber-700 border border-amber-200">
-                        ตั้งเบิกแล้ว
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-300 shadow-2xs">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                        <span>ตั้งเบิกแล้ว</span>
                       </span>
                     ) : status === "อนุมัติ" ? (
-                      <span className="px-2 py-0.5 rounded text-xs bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        อนุมัติแล้ว
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-sky-50 text-sky-700 border border-sky-300 shadow-2xs">
+                        <Check size={11} className="text-sky-600 shrink-0" />
+                        <span>อนุมัติแล้ว</span>
                       </span>
                     ) : status === "เบิกแล้ว" ? (
-                      <span className="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-600 border border-slate-200">
-                        ปิดงานแล้ว
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-300 shadow-2xs">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                        <span>ปิดงานแล้ว</span>
                       </span>
                     ) : creditInfo.isLocked ? (
                       <span
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-amber-50 text-amber-800 border border-amber-300 font-medium whitespace-nowrap shadow-2xs"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-indigo-50 text-indigo-700 border border-indigo-300 font-semibold whitespace-nowrap shadow-2xs"
                         title={`ยังไม่ถึงกำหนดวันจ่าย (${creditInfo.formattedDueDate} - อีก ${creditInfo.daysRemaining} วัน)`}
                       >
-                        <Clock size={11} className="text-amber-600 shrink-0" />
+                        <Clock size={11} className="text-indigo-600 shrink-0" />
                         <span>รอวันจ่าย ({creditInfo.formattedDueDate.slice(0, 5)})</span>
                       </span>
                     ) : (
@@ -1203,7 +1207,7 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
                         type="button"
                         disabled={approvingRow === sheetRowId}
                         onClick={() => approveRow(row)}
-                        className="h-7 px-2.5 rounded-lg text-xs font-medium flex items-center gap-1 transition cursor-pointer bg-sky-600 hover:bg-sky-700 text-white disabled:opacity-50 active:scale-95 shadow-2xs"
+                        className="h-7 px-2.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 active:scale-95 shadow-2xs"
                       >
                         {approvingRow === sheetRowId ? (
                           <LoaderCircle className="spin" size={11} />
@@ -1437,23 +1441,26 @@ function WithdrawTable({
                   <td key={column} className={`py-2 px-3 border-r border-slate-100 ${isAmountColumn(column) ? "text-right text-slate-900" : ""}`}>
                     {column === "จัดการ" ? (
                       normalizedStatus(row["สถานะ"]) === "ตั้งเบิก" ? (
-                        <span className="px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200 inline-block">
-                          ตั้งเบิกแล้ว
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-300 shadow-2xs whitespace-nowrap">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                          <span>ตั้งเบิกแล้ว</span>
                         </span>
                       ) : normalizedStatus(row["สถานะ"]) === "อนุมัติ" ? (
-                        <span className="px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-800 border border-emerald-200 inline-block">
-                          อนุมัติแล้ว
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-sky-50 text-sky-700 border border-sky-300 shadow-2xs whitespace-nowrap">
+                          <Check size={12} className="text-sky-600 shrink-0" />
+                          <span>อนุมัติแล้ว</span>
                         </span>
                       ) : normalizedStatus(row["สถานะ"]) === "เบิกแล้ว" ? (
-                        <span className="px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200 inline-block">
-                          ปิดงานแล้ว
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-300 shadow-2xs whitespace-nowrap">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                          <span>ปิดงานแล้ว</span>
                         </span>
                       ) : creditInfo.isLocked ? (
                         <span
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-amber-50 text-amber-800 border border-amber-300 shadow-2xs whitespace-nowrap"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-300 shadow-2xs whitespace-nowrap"
                           title={`ยังไม่ถึงกำหนดวันจ่าย (${creditInfo.formattedDueDate} - อีก ${creditInfo.daysRemaining} วัน) ไม่สามารถตั้งเบิกได้`}
                         >
-                          <Clock size={12} className="text-amber-600 shrink-0" />
+                          <Clock size={12} className="text-indigo-600 shrink-0" />
                           <span>รอถึงวันจ่าย ({creditInfo.formattedDueDate.slice(0, 5)})</span>
                         </span>
                       ) : (
@@ -1461,7 +1468,7 @@ function WithdrawTable({
                           type="button"
                           disabled={approvingRow === sheetRowId}
                           onClick={() => onApprove(row)}
-                          className="h-7 px-2.5 rounded-lg text-xs font-medium flex items-center gap-1 transition cursor-pointer bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-50 shadow-2xs active:scale-95"
+                          className="h-7 px-2.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 shadow-2xs active:scale-95 whitespace-nowrap"
                         >
                           {approvingRow === sheetRowId ? (
                             <LoaderCircle className="spin" size={13} />
@@ -1475,12 +1482,12 @@ function WithdrawTable({
                       creditInfo.dueDateIso ? (
                         creditInfo.isLocked ? (
                           <span 
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-amber-50 text-amber-800 border border-amber-200 whitespace-nowrap"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200 whitespace-nowrap shadow-2xs"
                             title={`ครบกำหนดวันจ่าย ${creditInfo.formattedDueDate} (อีก ${creditInfo.daysRemaining} วัน)`}
                           >
-                            <Clock size={11} className="text-amber-600 shrink-0" />
+                            <Clock size={11} className="text-indigo-600 shrink-0" />
                             <span>{creditInfo.formattedDueDate}</span>
-                            <span className="text-[10px] text-amber-600 font-normal">({creditInfo.daysRemaining}ว.)</span>
+                            <span className="text-[10px] text-indigo-600 font-normal">({creditInfo.daysRemaining}ว.)</span>
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 text-slate-700 font-medium whitespace-nowrap">
@@ -1726,20 +1733,7 @@ function formatWithdrawCell(
     return formatVendorDisplay ? formatVendorDisplay(value) : (String(value) || "-");
   }
   if (column === "สถานะ") {
-    const status = normalizedStatus(value);
-    return (
-      <span
-        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-xs ${
-          status === "อนุมัติ"
-            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-            : status === "เบิกแล้ว"
-            ? "bg-slate-100 text-slate-700 border border-slate-200"
-            : "bg-amber-50 text-amber-700 border border-amber-200"
-        }`}
-      >
-        {status}
-      </span>
-    );
+    return <BillStatusBadge status={value} />;
   }
   if (column === "ประเภท") {
     const str = String(value || "").trim();

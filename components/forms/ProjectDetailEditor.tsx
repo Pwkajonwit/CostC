@@ -6,6 +6,7 @@ import { Pencil, Save, X } from "lucide-react";
 import { TABLES } from "@/lib/config";
 import { money, toNumber } from "@/lib/utils/numbers";
 import { formatDateDisplay } from "@/lib/utils/dates";
+import { getProjectColorInfo, PROJECT_COLOR_OPTIONS } from "@/components/dashboards/WorkStatusDashboardClient";
 import type { SheetRow } from "@/lib/types";
 
 type ProjectDetailEditorProps = {
@@ -103,7 +104,7 @@ export function ProjectDetailEditor({
                 type="button"
                 disabled={busy}
                 onClick={cancelEdit}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-700 bg-white hover:bg-slate-50 transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-700 bg-white hover:bg-slate-50 transition-colors cursor-pointer"
               >
                 <X size={15} />
                 <span>ยกเลิก</span>
@@ -111,7 +112,7 @@ export function ProjectDetailEditor({
               <button
                 type="submit"
                 disabled={busy || !canSave}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs text-white bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 disabled:opacity-50 transition-all shadow-xs"
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs text-white bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 disabled:opacity-50 transition-all shadow-xs cursor-pointer"
               >
                 <Save size={15} />
                 <span>บันทึก</span>
@@ -120,46 +121,66 @@ export function ProjectDetailEditor({
           </header>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {fields.filter(f => (!f.startsWith("งบไม่เกิน") || f === "งบไม่เกิน") && f !== "คุมงบประเภทงาน").map(field => (
-              <label className="flex flex-col gap-1.5" key={field}>
-                <span className="text-xs text-slate-500 uppercase tracking-wider">{field}</span>
-                {readonlyField(field) ? (
-                  <input
-                    value={formatDisplay(project[field], field)}
-                    readOnly
-                    className="w-full px-3 py-2 text-xs font-medium text-slate-400 bg-slate-50 border border-slate-200 rounded-lg cursor-not-allowed"
-                  />
-                ) : field === "color" ? (
-                  <select
-                    value={draft[field] || ""}
-                    disabled={busy}
-                    onChange={event => setDraftValue(field, event.target.value)}
-                    className="w-full px-3 py-2 text-xs font-medium text-slate-800 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-                  >
-                    <option value=""></option>
-                    <option value="Green">Green</option>
-                    <option value="Red">Red</option>
-                    <option value="Black">Black</option>
-                  </select>
-                ) : longField(field) ? (
-                  <textarea
-                    value={draft[field] || ""}
-                    disabled={busy}
-                    rows={3}
-                    onChange={event => setDraftValue(field, event.target.value)}
-                    className="w-full px-3 py-2 text-xs font-medium text-slate-800 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-                  />
-                ) : (
-                  <input
-                    value={draft[field] || ""}
-                    disabled={busy}
-                    inputMode={amountField(field) ? "decimal" : undefined}
-                    onChange={event => setDraftValue(field, event.target.value)}
-                    className="w-full px-3 py-2 text-xs font-medium text-slate-800 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-                  />
-                )}
-              </label>
-            ))}
+            {fields.filter(f => (!f.startsWith("งบไม่เกิน") || f === "งบไม่เกิน") && f !== "คุมงบประเภทงาน").map(field => {
+              if (isColorField(field)) {
+                return (
+                  <div className="flex flex-col gap-1.5" key={field}>
+                    <span className="text-xs text-slate-500 uppercase tracking-wider">{field}</span>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {PROJECT_COLOR_OPTIONS.map(opt => {
+                        const isSelected = (draft[field] || "").toLowerCase() === opt.value.toLowerCase();
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            disabled={busy}
+                            onClick={() => setDraftValue(field, opt.value)}
+                            className={`flex items-center justify-center gap-1 px-1.5 py-2 rounded-lg border text-center transition cursor-pointer select-none ${
+                              isSelected
+                                ? opt.activeClass
+                                : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                            }`}
+                          >
+                            <span className="text-xs leading-none shrink-0">{opt.icon}</span>
+                            <span className="text-xs font-semibold">{opt.name}</span>
+                            <span className="text-[11px] text-slate-500 whitespace-nowrap">({opt.description})</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <label className="flex flex-col gap-1.5" key={field}>
+                  <span className="text-xs text-slate-500 uppercase tracking-wider">{field}</span>
+                  {readonlyField(field) ? (
+                    <input
+                      value={formatDisplay(project[field], field)}
+                      readOnly
+                      className="w-full px-3 py-2 text-xs font-medium text-slate-400 bg-slate-50 border border-slate-200 rounded-lg cursor-not-allowed"
+                    />
+                  ) : longField(field) ? (
+                    <textarea
+                      value={draft[field] || ""}
+                      disabled={busy}
+                      rows={3}
+                      onChange={event => setDraftValue(field, event.target.value)}
+                      className="w-full px-3 py-2 text-xs font-medium text-slate-800 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                    />
+                  ) : (
+                    <input
+                      value={draft[field] || ""}
+                      disabled={busy}
+                      inputMode={amountField(field) ? "decimal" : undefined}
+                      onChange={event => setDraftValue(field, event.target.value)}
+                      className="w-full px-3 py-2 text-xs font-medium text-slate-800 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                    />
+                  )}
+                </label>
+              );
+            })}
           </div>
 
           {error ? <div className="mt-4 p-3 bg-rose-50 text-rose-600 rounded-lg text-xs font-medium border border-rose-200">{error}</div> : null}
@@ -176,25 +197,38 @@ export function ProjectDetailEditor({
           type="button"
           disabled={!canSave}
           onClick={beginEdit}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-700 bg-white hover:bg-slate-50 transition-colors shadow-2xs"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-700 bg-white hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer"
         >
           <Pencil size={15} />
           <span>แก้ไข</span>
         </button>
       </header>
       <dl className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {fields.map(field => (
-          <div key={field} className="p-3 bg-slate-50/60 rounded-lg border border-slate-100 flex flex-col justify-between">
-            <dt className="text-xs text-slate-400 uppercase tracking-wider mb-1">{field}</dt>
-            <dd className={`text-xs text-slate-800 ${amountField(field) ? "text-right text-emerald-700 " : ""}`}>
-              {field === "ชื่อลูกค้า" || field === "ลูกค้า"
-                ? customerDisplay || formatDisplay(project[field], field) || "-"
-                : field === "บริษัท"
-                ? companyDisplay || formatDisplay(project[field], field) || "-"
-                : formatDisplay(project[field], field) || "-"}
-            </dd>
-          </div>
-        ))}
+        {fields.map(field => {
+          const isColor = isColorField(field);
+          const colorInfo = isColor ? getProjectColorInfo(project[field]) : null;
+
+          return (
+            <div key={field} className="p-3 bg-slate-50/60 rounded-lg border border-slate-100 flex flex-col justify-between">
+              <dt className="text-xs text-slate-400 uppercase tracking-wider mb-1">{field}</dt>
+              <dd className={`text-xs text-slate-800 ${amountField(field) ? "text-right text-emerald-700 " : ""}`}>
+                {isColor && colorInfo ? (
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold ${colorInfo.badgeClass}`}>
+                      <span className="text-sm leading-none">{colorInfo.icon}</span>
+                      <span>{colorInfo.name}</span>
+                      <span className="font-normal text-slate-600">({colorInfo.description})</span>
+                    </span>
+                  </div>
+                ) : field === "ชื่อลูกค้า" || field === "ลูกค้า"
+                  ? customerDisplay || formatDisplay(project[field], field) || "-"
+                  : field === "บริษัท"
+                  ? companyDisplay || formatDisplay(project[field], field) || "-"
+                  : formatDisplay(project[field], field) || "-"}
+              </dd>
+            </div>
+          );
+        })}
       </dl>
     </section>
   );
@@ -252,9 +286,14 @@ function isDateField(field: string) {
   return /วันที่|date|ว\/ด\/ป/.test(field);
 }
 
+function isColorField(field: string) {
+  return field.toLowerCase() === "color";
+}
+
 function formatDisplay(value: unknown, field: string) {
   if (amountField(field)) return money(value);
   if (isDateField(field)) return formatDateDisplay(value);
   return stringify(value);
 }
+
 

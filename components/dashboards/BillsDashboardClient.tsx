@@ -6,6 +6,7 @@ import { ArrowDownWideNarrow, ArrowUpWideNarrow, Calendar, ChevronDown, ChevronL
 import dynamic from "next/dynamic";
 import { BillWorkflowActions } from "@/components/bills/BillWorkflowActions";
 import { BillImageThumbnail } from "@/components/bills/BillImageThumbnail";
+import { BillStatusBadge } from "@/components/bills/BillStatusBadge";
 
 const FormModal = dynamic(
   () => import("@/components/forms/FormModal").then((mod) => mod.FormModal),
@@ -337,7 +338,11 @@ export function BillsDashboardClient({
         if (!matchesReq && !matchesCreator) return false;
       }
       if (bill && String(row["บิล"] || "").trim() !== bill) return false;
-      if (status && String(row["สถานะ"] || "").trim() !== status) return false;
+      if (status) {
+        const rowNorm = normalizeBillStatus(row["สถานะ"]);
+        const filterNorm = normalizeBillStatus(status);
+        if (rowNorm !== filterNorm && String(row["สถานะ"] || "").trim() !== status) return false;
+      }
       if (filterDateIso) {
         const rowIso = normalizeDateToIso(row["ว/ด/ป"]);
         if (rowIso !== filterDateIso) return false;
@@ -579,36 +584,63 @@ export function BillsDashboardClient({
           </button>
           <button
             type="button"
-            onClick={() => updateFilter("status", "รออนุมัติ")}
-            className={`px-2.5 py-1 rounded-full whitespace-nowrap transition cursor-pointer text-xs ${
-              filters.status === "รออนุมัติ"
-                ? "bg-amber-600 text-white shadow-xs"
-                : "bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200/60"
+            onClick={() => updateFilter("status", "รอตั้งเบิก")}
+            className={`px-2.5 py-1 rounded-full whitespace-nowrap transition cursor-pointer text-xs flex items-center gap-1.5 ${
+              filters.status === "รอตั้งเบิก"
+                ? "bg-purple-700 text-white shadow-xs"
+                : "bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200"
             }`}
           >
-            รออนุมัติ
+            <span className={`w-1.5 h-1.5 rounded-full ${filters.status === "รอตั้งเบิก" ? "bg-white" : "bg-purple-500"}`} />
+            รอตั้งเบิก
+          </button>
+          <button
+            type="button"
+            onClick={() => updateFilter("status", "ตั้งเบิก")}
+            className={`px-2.5 py-1 rounded-full whitespace-nowrap transition cursor-pointer text-xs flex items-center gap-1.5 ${
+              filters.status === "ตั้งเบิก"
+                ? "bg-amber-600 text-white shadow-xs"
+                : "bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200"
+            }`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${filters.status === "ตั้งเบิก" ? "bg-white" : "bg-amber-500"}`} />
+            ตั้งเบิก
           </button>
           <button
             type="button"
             onClick={() => updateFilter("status", "อนุมัติ")}
-            className={`px-2.5 py-1 rounded-full whitespace-nowrap transition cursor-pointer text-xs ${
+            className={`px-2.5 py-1 rounded-full whitespace-nowrap transition cursor-pointer text-xs flex items-center gap-1.5 ${
               filters.status === "อนุมัติ"
-                ? "bg-emerald-700 text-white shadow-xs"
-                : "bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200/60"
+                ? "bg-sky-700 text-white shadow-xs"
+                : "bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200"
             }`}
           >
-            อนุมัติแล้ว
+            <span className={`w-1.5 h-1.5 rounded-full ${filters.status === "อนุมัติ" ? "bg-white" : "bg-sky-500"}`} />
+            อนุมัติ
           </button>
           <button
             type="button"
             onClick={() => updateFilter("status", "เบิกแล้ว")}
-            className={`px-2.5 py-1 rounded-full whitespace-nowrap transition cursor-pointer text-xs ${
+            className={`px-2.5 py-1 rounded-full whitespace-nowrap transition cursor-pointer text-xs flex items-center gap-1.5 ${
               filters.status === "เบิกแล้ว"
-                ? "bg-slate-700 text-white shadow-xs"
-                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                ? "bg-emerald-700 text-white shadow-xs"
+                : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
             }`}
           >
+            <span className={`w-1.5 h-1.5 rounded-full ${filters.status === "เบิกแล้ว" ? "bg-white" : "bg-emerald-500"}`} />
             เบิกแล้ว
+          </button>
+          <button
+            type="button"
+            onClick={() => updateFilter("status", "ไม่อนุมัติ")}
+            className={`px-2.5 py-1 rounded-full whitespace-nowrap transition cursor-pointer text-xs flex items-center gap-1.5 ${
+              filters.status === "ไม่อนุมัติ"
+                ? "bg-rose-700 text-white shadow-xs"
+                : "bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200"
+            }`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${filters.status === "ไม่อนุมัติ" ? "bg-white" : "bg-rose-500"}`} />
+            ไม่อนุมัติ
           </button>
         </div>
       </div>
@@ -729,10 +761,12 @@ export function BillsDashboardClient({
               title="กรองตามสถานะบิล"
             >
               <option value="">สถานะ: ทั้งหมด</option>
-              <option value="รออนุมัติ">สถานะ: รออนุมัติ</option>
+              <option value="รอตั้งเบิก">สถานะ: รอตั้งเบิก</option>
               <option value="ตั้งเบิก">สถานะ: ตั้งเบิก</option>
+              <option value="รออนุมัติ">สถานะ: รออนุมัติ</option>
               <option value="อนุมัติ">สถานะ: อนุมัติ</option>
               <option value="เบิกแล้ว">สถานะ: เบิกแล้ว</option>
+              <option value="ไม่อนุมัติ">สถานะ: ไม่อนุมัติ</option>
             </select>
             <ChevronDown size={13} className="absolute right-2 pointer-events-none text-slate-400" />
           </div>
@@ -893,15 +927,7 @@ export function BillsDashboardClient({
                       <span className="text-xs sm:text-sm text-slate-900">
                         {money(getBillRowAmount(row))} <span className="text-xs font-normal text-slate-500">฿</span>
                       </span>
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs ${
-                        isApproved
-                          ? "bg-emerald-50 text-emerald-700 border border-emerald-200/80"
-                          : isPending
-                          ? "bg-amber-50 text-amber-700 border border-amber-200/80"
-                          : "bg-slate-100 text-slate-600 border border-slate-200"
-                      }`}>
-                        {statusStr}
-                      </span>
+                      <BillStatusBadge status={statusStr} />
                     </div>
                   </div>
                 );
@@ -969,15 +995,7 @@ export function BillsDashboardClient({
                         <td className="py-2 px-3 text-center text-slate-700 border-r border-slate-100">{requesterName}</td>
                         <td className="py-2 px-3 text-center font-medium text-slate-600 border-r border-slate-100 whitespace-nowrap">{formatDateDisplay(row["ว/ด/ป"])}</td>
                         <td className="py-2 px-3 text-center">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs ${
-                            statusStr.includes("อนุมัติ")
-                              ? "bg-slate-100 text-slate-700 border border-slate-200"
-                              : statusStr.includes("เบิกแล้ว")
-                              ? "bg-slate-100 text-slate-600 border border-slate-200"
-                              : "bg-amber-50 text-amber-700 border border-amber-200"
-                          }`}>
-                            {statusStr}
-                          </span>
+                          <BillStatusBadge status={statusStr} />
                         </td>
                       </tr>
                     );

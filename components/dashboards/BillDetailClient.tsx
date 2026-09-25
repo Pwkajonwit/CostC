@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { BillImageThumbnail } from "@/components/bills/BillImageThumbnail";
 import { BillWorkflowActions } from "@/components/bills/BillWorkflowActions";
+import { BillStatusBadge } from "@/components/bills/BillStatusBadge";
 import { getCostCodeBadgeStyle, getExpenseFieldForCategory } from "@/lib/cost-codes";
 import { DataTable } from "@/components/tables/DataTable";
 import dynamic from "next/dynamic";
@@ -321,11 +322,17 @@ export function BillDetailClient({
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0 md:self-center">
-            <span className="text-xs text-slate-600 font-bold">หมวดหมู่:</span>
-            <span className={`text-xs font-bold px-2.5 py-0.5 rounded border ${getCostCodeBadgeStyle(category)}`}>
-              {category}
-            </span>
+          <div className="flex items-center gap-3 shrink-0 md:self-center flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-slate-600 font-bold">สถานะ:</span>
+              <BillStatusBadge status={currentBill["สถานะ"]} />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-slate-600 font-bold">หมวดหมู่:</span>
+              <span className={`text-xs font-bold px-2.5 py-0.5 rounded border ${getCostCodeBadgeStyle(category)}`}>
+                {category}
+              </span>
+            </div>
           </div>
         </div>
 

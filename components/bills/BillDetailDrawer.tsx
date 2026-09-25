@@ -21,6 +21,7 @@ import {
   Store
 } from "lucide-react";
 import { BillImageThumbnail } from "@/components/bills/BillImageThumbnail";
+import { BillStatusBadge } from "@/components/bills/BillStatusBadge";
 import { formatDateDisplay } from "@/lib/utils/dates";
 import { money, toNumber } from "@/lib/utils/numbers";
 import type { SheetRow } from "@/lib/types";
@@ -403,10 +404,8 @@ export function BillDetailDrawer({
                 </div>
 
                 <div>
-                  <span className="text-xs text-slate-400 block">สถานะ:</span>
-                  <span className="inline-block mt-0.5 px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
-                    {String(bill["สถานะ"] || "รออนุมัติ")}
-                  </span>
+                  <span className="text-xs text-slate-400 block mb-0.5">สถานะ:</span>
+                  <BillStatusBadge status={bill["สถานะ"]} />
                 </div>
               </div>
 
