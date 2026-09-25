@@ -17,6 +17,7 @@ const BillDetailDrawer = dynamic(
   { ssr: false }
 );
 import { FORM_SCHEMAS } from "@/lib/schemas";
+import { TABLES } from "@/lib/config";
 import { formatDateDisplay, normalizeDateToIso, parseDateStrict } from "@/lib/utils/dates";
 import { money, toNumber } from "@/lib/utils/numbers";
 import { formatBillConditions, normalizeBillStatus } from "@/lib/bills/bill-status";
@@ -797,6 +798,16 @@ export function BillsDashboardClient({
         buttonLabel="แก้ไขบิล"
         submitPath="/api/rows"
         openEventName="open-bill-edit-form"
+        hideLauncher
+      />
+
+      {/* Hidden Contract Open Modal Trigger (เปิดจ้างงานรับเหมา) */}
+      <FormModal
+        tableName={TABLES.CONTRACT_WORK}
+        title="เปิดจ้างงานรับเหมา"
+        buttonLabel="เปิดจ้างงาน"
+        submitPath="/api/rows"
+        openEventName="open-contract-form"
         hideLauncher
       />
 

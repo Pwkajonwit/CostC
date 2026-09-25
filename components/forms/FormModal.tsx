@@ -79,6 +79,7 @@ type FormPayload = {
   schema: FieldSchema[];
   initialValues: SheetRow;
   refOptions: Record<string, RefOption[]>;
+  submitPath?: string;
 };
 
 // Global in-memory cache and in-flight request tracker for schemas & refOptions
@@ -145,6 +146,7 @@ type FormModalProps = {
 type OpenFormDetail = {
   row?: SheetRow;
   sheetRow?: string | number;
+  isNew?: boolean;
 };
 
 const DATA_FORM_SECTIONS: { id: string; title: string; iconName: string; fields: string[] }[] = [
@@ -631,7 +633,8 @@ function MultiLineItemsBuilder({
             );
           })}
 
-          {/* Add New Store Button */}
+          {/* ซ่อนปุ่มเพิ่มร้านค้าใหม่ (ร้านที่ 2+) ไว้ชั่วคราวตามที่ร้องขอ ยังไม่เปิดใช้งาน */}
+          {/*
           <button
             type="button"
             onClick={() => onAdd(`ร้านที่ ${storeGroups.length + 1}`)}
@@ -640,6 +643,7 @@ function MultiLineItemsBuilder({
             <Store size={15} className="text-emerald-600" />
             <span>+ เพิ่มร้านค้าใหม่ (ร้านที่ {storeGroups.length + 1})</span>
           </button>
+          */}
         </div>
       ) : (
         /* When isSubBill is FALSE: Normal Flat Items List */
@@ -745,7 +749,30 @@ export function FormModal({
   const [attachedFilesByField, setAttachedFilesByField] = useState<Record<string, File[]>>({});
   const isEditing = editSheetRow !== null && editSheetRow !== undefined;
   const isDataForm = resolvedTableName === TABLES.DATA || resolvedTableName === "Data" || resolvedTableName === "bills" || resolvedTableName === "DATA" || resolvedTableName === "กรอกบิล";
+  const isContractModal = resolvedTableName === TABLES.CONTRACT_WORK || resolvedTableName === "งานรับเหมา" || resolvedTableName === "Contract_work" || openEventName === "open-contract-form";
+  const modalZIndex = isContractModal ? "z-[60]" : "z-50";
+  const modalBackdropClass = isContractModal ? "bg-slate-950/45 backdrop-blur-sm" : "bg-slate-900/65 backdrop-blur-md sm:backdrop-blur-lg";
   const hasSavedDuringSession = useRef(false);
+  const effectiveSubmitPath = submitPath || activeForm?.submitPath || "/api/sheets/update";
+
+  const handleQuickOpenContract = useCallback(() => {
+    const projectVal = values["ID Project"] || "";
+    const contractorVal = values["ผู้รับเหมา"] || "";
+    const projectNameVal = values["ชื่อ Project"] || "";
+    const dateVal = values["ว/ด/ป"] || values["วันที่"] || getTodayDateIso();
+
+    window.dispatchEvent(new CustomEvent("open-contract-form", {
+      detail: {
+        isNew: true,
+        row: {
+          "ID Project": projectVal,
+          "id_Contractor": contractorVal,
+          "ชื่อ Project": projectNameVal,
+          "วันที่": dateVal
+        }
+      }
+    }));
+  }, [values]);
 
   function handleClose() {
     setOpen(false);
@@ -791,24 +818,16 @@ export function FormModal({
   const [resetKey, setResetKey] = useState(0);
   const formBodyRef = useRef<HTMLDivElement>(null);
 
-  const productOptions: { label: string; value: string }[] = useMemo(() => {
-    const productField = activeForm?.schema.find(f => f.name === "สินค้า");
-    if (productField && activeForm) {
-      return getFieldOptions(productField, activeForm, values).map(opt => ({
-        label: String(opt.label || opt.value || ""),
-        value: String(opt.value ?? "")
-      }));
-    }
+  const productOptions = useMemo(() => {
     const isContractor = values["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา";
     if (isContractor) {
-      return LABOR_CATEGORY_OPTIONS.map((c: string) => ({ label: c, value: c }));
+      return ALL_CONTRACTOR_CATEGORIES.map((c: string) => ({ label: c, value: c }));
     }
-    const isStaff = values["ร้านค้า/ผู้รับเหมา"] === "พนักงาน";
-    if (isStaff) {
-      return STAFF_CATEGORY_OPTIONS.map((c: string) => ({ label: c, value: c }));
-    }
-    return ALL_STORE_CATEGORIES.map((c: string) => ({ label: c, value: c }));
-  }, [activeForm, values]);
+    const field = activeForm?.schema.find(f => f.name === "สินค้า");
+    const rawList: string[] = Array.isArray(field?.values) ? field.values : [];
+    if (rawList.length > 0) return rawList.map((v: string) => ({ label: String(v), value: String(v) }));
+    return (activeForm?.refOptions?.["สินค้า"] || []).map(opt => ({ label: String(opt.label || opt.value || ""), value: String(opt.value || "") }));
+  }, [activeForm, values["ร้านค้า/ผู้รับเหมา"]]);
 
   const vehicleOptions = useMemo(() => {
     const fromRef = activeForm?.refOptions?.["ทะเบียน"] || activeForm?.refOptions?.["ทะเบียนรถ"] || [];
@@ -1194,8 +1213,15 @@ export function FormModal({
     setError("");
     setSuccessMessage("");
     setEnumListSearch({});
-    const targetRowKey = detail?.row?.id ?? detail?.row?.id_petty_cash ?? detail?.row?.["ID Project"] ?? detail?.row?.["รหัสพนักงาน"] ?? detail?.row?.id_store ?? detail?.row?.id_Contractor ?? detail?.row?.id_Conwork ?? detail?.row?.id_bank ?? detail?.row?.id_car ?? detail?.row?.id_cus ?? detail?.row?.id_Company ?? detail?.row?.["ลำดับ"] ?? detail?.sheetRow ?? detail?.row?._sheetRow;
-    setEditSheetRow(detail?.row ? (targetRowKey !== undefined && targetRowKey !== null ? (typeof targetRowKey === "number" || typeof targetRowKey === "string" ? targetRowKey : String(targetRowKey)) : 1) : null);
+    const isExplicitNew = Boolean(detail?.isNew);
+    const targetRowKey = isExplicitNew
+      ? null
+      : (targetForm.tableName === TABLES.CONTRACT_WORK || targetForm.tableName === "งานรับเหมา" || targetForm.tableName === "Contract_work")
+        ? (detail?.row?.id_Conwork ?? detail?.row?.id ?? detail?.sheetRow)
+        : (targetForm.tableName === TABLES.DATA || targetForm.tableName === "Data" || targetForm.tableName === "bills")
+          ? (detail?.row?.["ลำดับ"] ?? detail?.row?.id ?? detail?.sheetRow)
+          : (detail?.row?.id ?? detail?.row?.id_petty_cash ?? detail?.row?.["ID Project"] ?? detail?.row?.["รหัสพนักงาน"] ?? detail?.row?.id_store ?? detail?.row?.id_Contractor ?? detail?.row?.id_Conwork ?? detail?.row?.id_bank ?? detail?.row?.id_car ?? detail?.row?.id_cus ?? detail?.row?.id_Company ?? detail?.row?.["ลำดับ"] ?? detail?.sheetRow ?? detail?.row?._sheetRow);
+    setEditSheetRow(!isExplicitNew && detail?.row ? (targetRowKey !== undefined && targetRowKey !== null ? (typeof targetRowKey === "number" || typeof targetRowKey === "string" ? targetRowKey : String(targetRowKey)) : 1) : null);
 
     if (detail?.row) {
       const rawItems = detail.row.items || (detail.row.data as any)?.items;
@@ -1232,7 +1258,7 @@ export function FormModal({
     setSuccessMessage("");
 
     // If editing existing row, populate directly
-    if (detail?.row && activeForm) {
+    if (detail?.row && !detail?.isNew && activeForm) {
       populateFormValues(activeForm, detail);
       setOpen(true);
       prefetchFormSchema(resolvedTableName, true).then(fresh => {
@@ -1253,11 +1279,18 @@ export function FormModal({
       const fresh = await prefetchFormSchema(resolvedTableName, true);
       if (fresh) {
         setActiveForm(fresh);
-        if (!detail?.row) {
+        if (!detail?.row || detail?.isNew) {
           const freshInitial = getInitialStringValues(fresh);
           const todayIso = getTodayDateIso();
           setValues(prev => {
             const next = { ...prev };
+            if (detail?.row) {
+              Object.entries(detail.row).forEach(([k, v]) => {
+                if (v !== undefined && v !== null && String(v) !== "") {
+                  next[k] = String(v);
+                }
+              });
+            }
             if (freshInitial["ลำดับ"]) next["ลำดับ"] = freshInitial["ลำดับ"];
             if (freshInitial["ID Project"] && !next["ID Project"]) next["ID Project"] = freshInitial["ID Project"];
             if (freshInitial["id_Conwork"] && !next["id_Conwork"]) next["id_Conwork"] = freshInitial["id_Conwork"];
@@ -1269,6 +1302,7 @@ export function FormModal({
                 }
               }
             });
+            applyLocalFormulas(next, fresh.tableName);
             return next;
           });
         } else {
@@ -1392,7 +1426,7 @@ export function FormModal({
 
   async function submitForm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!submitPath || !activeForm) return;
+    if (!effectiveSubmitPath || !activeForm) return;
 
     const submitValues = sanitizeValuesForSubmit(values, activeForm);
     if (activeForm.tableName === TABLES.DATA || activeForm.tableName === "Data") {
@@ -1557,16 +1591,16 @@ export function FormModal({
     try {
       const response = isEditing
         ? hasFiles
-          ? await fetch(submitPath, {
+          ? await fetch(effectiveSubmitPath, {
             method: "PATCH",
             body
           })
-          : await fetch(submitPath, {
+          : await fetch(effectiveSubmitPath, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ tableName: activeForm.tableName, id: editSheetRow, sheetRow: editSheetRow, values: submitValues })
           })
-        : await fetch(submitPath, {
+        : await fetch(effectiveSubmitPath, {
           method: "POST",
           body
         });
@@ -1583,7 +1617,7 @@ export function FormModal({
 
       setAttachedFilesByField({});
 
-      if (isEditing) {
+      if (isEditing || isContractModal) {
         setOpen(false);
         setEditSheetRow(null);
         setValues(getInitialStringValues(activeForm));
@@ -1610,8 +1644,28 @@ export function FormModal({
         }
 
         const baseValues = freshForm ? getInitialStringValues(freshForm) : getInitialStringValues(activeForm);
-        if (nextSeq && (activeForm.tableName === TABLES.DATA || activeForm.tableName === "Data" || activeForm.tableName === "bills")) {
+        if (nextSeq && isDataForm) {
           baseValues["ลำดับ"] = nextSeq;
+        }
+
+        // ✅ คงค่า โครงการ, บิล, ผู้เบิก, และ วันที่ ไว้เมื่อบันทึกแล้วและยังไม่ปิดฟอร์ม เพื่อกรอกบิลต่อเนื่องได้ทันที
+        if (isDataForm) {
+          if (submitValues["ID Project"]) {
+            baseValues["ID Project"] = submitValues["ID Project"];
+            if (submitValues["ชื่อ Project"]) baseValues["ชื่อ Project"] = submitValues["ชื่อ Project"];
+          }
+          if (submitValues["บิล"]) {
+            baseValues["บิล"] = submitValues["บิล"];
+          }
+          if (submitValues["ผู้เบิก"]) {
+            baseValues["ผู้เบิก"] = submitValues["ผู้เบิก"];
+          }
+          if (submitValues["ว/ด/ป"]) {
+            baseValues["ว/ด/ป"] = submitValues["ว/ด/ป"];
+          } else if (submitValues["วันที่"]) {
+            baseValues["วันที่"] = submitValues["วันที่"];
+          }
+          applyLocalFormulas(baseValues, activeForm.tableName);
         }
 
         setValues(baseValues);
@@ -1622,7 +1676,7 @@ export function FormModal({
         setError("");
         setSuccessMessage(
           prevSeq
-            ? `บันทึกบิลลำดับที่ ${prevSeq} สำเร็จเรียบร้อย! ระบบเตรียมเลขถัดไป (#${nextSeq || Number(prevSeq) + 1}) พร้อมกรอกต่อแล้ว`
+            ? `บันทึกบิลลำดับที่ ${prevSeq} สำเร็จเรียบร้อย! ระบบเตรียมเลขถัดไป (#${nextSeq || Number(prevSeq) + 1}) และคงโครงการ/ประเภทบิลไว้พร้อมกรอกต่อแล้ว`
             : "บันทึกรายการเรียบร้อยแล้ว สามารถสร้างรายการถัดไปต่อได้เลย"
         );
         setResetKey(k => k + 1);
@@ -1674,7 +1728,7 @@ export function FormModal({
         </div>
       ) : null}
       {open ? (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/65 backdrop-blur-md sm:backdrop-blur-lg animate-in fade-in duration-150" role="presentation">
+        <div className={`fixed inset-0 ${modalZIndex} flex items-end sm:items-center justify-center p-0 sm:p-4 ${modalBackdropClass} animate-in fade-in duration-150`} role="presentation">
           <form
             className={`w-full bg-white rounded-t-2xl sm:rounded-xl shadow-2xl overflow-hidden flex flex-col border border-slate-300 h-[92vh] sm:h-auto sm:max-h-[90vh] transition-all duration-200 ${
               relaxed ? "max-w-4xl" : "max-w-2xl sm:max-w-3xl"
@@ -1809,6 +1863,17 @@ export function FormModal({
                                   <SectionHeaderIcon name={section.iconName} />
                                   <h4 className="text-xs text-slate-800 m-0 font-semibold">{section.title}</h4>
                                 </div>
+                                {section.id === "vendor" && isContractorVendor && (
+                                  <button
+                                    type="button"
+                                    onClick={handleQuickOpenContract}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] sm:text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 border border-emerald-300 transition cursor-pointer shadow-2xs active:scale-[0.98]"
+                                    title="เปิดฟอร์มสร้างสัญญาจ้างงานรับเหมา (ส่งข้อมูลโครงการและผู้รับเหมาให้อัตโนมัติ)"
+                                  >
+                                    <FileText size={12} className="shrink-0" />
+                                    <span>+ เปิดจ้างงานรับเหมา</span>
+                                  </button>
+                                )}
                                 {section.id === "tax" && (() => {
                                   const storeOption = (activeForm?.refOptions?.["ร้านค้า"] || []).find(opt => opt.value === values["ร้านค้า"]);
                                   const storeCutoffRaw = storeOption?.row?.["เครดิตจ่าย"] || storeOption?.row?.["credit_payment_day"];
@@ -1858,7 +1923,9 @@ export function FormModal({
                                     section.id === "vendor" && field.name === "ร้านค้า"
                                       ? (isMultiItemMode ? "col-span-1 sm:col-span-2 lg:col-span-2" : "col-span-1")
                                       : section.id === "vendor" && field.name === "ผู้รับเหมา"
-                                      ? "col-span-full"
+                                      ? (isMultiItemMode ? "col-span-1 sm:col-span-2" : "col-span-1")
+                                      : section.id === "vendor" && field.name === "สินค้า" && isContractorVendor
+                                      ? "col-span-1"
                                       : undefined;
 
                                   return (
@@ -2082,9 +2149,10 @@ export function FormModal({
                 >
                   {hasSavedDuringSession.current ? "ปิดฟอร์ม" : "ยกเลิก"}
                 </button>
+
                 <button
-                  type={submitPath ? "submit" : "button"}
-                  disabled={saving || loadingSchema || !activeForm || !submitPath}
+                  type={effectiveSubmitPath ? "submit" : "button"}
+                  disabled={saving || loadingSchema || !activeForm || !effectiveSubmitPath}
                   className="flex-1 sm:flex-initial h-9 sm:h-9.5 inline-flex items-center justify-center gap-1.5 px-5 rounded-lg text-xs sm:text-sm font-medium text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-75 transition cursor-pointer shadow-xs active:scale-[0.99]"
                 >
                   {saving ? (
@@ -4168,8 +4236,12 @@ function normalizeDependentValues(values: Record<string, string>, changedField: 
     }
   }
 
-  if (changedField === "vat" && !isVatActive(values["vat"])) {
-    values["วันได้บิล"] = "";
+  if (changedField === "vat") {
+    if (isVatActive(values["vat"])) {
+      values["วันได้บิล"] = getTodayDateIso();
+    } else {
+      values["วันได้บิล"] = "";
+    }
   }
 
   // หากเลือกเครดิต จะเคลียข้อมูลวันที่ได้บิล และคำนวณวันจ่ายจาก ว/ด/ป (หรือ วันที่) + เครดิต
@@ -4564,7 +4636,7 @@ function getFieldClassName(field: FieldSchema, values?: Record<string, string>) 
   const vendorType = values?.["ร้านค้า/ผู้รับเหมา"];
 
   if (field.name === "ผู้รับเหมา") {
-    return "col-span-full";
+    return "col-span-1";
   }
   if (field.name === "รายละเอียดงาน") {
     return "hidden";
@@ -4579,8 +4651,7 @@ function getFieldClassName(field: FieldSchema, values?: Record<string, string>) 
     return "col-span-full";
   }
   if (field.name === "สินค้า" && vendorType === "ผู้รับเหมา") {
-    // เมื่อเป็นผู้รับเหมา ให้ช่อง "ประเภทงาน (ผู้รับเหมา)" ขยายเต็มแถว
-    return "col-span-full";
+    return "col-span-1";
   }
   if (
     field.name === "ID Project" ||
