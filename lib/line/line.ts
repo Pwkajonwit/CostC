@@ -4701,7 +4701,22 @@ export function createMultiBillFlex(
 
   const pageSize = 5;
   const maxBubbles = 10; // LINE Carousel supports up to 10 bubbles
-  const displayBills = bills.slice(0, pageSize * maxBubbles);
+
+  // Sort sub-bills so bills of the same requester/bank account stay contiguous
+  const sortedBills = [...bills].sort((a, b) => {
+    const isSubA = isSubBillRecord(a);
+    const isSubB = isSubBillRecord(b);
+    if (isSubA && isSubB) {
+      const bankA = resolveRequesterBankInfo(a, bankInfoMap, peopleMap);
+      const bankB = resolveRequesterBankInfo(b, bankInfoMap, peopleMap);
+      const reqA = `${bankA.accountNo || ""}_${bankA.accountName || bankA.requesterName || getRequesterDisplayName(a)}`.trim();
+      const reqB = `${bankB.accountNo || ""}_${bankB.accountName || bankB.requesterName || getRequesterDisplayName(b)}`.trim();
+      return reqA.localeCompare(reqB, "th");
+    }
+    return 0;
+  });
+
+  const displayBills = sortedBills.slice(0, pageSize * maxBubbles);
   const totalPages = Math.max(1, Math.ceil(displayBills.length / pageSize));
 
   function buildBubblePage(pageBills: typeof displayBills, pageIndex: number) {
@@ -4752,8 +4767,16 @@ export function createMultiBillFlex(
       ]
     };
 
-    // 2. Bill Items List
-    const itemsContents = pageBills.map((b, idx) => {
+    // 2. Bill Items List (Grouped by requester for sub-bills)
+    const groupedCards: any[] = [];
+    let currentSubGroup: {
+      requesterKey: string;
+      headerBox: any;
+      billItems: any[];
+    } | null = null;
+
+    for (let idx = 0; idx < pageBills.length; idx++) {
+      const b = pageBills[idx];
       const bId = String(b.id || b["ลำดับ"] || b._sheetRow || startNum + idx);
       const grossAmt = getBillFlexGrossAmount(b);
       const dInfo = resolveBillDeductionInfo(b);
@@ -5085,101 +5108,11 @@ export function createMultiBillFlex(
         layout: "vertical",
         spacing: "none",
         contents: [
-          // Row 0 (Sub-bill): Prominent header with requester name, bank, and account number
-          ...(isSubBill ? [
-            {
-              type: "box",
-              layout: "vertical",
-              margin: "none",
-              paddingAll: "6px",
-              backgroundColor: "#FEF3C7",
-              cornerRadius: "6px",
-              borderWidth: "1px",
-              borderColor: "#F59E0B",
-              spacing: "none",
-              contents: [
-                {
-                  type: "box",
-                  layout: "horizontal",
-                  contents: [
-                    {
-                      type: "text",
-                      text: `👤 ผู้เบิก: ${reqBank.accountName || reqBank.requesterName || requesterName}`,
-                      size: "xxs",
-                      color: "#92400E",
-                      weight: "bold",
-                      flex: 1,
-                      wrap: true
-                    }
-                  ]
-                },
-                {
-                  type: "box",
-                  layout: "horizontal",
-                  margin: "xs",
-                  alignItems: "center",
-                  contents: [
-                    {
-                      type: "text",
-                      text: `เลข: ${reqBank.accountNo || "ไม่มีเลขบัญชี"}`,
-                      size: "xs",
-                      color: reqBank.accountNo ? "#047857" : "#DC2626",
-                      weight: "bold",
-                      flex: 7
-                    },
-                    {
-                      type: "text",
-                      text: `ธ.${reqBank.bankName || "-"}`,
-                      size: "xxs",
-                      color: "#78350F",
-                      align: "end",
-                      flex: 5,
-                      wrap: false,
-                      maxLines: 1
-                    }
-                  ]
-                },
-                ...(itemPettyCash && itemPettyCash.remaining > 0 ? [
-                  {
-                    type: "separator",
-                    margin: "xs",
-                    color: "#FCD34D"
-                  },
-                  {
-                    type: "box",
-                    layout: "horizontal",
-                    margin: "xs",
-                    paddingAll: "2px",
-                    alignItems: "center",
-                    contents: [
-                      {
-                        type: "text",
-                        text: "🪙 เบิกไว้ก่อน:",
-                        size: "xxs",
-                        color: "#92400E",
-                        weight: "bold",
-                        flex: 5
-                      },
-                      {
-                        type: "text",
-                        text: `฿${itemPettyCash.remaining.toLocaleString("th-TH")}`,
-                        size: "xs",
-                        color: "#DC2626",
-                        weight: "bold",
-                        align: "end",
-                        flex: 7
-                      }
-                    ]
-                  }
-                ] : [])
-              ]
-            }
-          ] : []),
           // Row 1: Title & Net Transfer Amount (with VAT / Deduct tags underneath price)
           {
             type: "box",
             layout: "horizontal",
-            margin: isSubBill ? "xs" : "none",
+            margin: "none",
             contents: [
               { type: "text", text: `#${bId}${isSubBill ? " [บิลย่อย]" : ""} | ${projName}`, weight: "bold", size: "xs", color: "#0F172A", flex: 7, wrap: true },
               {
@@ -5567,6 +5500,7 @@ export function createMultiBillFlex(
         ]
       };
 
+      let multiImgRow: any = null;
       if (hasImages) {
         const displayedImgs = imgList.slice(0, 4);
         const imgColumns: any[] = displayedImgs.map((imgUrl, imgIdx) => ({
@@ -5586,38 +5520,202 @@ export function createMultiBillFlex(
           imgColumns.push({ type: "filler" });
         }
 
-        const multiImgRow = {
+        multiImgRow = {
           type: "box",
           layout: "horizontal",
           margin: "xs",
           spacing: "xs",
           contents: imgColumns
         };
+      }
 
-        return {
+      const singleBillContents = [
+        textDetailsBox,
+        ...(multiImgRow ? [multiImgRow] : [])
+      ];
+
+      if (isSubBill) {
+        const reqKey = `${reqBank.accountNo || ""}_${reqBank.accountName || reqBank.requesterName || requesterName}`.trim();
+
+        if (currentSubGroup && currentSubGroup.requesterKey === reqKey) {
+          // Same requester & bank account: append to existing card with separator
+          currentSubGroup.billItems.push({
+            type: "separator",
+            margin: "sm",
+            color: "#CBD5E1"
+          });
+          currentSubGroup.billItems.push({
+            type: "box",
+            layout: "vertical",
+            margin: "xs",
+            contents: singleBillContents
+          });
+        } else {
+          // Different requester or first sub-bill: finalize previous group if exists
+          if (currentSubGroup) {
+            groupedCards.push({
+              type: "box",
+              layout: "vertical",
+              margin: "xs",
+              paddingAll: "6px",
+              backgroundColor: "#F8FAFC",
+              cornerRadius: "6px",
+              contents: [
+                currentSubGroup.headerBox,
+                ...currentSubGroup.billItems
+              ]
+            });
+          }
+
+          // Build prominent requester bank account header (shown once per group)
+          const bankHeaderBox = {
+            type: "box",
+            layout: "vertical",
+            margin: "none",
+            paddingAll: "6px",
+            backgroundColor: "#FEF3C7",
+            cornerRadius: "6px",
+            borderWidth: "1px",
+            borderColor: "#F59E0B",
+            spacing: "none",
+            contents: [
+              {
+                type: "box",
+                layout: "horizontal",
+                contents: [
+                  {
+                    type: "text",
+                    text: `👤 ผู้เบิก: ${reqBank.accountName || reqBank.requesterName || requesterName}`,
+                    size: "xxs",
+                    color: "#92400E",
+                    weight: "bold",
+                    flex: 1,
+                    wrap: true
+                  }
+                ]
+              },
+              {
+                type: "box",
+                layout: "horizontal",
+                margin: "xs",
+                alignItems: "center",
+                contents: [
+                  {
+                    type: "text",
+                    text: `เลข: ${reqBank.accountNo || "ไม่มีเลขบัญชี"}`,
+                    size: "xs",
+                    color: reqBank.accountNo ? "#047857" : "#DC2626",
+                    weight: "bold",
+                    flex: 7
+                  },
+                  {
+                    type: "text",
+                    text: `ธ.${reqBank.bankName || "-"}`,
+                    size: "xxs",
+                    color: "#78350F",
+                    align: "end",
+                    flex: 5,
+                    wrap: false,
+                    maxLines: 1
+                  }
+                ]
+              },
+              ...(itemPettyCash && itemPettyCash.remaining > 0 ? [
+                {
+                  type: "separator",
+                  margin: "xs",
+                  color: "#FCD34D"
+                },
+                {
+                  type: "box",
+                  layout: "horizontal",
+                  margin: "xs",
+                  paddingAll: "2px",
+                  alignItems: "center",
+                  contents: [
+                    {
+                      type: "text",
+                      text: "🪙 เบิกไว้ก่อน:",
+                      size: "xxs",
+                      color: "#92400E",
+                      weight: "bold",
+                      flex: 5
+                    },
+                    {
+                      type: "text",
+                      text: `฿${itemPettyCash.remaining.toLocaleString("th-TH")}`,
+                      size: "xs",
+                      color: "#DC2626",
+                      weight: "bold",
+                      align: "end",
+                      flex: 7
+                    }
+                  ]
+                }
+              ] : [])
+            ]
+          };
+
+          currentSubGroup = {
+            requesterKey: reqKey,
+            headerBox: bankHeaderBox,
+            billItems: [
+              {
+                type: "box",
+                layout: "vertical",
+                margin: "xs",
+                contents: singleBillContents
+              }
+            ]
+          };
+        }
+      } else {
+        // Non sub-bill (บิลหลัก)
+        if (currentSubGroup) {
+          groupedCards.push({
+            type: "box",
+            layout: "vertical",
+            margin: "xs",
+            paddingAll: "6px",
+            backgroundColor: "#F8FAFC",
+            cornerRadius: "6px",
+            contents: [
+              currentSubGroup.headerBox,
+              ...currentSubGroup.billItems
+            ]
+          });
+          currentSubGroup = null;
+        }
+
+        groupedCards.push({
           type: "box",
           layout: "vertical",
           margin: "xs",
           paddingAll: "6px",
           backgroundColor: "#F8FAFC",
           cornerRadius: "6px",
-          contents: [
-            textDetailsBox,
-            multiImgRow
-          ]
-        };
+          contents: singleBillContents
+        });
       }
+    }
 
-      return {
+    if (currentSubGroup) {
+      groupedCards.push({
         type: "box",
         layout: "vertical",
         margin: "xs",
         paddingAll: "6px",
         backgroundColor: "#F8FAFC",
         cornerRadius: "6px",
-        contents: [textDetailsBox]
-      };
-    });
+        contents: [
+          currentSubGroup.headerBox,
+          ...currentSubGroup.billItems
+        ]
+      });
+      currentSubGroup = null;
+    }
+
+    const itemsContents = groupedCards;
 
     // 3. Bottom Total Sum Box (Only when multiple bills)
     const bottomTotalSumBox = bills.length > 1 ? {
@@ -5707,20 +5805,18 @@ export function createMultiBillFlex(
           }
         }
       ];
-    } else if (mode === "completed") {
-      footerButtons = [];
-    } else {
-      const hasPendingBills = displayBills.some(b => {
+      const approvableBills = displayBills.filter(b => {
         const st = String(b["สถานะ"] || b.status || "").trim();
-        return st !== "อนุมัติ" && st !== "เบิกแล้ว" && st !== "จ่ายแล้ว" && !st.includes("ปิดงาน");
+        return st === "ตั้งเบิก" || st === "รออนุมัติ" || st === "รอตรวจสอบ" || st === "รอดำเนินการ" || st === "รอเบิก";
       });
-      const hasApprovedBills = displayBills.some(b => {
+      const closableBills = displayBills.filter(b => {
         const st = String(b["สถานะ"] || b.status || "").trim();
         return st === "อนุมัติ";
       });
 
       footerButtons = [];
-      if (hasPendingBills) {
+      if (approvableBills.length > 0) {
+        const approvableIds = approvableBills.map(b => b.id || b["ลำดับ"] || b._sheetRow).filter(Boolean).join(", ");
         footerButtons.push({
           type: "button",
           style: "primary",
@@ -5729,12 +5825,13 @@ export function createMultiBillFlex(
           flex: 6,
           action: {
             type: "message",
-            label: `อนุมัติ (${bills.length})`,
-            text: `อนุมัติบิลลำดับที่: ${sheetRowStr}`
+            label: `อนุมัติ (${approvableBills.length})`,
+            text: `อนุมัติบิลลำดับที่: ${approvableIds}`
           }
         });
       }
-      if (hasApprovedBills) {
+      if (closableBills.length > 0) {
+        const closableIds = closableBills.map(b => b.id || b["ลำดับ"] || b._sheetRow).filter(Boolean).join(", ");
         footerButtons.push({
           type: "button",
           style: "primary",
@@ -5743,8 +5840,8 @@ export function createMultiBillFlex(
           flex: 6,
           action: {
             type: "message",
-            label: `ปิดงาน (${bills.length})`,
-            text: `ปิดงานบิลลำดับที่: ${sheetRowStr}`
+            label: `ปิดงาน (${closableBills.length})`,
+            text: `ปิดงานบิลลำดับที่: ${closableIds}`
           }
         });
       }
@@ -5846,8 +5943,8 @@ export function createWithdrawApproverFlex(
 ): Record<string, any> {
   const bills = (Array.isArray(billsInput) ? billsInput : [billsInput]).map(b => ({
     ...b,
-    "สถานะ": !b["สถานะ"] || b["สถานะ"] === "ตั้งเบิก" || b["สถานะ"] === "รอตั้งเบิก" || b["สถานะ"] === "รออนุมัติ" ? "อนุมัติ" : b["สถานะ"],
-    status: !b.status || b.status === "ตั้งเบิก" || b.status === "รอตั้งเบิก" || b.status === "รออนุมัติ" ? "อนุมัติ" : b.status
+    "สถานะ": !b["สถานะ"] || b["สถานะ"] === "ตั้งเบิก" || b["สถานะ"] === "รออนุมัติ" ? "อนุมัติ" : b["สถานะ"],
+    status: !b.status || b.status === "ตั้งเบิก" || b.status === "รออนุมัติ" ? "อนุมัติ" : b.status
   }));
   return createMultiBillFlex(bills, {
     title: "✅ รายการอนุมัติสำเร็จ (รอปิดงาน)",

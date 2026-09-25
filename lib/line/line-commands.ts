@@ -29,8 +29,25 @@ import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 import { insertRowToSupabase } from "@/lib/supabase/supabase-db";
 import { normalizeDateToIso, getTodayDateIso } from "@/lib/utils/dates";
 import { TABLES } from "@/lib/config";
-import { isPaidBill } from "@/lib/bills/bill-status";
+import { isPaidBill, normalizeBillStatus } from "@/lib/bills/bill-status";
+import { isCreditActive, parseCreditDays } from "@/lib/project-summary";
 import { getRows } from "@/lib/db";
+
+function isBillCreditLocked(b: any, todayIso: string): boolean {
+  const rawDueDate = b["วันจ่าย"] || b.due_date || b.paid_date || b.data?.["วันจ่าย"] || b.data?.due_date;
+  let dueDateIso = normalizeDateToIso(rawDueDate);
+  const hasCreditTerm = isCreditActive(b["เครดิต"]) || b.data?.["เครดิต"];
+  if (!dueDateIso && hasCreditTerm) {
+    const cDays = parseCreditDays(b["เครดิต"] || b.data?.["เครดิต"]);
+    const billDateIso = normalizeDateToIso(b["ว/ด/ป"] || b["วันที่"] || b.bill_date);
+    if (billDateIso && cDays > 0) {
+      const bDate = new Date(billDateIso);
+      bDate.setDate(bDate.getDate() + cDays);
+      dueDateIso = getTodayDateIso(bDate);
+    }
+  }
+  return Boolean(dueDateIso && dueDateIso > todayIso);
+}
 
 /**
   * Central command processor for all 63 AppscriptBot keywords migrated to Next.js + Supabase
@@ -736,16 +753,22 @@ export async function handleLineCommand(
         (targetIdList.length > 0 && targetIdList.every(id => /^\d+$/.test(id)))
       );
 
-      let targetBills = rawBills.filter(b => {
-        const st = normalizeBillStatus(b["สถานะ"] || b.status);
-        // Only select bills that are pending approval
-        if (st === "อนุมัติ" || st === "เบิกแล้ว") return false;
+      const todayIso = getTodayDateIso();
 
+      let targetBills = rawBills.filter(b => {
         const bId = String(b.id || b["ลำดับ"] || b._sheetRow || "").trim();
 
         if (isExplicitIdList) {
           return targetIdList.includes(bId);
         }
+
+        const st = normalizeBillStatus(b["สถานะ"] || b.status);
+        // Only select bills that are already submitted for withdrawal ("ตั้งเบิก" or "รออนุมัติ")
+        // NEVER include bills in "รอตั้งเบิก", "อนุมัติ", or "เบิกแล้ว"
+        if (st !== "ตั้งเบิก" && st !== "รออนุมัติ") return false;
+
+        // Never include credit-locked bills that haven't reached payment due date
+        if (isBillCreditLocked(b, todayIso)) return false;
 
         if (!sheetRowStr || sheetRowStr === "ทั้งหมด" || sheetRowStr === "บิล") {
           return true;
@@ -766,22 +789,59 @@ export async function handleLineCommand(
         await replyTextMessage(
           replyToken,
           sheetRowStr && sheetRowStr !== "ทั้งหมด"
-            ? `🔍 ไม่พบรายการบิลที่รออนุมัติสำหรับ "${sheetRowStr}" ในระบบ`
-            : "🔍 ขณะนี้ไม่มีรายการบิลที่รอการอนุมัติในระบบครับ"
+            ? `🔍 ไม่พบรายการบิลที่ตั้งเบิกแล้วสำหรับ "${sheetRowStr}" ในระบบ (บิลอาจยังอยู่ในสถานะ "รอตั้งเบิก" หรืออนุมัติไปแล้ว)`
+            : "🔍 ขณะนี้ไม่มีรายการบิลที่ตั้งเบิกแล้วรอการอนุมัติในระบบครับ"
         );
         return true;
       }
 
-      // Prevent duplicate approval requests for bills that are already approved or finished
+      // If user explicitly specified bill IDs, check for bills that are not yet submitted or locked
+      if (isExplicitIdList) {
+        const unsubmitted = targetBills.filter(b => {
+          const st = normalizeBillStatus(b["สถานะ"] || b.status);
+          return st === "รอตั้งเบิก" || st === "";
+        });
+        if (unsubmitted.length > 0) {
+          const unsubmittedIds = unsubmitted.map(b => `#${b.id || b["ลำดับ"] || b._sheetRow}`).join(", ");
+          await replyTextMessage(
+            replyToken,
+            `⚠️ ไม่สามารถส่งขออนุมัติได้ เนื่องจากรายการบิล ${unsubmittedIds} ยังอยู่ในสถานะ "รอตั้งเบิก" (กรุณากดตั้งเบิกในระบบก่อนส่งให้ผู้อนุมัติครับ)`
+          );
+          return true;
+        }
+
+        const creditLocked = targetBills.filter(b => isBillCreditLocked(b, todayIso));
+        if (creditLocked.length > 0) {
+          const lockedIds = creditLocked.map(b => `#${b.id || b["ลำดับ"] || b._sheetRow}`).join(", ");
+          await replyTextMessage(
+            replyToken,
+            `⚠️ ไม่สามารถส่งขออนุมัติรายการ ${lockedIds} ได้ เนื่องจากติดเงื่อนไขเครดิตและยังไม่ถึงกำหนดวันจ่ายครับ`
+          );
+          return true;
+        }
+      }
+
+      // Filter only bills that are genuinely ready for approval ("ตั้งเบิก" or "รออนุมัติ")
       const pendingBills = targetBills.filter(b => {
         const st = normalizeBillStatus(b["สถานะ"] || b.status);
-        return st !== "อนุมัติ" && st !== "เบิกแล้ว";
+        return (st === "ตั้งเบิก" || st === "รออนุมัติ") && !isBillCreditLocked(b, todayIso);
       });
 
       if (pendingBills.length === 0) {
+        const alreadyDoneBills = targetBills.filter(b => {
+          const st = normalizeBillStatus(b["สถานะ"] || b.status);
+          return st === "อนุมัติ" || st === "เบิกแล้ว";
+        });
+        if (alreadyDoneBills.length > 0) {
+          await replyTextMessage(
+            replyToken,
+            `⚠️ รายการบิลที่เลือกอยู่ในสถานะ "อนุมัติแล้ว" หรือ "ปิดงานแล้ว" เรียบร้อยแล้ว (ระบบป้องกันการสั่งอนุมัติซ้ำ)`
+          );
+          return true;
+        }
         await replyTextMessage(
           replyToken,
-          `⚠️ รายการบิลที่เลือกอยู่ในสถานะ "อนุมัติแล้ว" หรือ "ปิดงานแล้ว" เรียบร้อยแล้ว (ระบบป้องกันการสั่งอนุมัติซ้ำ)`
+          `🔍 ไม่พบรายการบิลที่สามารถส่งอนุมัติได้สำหรับ "${sheetRowStr || "รายการที่เลือก"}"`
         );
         return true;
       }
@@ -937,13 +997,21 @@ export async function handleLineCommand(
       const target = cleanTarget;
       const matchedEmpId = nameToEmpIdMap.get(target) || target;
 
+      const todayIso = getTodayDateIso();
+
       const targetBills = rawBills.filter(b => {
         const currentSt = String(b["สถานะ"] || b.status || "").trim();
         const normSt = normalizeBillStatus(currentSt);
 
-        // Skip bills that are already approved or finished when performing approval
-        if ((isApprove || isReject) && (normSt === "อนุมัติ" || normSt === "เบิกแล้ว" || currentSt.includes("เสร็จ") || currentSt.includes("ปิดงาน") || currentSt.includes("จ่ายแล้ว"))) {
-          return false;
+        // When performing approval/rejection: ONLY bills with status "ตั้งเบิก" or "รออนุมัติ" are eligible.
+        // Bills in "รอตั้งเบิก", "อนุมัติ", "เบิกแล้ว", or credit-locked must NEVER be approved.
+        if (isApprove || isReject) {
+          if (normSt !== "ตั้งเบิก" && normSt !== "รออนุมัติ") {
+            return false;
+          }
+          if (isBillCreditLocked(b, todayIso)) {
+            return false;
+          }
         }
         // When performing close, only bills that are "อนุมัติ" can be closed.
         // If the user explicitly specified bill ID(s) (e.g. from the LINE "ปิดงานทั้งหมด" button)
@@ -987,39 +1055,86 @@ export async function handleLineCommand(
       });
 
       if (targetBills.length === 0) {
-        if (!isApprove && !isReject && isExplicitIdList) {
+        if (isExplicitIdList) {
           const matchedBills = rawBills.filter(b => {
-            const bId = String(b.id || b["ลำดับ"] || b._sheetRow || "").trim();
-            return targetIdList.includes(bId);
+            const bId = String(b.id || "").trim();
+            const bSeq = String(b["ลำดับ"] || "").trim();
+            const bSheet = String(b._sheetRow || "").trim();
+            return (
+              (bId !== "" && targetIdList.includes(bId)) ||
+              (bSeq !== "" && targetIdList.includes(bSeq)) ||
+              (bSheet !== "" && targetIdList.includes(bSheet))
+            );
           });
+
           if (matchedBills.length > 0) {
-            const alreadyClosedBills = matchedBills.filter(b => {
-              const currentSt = String(b["สถานะ"] || b.status || "").trim();
-              const normSt = normalizeBillStatus(currentSt);
-              return normSt === "เบิกแล้ว" || currentSt.includes("เสร็จ") || currentSt.includes("ปิดงาน") || currentSt.includes("จ่ายแล้ว");
-            });
-            const unapprovedBills = matchedBills.filter(b => {
-              const currentSt = String(b["สถานะ"] || b.status || "").trim();
-              const normSt = normalizeBillStatus(currentSt);
-              return normSt !== "อนุมัติ" && normSt !== "เบิกแล้ว" && !currentSt.includes("เสร็จ") && !currentSt.includes("ปิดงาน") && !currentSt.includes("จ่ายแล้ว");
-            });
+            if (isApprove || isReject) {
+              const unsubmittedBills = matchedBills.filter(b => {
+                const normSt = normalizeBillStatus(b["สถานะ"] || b.status);
+                return normSt === "รอตั้งเบิก" || normSt === "";
+              });
+              const creditLockedBills = matchedBills.filter(b => isBillCreditLocked(b, todayIso));
+              const alreadyApprovedBills = matchedBills.filter(b => {
+                const normSt = normalizeBillStatus(b["สถานะ"] || b.status);
+                return normSt === "อนุมัติ" || normSt === "เบิกแล้ว";
+              });
 
-            if (alreadyClosedBills.length > 0 && unapprovedBills.length === 0) {
-              const closedList = alreadyClosedBills.map(b => `#${b.id || b["ลำดับ"] || b._sheetRow}`).join(", ");
-              await replyTextMessage(
-                replyToken,
-                `ℹ️ บิล ${closedList} ได้รับการปิดงาน/จ่ายเงินเรียบร้อยแล้วครับ`
-              );
-              return true;
-            }
+              if (unsubmittedBills.length > 0) {
+                const unsubmittedList = unsubmittedBills.map(b => `#${b.id || b["ลำดับ"] || b._sheetRow}`).join(", ");
+                await replyTextMessage(
+                  replyToken,
+                  `⚠️ ไม่สามารถอนุมัติได้ เนื่องจากบิล ${unsubmittedList} ยังอยู่ในสถานะ "รอตั้งเบิก" (ยังไม่มีการส่งคำขอตั้งเบิก จึงไม่สามารถอนุมัติได้ครับ)`
+                );
+                return true;
+              }
 
-            if (unapprovedBills.length > 0) {
-              const stList = unapprovedBills.map(b => `#${b.id || b["ลำดับ"] || b._sheetRow} (${b["สถานะ"] || b.status || "ตั้งเบิก"})`).join(", ");
-              await replyTextMessage(
-                replyToken,
-                `⚠️ ไม่สามารถปิดงานได้ เนื่องจากบิล ${stList} ยังไม่ได้รับการอนุมัติจากผู้อนุมัติบิล\n\n(ฝ่ายการเงินสามารถปิดงานได้เฉพาะบิลที่มีสถานะ "อนุมัติ" แล้วเท่านั้นครับ)`
-              );
-              return true;
+              if (creditLockedBills.length > 0) {
+                const lockedList = creditLockedBills.map(b => `#${b.id || b["ลำดับ"] || b._sheetRow}`).join(", ");
+                await replyTextMessage(
+                  replyToken,
+                  `⚠️ ไม่สามารถอนุมัติบิล ${lockedList} ได้ เนื่องจากติดเงื่อนไขเครดิตและยังไม่ถึงกำหนดวันจ่ายครับ`
+                );
+                return true;
+              }
+
+              if (alreadyApprovedBills.length > 0) {
+                const approvedList = alreadyApprovedBills.map(b => `#${b.id || b["ลำดับ"] || b._sheetRow}`).join(", ");
+                await replyTextMessage(
+                  replyToken,
+                  `ℹ️ บิล ${approvedList} ได้รับการอนุมัติหรือปิดงานไปเรียบร้อยแล้วครับ`
+                );
+                return true;
+              }
+            } else {
+              // Closing logic
+              const alreadyClosedBills = matchedBills.filter(b => {
+                const currentSt = String(b["สถานะ"] || b.status || "").trim();
+                const normSt = normalizeBillStatus(currentSt);
+                return normSt === "เบิกแล้ว" || currentSt.includes("เสร็จ") || currentSt.includes("ปิดงาน") || currentSt.includes("จ่ายแล้ว");
+              });
+              const unapprovedBills = matchedBills.filter(b => {
+                const currentSt = String(b["สถานะ"] || b.status || "").trim();
+                const normSt = normalizeBillStatus(currentSt);
+                return normSt !== "อนุมัติ" && normSt !== "เบิกแล้ว" && !currentSt.includes("เสร็จ") && !currentSt.includes("ปิดงาน") && !currentSt.includes("จ่ายแล้ว");
+              });
+
+              if (alreadyClosedBills.length > 0 && unapprovedBills.length === 0) {
+                const closedList = alreadyClosedBills.map(b => `#${b.id || b["ลำดับ"] || b._sheetRow}`).join(", ");
+                await replyTextMessage(
+                  replyToken,
+                  `ℹ️ บิล ${closedList} ได้รับการปิดงาน/จ่ายเงินเรียบร้อยแล้วครับ`
+                );
+                return true;
+              }
+
+              if (unapprovedBills.length > 0) {
+                const stList = unapprovedBills.map(b => `#${b.id || b["ลำดับ"] || b._sheetRow} (${b["สถานะ"] || b.status || "ตั้งเบิก"})`).join(", ");
+                await replyTextMessage(
+                  replyToken,
+                  `⚠️ ไม่สามารถปิดงานได้ เนื่องจากบิล ${stList} ยังไม่ได้รับการอนุมัติจากผู้อนุมัติบิล\n\n(ฝ่ายการเงินสามารถปิดงานได้เฉพาะบิลที่มีสถานะ "อนุมัติ" แล้วเท่านั้นครับ)`
+                );
+                return true;
+              }
             }
           }
         }
@@ -1219,7 +1334,12 @@ export async function handleLineCommand(
       rawText.startsWith("รอจ่าย:") ||
       rawText.startsWith("รอโอน:") ||
       rawText.startsWith("อนุมัติแล้ว:") ||
-      rawText.startsWith("รอปิดบิล:")
+      rawText.startsWith("รอปิดบิล:") ||
+      lowerText.startsWith("รอปิดงาน ") ||
+      lowerText.startsWith("รอจ่าย ") ||
+      lowerText.startsWith("รอโอน ") ||
+      lowerText.startsWith("อนุมัติแล้ว ") ||
+      lowerText.startsWith("รอปิดบิล ")
     ) {
       const isSub = rawText.includes("ย่อย");
       const isMain = rawText.includes("หลัก");
@@ -1233,20 +1353,31 @@ export async function handleLineCommand(
         rawText.startsWith("รอจ่าย:") ||
         rawText.startsWith("รอโอน:") ||
         rawText.startsWith("อนุมัติแล้ว:") ||
-        rawText.startsWith("รอปิดบิล:")
+        rawText.startsWith("รอปิดบิล:") ||
+        lowerText.startsWith("รอปิดงาน ") ||
+        lowerText.startsWith("รอจ่าย ") ||
+        lowerText.startsWith("รอโอน ") ||
+        lowerText.startsWith("อนุมัติแล้ว ") ||
+        lowerText.startsWith("รอปิดบิล ")
+      );
+      const isWaitingWithdrawOnly = (
+        lowerText === "รอตั้งเบิก" ||
+        rawText.startsWith("รอตั้งเบิก:") ||
+        lowerText.startsWith("รอตั้งเบิก ")
+      );
+      const isWaitingApprovalOnly = (
+        lowerText === "รออนุมัติ" ||
+        lowerText === "ตั้งเบิก" ||
+        rawText.startsWith("รออนุมัติ:") ||
+        rawText.startsWith("ตั้งเบิก:") ||
+        lowerText.startsWith("รออนุมัติ ") ||
+        lowerText.startsWith("ตั้งเบิก ")
       );
       const isPendingFilter = !isApprovedFilter && (
         isMain ||
         isSub ||
-        lowerText === "รอตั้งเบิก" ||
-        lowerText === "รออนุมัติ" ||
-        lowerText === "ตั้งเบิก" ||
-        rawText.startsWith("รอตั้งเบิก:") ||
-        rawText.startsWith("รออนุมัติ:") ||
-        rawText.startsWith("ตั้งเบิก:") ||
-        lowerText.startsWith("รอตั้งเบิก ") ||
-        lowerText.startsWith("รออนุมัติ ") ||
-        lowerText.startsWith("ตั้งเบิก ")
+        isWaitingWithdrawOnly ||
+        isWaitingApprovalOnly
       );
 
       const filterQuery = rawText
@@ -1287,27 +1418,38 @@ export async function handleLineCommand(
 
       let filtered = hydratedBills;
 
-      // ✅ กรองสถานะบิลตามประเภทคำสั่ง
+      // ✅ กรองสถานะบิลตามประเภทคำสั่งอย่างเคร่งครัด 100% (ไม่มีสถานะอื่นปนแน่นอน)
       if (isApprovedFilter) {
-        // กรองเฉพาะบิลที่ "อนุมัติแล้ว" แต่ยังไม่ได้ "ปิดงาน/เบิกแล้ว"
+        // เมื่อพิมพ์ "รอปิดงาน", "รอจ่าย", "รอโอน", "อนุมัติแล้ว":
+        // กรองเฉพาะบิลสถานะ "อนุมัติ" เท่านั้น (บิลที่อนุมัติแล้ว รอการเงินปิดงาน/จ่ายเงิน)
+        // จะไม่มีสถานะ "รอตั้งเบิก", "ตั้งเบิก", "รออนุมัติ", หรือ "เบิกแล้ว" ปนมาเด็ดขาด
         filtered = filtered.filter(b => {
-          const st = normalizeBillStatus(b["สถานะ"] || b.status);
-          return st === "อนุมัติ";
+          const norm = normalizeBillStatus(b["สถานะ"] || b.status || b.data?.["สถานะ"] || b.data?.status);
+          return norm === "อนุมัติ";
+        });
+      } else if (isWaitingApprovalOnly) {
+        // เมื่อพิมพ์ "รออนุมัติ", "ตั้งเบิก":
+        // กรองเฉพาะบิลสถานะ "ตั้งเบิก" หรือ "รออนุมัติ" เท่านั้น (บิลที่ส่งตั้งเบิกแล้ว รอพิจารณาอนุมัติ)
+        // จะไม่มีสถานะ "รอตั้งเบิก", "อนุมัติ", หรือ "เบิกแล้ว" ปนมาเด็ดขาด
+        filtered = filtered.filter(b => {
+          const norm = normalizeBillStatus(b["สถานะ"] || b.status || b.data?.["สถานะ"] || b.data?.status);
+          return norm === "ตั้งเบิก" || norm === "รออนุมัติ";
+        });
+      } else if (isWaitingWithdrawOnly) {
+        // เมื่อพิมพ์ "รอตั้งเบิก":
+        // กรองเฉพาะบิลสถานะ "รอตั้งเบิก" เท่านั้น (บิลร่างที่บันทึกแล้วแต่ยังไม่ได้กดส่งตั้งเบิก)
+        // จะไม่มีสถานะ "ตั้งเบิก", "รออนุมัติ", "อนุมัติ", หรือ "เบิกแล้ว" ปนมาเด็ดขาด
+        filtered = filtered.filter(b => {
+          const norm = normalizeBillStatus(b["สถานะ"] || b.status || b.data?.["สถานะ"] || b.data?.status);
+          return norm === "รอตั้งเบิก";
         });
       } else if (isPendingFilter && !rawText.startsWith("ทั้งหมด:")) {
-        // กรองเฉพาะบิลสถานะ "รอตั้งเบิก", "ตั้งเบิก" และ "รออนุมัติ" เมื่อพิมพ์ หลัก หรือ ย่อย หรือ รออนุมัติ
+        // กรองบิลที่ยังอยู่ระหว่างดำเนินการ (รอตั้งเบิก, ตั้งเบิก, รออนุมัติ) สำหรับคำค้น เช่น "หลัก", "ย่อย"
         filtered = filtered.filter(b => {
-          const st = String(b["สถานะ"] || b.status || "").trim();
-          const norm = normalizeBillStatus(st);
+          const norm = normalizeBillStatus(b["สถานะ"] || b.status || b.data?.["สถานะ"] || b.data?.status);
           return (
-            st === "รอตั้งเบิก" ||
-            st === "ตั้งเบิก" ||
-            st === "รออนุมัติ" ||
-            st === "รอตรวจสอบ" ||
-            st === "รอดำเนินการ" ||
-            st === "รอเบิก" ||
-            norm === "ตั้งเบิก" ||
             norm === "รอตั้งเบิก" ||
+            norm === "ตั้งเบิก" ||
             norm === "รออนุมัติ"
           );
         });
@@ -1353,9 +1495,15 @@ export async function handleLineCommand(
         const noResultMsg = isApprovedFilter
           ? (filterQuery
               ? `✅ ไม่พบรายการบิลที่รอปิดงาน/จ่ายเงินสำหรับ "${filterQuery}"\n\n(บิลทั้งหมดได้รับการปิดงานเรียบร้อยแล้ว หรือยังไม่ผ่านการอนุมัติ)`
-              : "✅ ไม่มีรายการบิลที่รอปิดงาน/จ่ายเงินในขณะนี้ครับ\n\nบิลทั้งหมดได้รับการปิดงานและโอนเงินเรียบร้อยแล้ว")
-          : (lowerText === "รออนุมัติ" || lowerText === "ตั้งเบิก" || lowerText === "รอตั้งเบิก")
-            ? "✅ ไม่มีรายการรออนุมัติในขณะนี้ครับ\n\nบิลทั้งหมดได้รับการอนุมัติหรือดำเนินการแล้ว"
+              : "✅ ไม่มีรายการบิลที่รอปิดงาน/จ่ายเงินในขณะนี้ครับ\n\nบิลที่อนุมัติแล้วทั้งหมดได้รับการปิดงานและโอนเงินเรียบร้อยแล้ว")
+          : isWaitingApprovalOnly
+            ? (filterQuery
+                ? `✅ ไม่พบรายการบิลรออนุมัติสำหรับ "${filterQuery}"`
+                : "✅ ไม่มีรายการรออนุมัติในขณะนี้ครับ\n\nบิลทั้งหมดได้รับการพิจารณาอนุมัติเรียบร้อยแล้ว")
+          : isWaitingWithdrawOnly
+            ? (filterQuery
+                ? `✅ ไม่พบรายการบิลรอตั้งเบิกสำหรับ "${filterQuery}"`
+                : "✅ ไม่มีรายการรอตั้งเบิกในขณะนี้ครับ")
             : filterQuery
               ? `🔍 ไม่พบรายการบิล${isSub ? "ย่อย" : isMain ? "หลัก" : ""}ที่ตรงกับ "${filterQuery}"\n\nกรุณาตรวจสอบชื่อผู้เบิกหรือรายละเอียดที่ค้นหาอีกครั้งครับ`
               : "ไม่พบรายการบิลในระบบ";
@@ -1363,15 +1511,15 @@ export async function handleLineCommand(
         return true;
       }
 
-      const isPendingMode = lowerText.startsWith("รออนุมัติ") || lowerText.startsWith("ตั้งเบิก") || lowerText.startsWith("รอตั้งเบิก");
-
       const flexTitle = isApprovedFilter
         ? (filterQuery ? `รายการอนุมัติแล้วของ "${filterQuery}" (รอปิดงาน)` : `รายการอนุมัติแล้ว (รอปิดงาน/จ่ายเงิน)`)
-        : isPendingMode
+        : isWaitingApprovalOnly
           ? (filterQuery ? `รายการรออนุมัติของ "${filterQuery}"` : `รายการรออนุมัติ`)
-          : filterQuery
-            ? `ผลการค้นหาบิล${isSub ? "ย่อย" : isMain ? "หลัก" : ""}ของ "${filterQuery}"`
-            : `รายการเบิกเงิน${isSub ? "บิลย่อย" : isMain ? "บิลหลัก" : "บิล"}`;
+          : isWaitingWithdrawOnly
+            ? (filterQuery ? `รายการรอตั้งเบิกของ "${filterQuery}"` : `รายการรอตั้งเบิก`)
+            : filterQuery
+              ? `ผลการค้นหาบิล${isSub ? "ย่อย" : isMain ? "หลัก" : ""}ของ "${filterQuery}"`
+              : `รายการเบิกเงิน${isSub ? "บิลย่อย" : isMain ? "บิลหลัก" : "บิล"}`;
 
       const [bankInfoMap, contractsMap, projectBudgetMap, carsMap] = await Promise.all([
         getBankInfoMap(),
@@ -1380,6 +1528,14 @@ export async function handleLineCommand(
         getCarsMap()
       ]);
 
+      const flexMode = isApprovedFilter
+        ? "approver"
+        : isWaitingApprovalOnly
+          ? "owner"
+          : isWaitingWithdrawOnly
+            ? "requester"
+            : "search";
+
       // ใช้ createMultiBillFlex รูปแบบใหม่ที่สวยงาม มีแถบคุมงบ บัญชีธนาคาร และรูปใบเสร็จ
       const flexPayload = isApprovedFilter
         ? createWithdrawApproverFlex(targetBills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap)
@@ -1387,7 +1543,7 @@ export async function handleLineCommand(
             targetBills,
             {
               title: `🧾 ${flexTitle}`,
-              mode: isPendingMode ? "owner" : "search"
+              mode: flexMode
             },
             peopleMap,
             bankInfoMap,
@@ -1490,7 +1646,7 @@ export async function handleLineCommand(
       // Count global pending bills (current queue waiting for approval across entire system)
       const globalPendingCount = bills.filter(b => {
         const normSt = normalizeBillStatus(b["สถานะ"] || b.status);
-        return normSt === "รออนุมัติ" || normSt === "รอตั้งเบิก" || normSt === "ตั้งเบิก" || normSt === "รอตรวจสอบ";
+        return normSt === "รออนุมัติ" || normSt === "ตั้งเบิก" || normSt === "รอตรวจสอบ";
       }).length;
 
       let todayPendingCount = 0;
@@ -1509,7 +1665,7 @@ export async function handleLineCommand(
           todayApprovedCount++;
         } else if (normSt === "เบิกแล้ว") {
           todayPaidCount++;
-        } else if (normSt === "รออนุมัติ" || normSt === "รอตั้งเบิก" || normSt === "ตั้งเบิก" || normSt === "รอตรวจสอบ") {
+        } else if (normSt === "รออนุมัติ" || normSt === "ตั้งเบิก" || normSt === "รอตรวจสอบ") {
           todayPendingCount++;
         }
       });
