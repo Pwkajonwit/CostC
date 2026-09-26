@@ -810,7 +810,12 @@ function sanitizeBySchema(row: SheetRow, tableName: string) {
 function validateRequiredBySchema(row: SheetRow, tableName: string) {
   const missing = getFormSchema(tableName).find(field => {
     if (!field.required || field.type === "Hidden" || field.readonly) return false;
+    const vType = String(row["ร้านค้า/ผู้รับเหมา"] ?? row.vendor_type ?? "").trim();
+    if (field.name === "statusค่าแรง") {
+      if (vType !== "ผู้รับเหมา") return false;
+    }
     if (field.name === "ผู้รับเหมา") {
+      if (vType && vType !== "ผู้รับเหมา") return false;
       const category = String(row["ประเภท"] || row.category || "").trim();
       if (
         category.startsWith("3.") ||
@@ -828,13 +833,19 @@ function validateRequiredBySchema(row: SheetRow, tableName: string) {
 }
 
 function isFieldVisible(field: ReturnType<typeof getFormSchema>[number], row: SheetRow) {
+  const vendorType = String(row["ร้านค้า/ผู้รับเหมา"] ?? row.vendor_type ?? "").trim();
+  if (field.name === "statusค่าแรง") {
+    return vendorType === "ผู้รับเหมา";
+  }
+  if (field.name === "ผู้รับเหมา" || field.name === "ค่าแรงคงเหลือ") {
+    return vendorType === "ผู้รับเหมา";
+  }
   if (field.name === "วันได้บิล") {
     const hasVat = isVatActive(row["vat"]);
     const hasCredit = parseCreditDays(row["เครดิต"]) > 0;
     return hasVat && !hasCredit;
   }
   if (field.name === "เครดิต") {
-    const vendorType = String(row["ร้านค้า/ผู้รับเหมา"] ?? row.vendor_type ?? "").trim();
     return vendorType === "ร้านค้า" || isVatActive(row["vat"]) || parseCreditDays(row["เครดิต"]) > 0 || hasRowValue(row["เครดิต"]);
   }
   if (field.name === "วันจ่าย") {

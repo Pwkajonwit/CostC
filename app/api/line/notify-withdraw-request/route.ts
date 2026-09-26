@@ -18,6 +18,7 @@ import {
   getPettyCashSummaryMap
 } from "@/lib/line/line";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
+import { mapSupabaseRowToSheetRow } from "@/lib/supabase/supabase-db";
 import { getTodayDateIso, normalizeDateToIso } from "@/lib/utils/dates";
 import { isCreditActive, parseCreditDays } from "@/lib/project-summary";
 
@@ -87,8 +88,55 @@ export async function POST(req: NextRequest) {
       getCarsMap(),
       getPettyCashSummaryMap()
     ]);
+    const billIds = bills
+      .map((b: any) => Number(b.id ?? b["ลำดับ"] ?? b._sheetRow))
+      .filter((n: number) => Number.isFinite(n) && n > 0);
+
+    const dbBillMap = new Map<number, any>();
+    if (billIds.length > 0) {
+      try {
+        const { data: dbBills } = await supabaseAdmin
+          .from("bills")
+          .select("*")
+          .in("id", billIds);
+        if (dbBills && dbBills.length > 0) {
+          dbBills.forEach((dbB, idx) => {
+            const mapped = mapSupabaseRowToSheetRow("bills", dbB, idx);
+            dbBillMap.set(Number(dbB.id), mapped);
+          });
+        }
+      } catch (e) {
+        console.warn("Could not query bills table for lookup:", e);
+      }
+    }
+
+    const authoritativeBills = bills.map((b: any) => {
+      const bId = Number(b.id ?? b["ลำดับ"] ?? b._sheetRow);
+      const dbB = dbBillMap.get(bId);
+      if (!dbB) return b;
+
+      return {
+        ...dbB,
+        ...b,
+        "ยอดเงิน": dbB["ยอดเงิน"] ?? b["ยอดเงิน"],
+        amount: dbB.amount ?? b.amount ?? dbB["ยอดเงิน"],
+        "ยอดโอน": dbB["ยอดโอน"] ?? b["ยอดโอน"],
+        transfer_amount: dbB.transfer_amount ?? b.transfer_amount ?? dbB["ยอดโอน"],
+        vat: dbB.vat ?? dbB["vat"] ?? "",
+        vat_amount: dbB.vat_amount ?? 0,
+        "หัก": dbB["หัก"] ?? b["หัก"] ?? "",
+        withholding_tax: dbB.withholding_tax ?? b.withholding_tax ?? 0,
+        "จำนวนหัก": dbB["จำนวนหัก"] ?? b["จำนวนหัก"] ?? 0,
+        "3เปอร์": dbB["3เปอร์"] ?? b["3เปอร์"] ?? 0,
+        "statusค่าแรง": dbB["statusค่าแรง"] ?? b["statusค่าแรง"] ?? "",
+        "ผู้สร้างบิล": dbB["ผู้สร้างบิล"] || b["ผู้สร้างบิล"],
+        created_by: dbB.created_by || b.created_by || dbB["ผู้สร้างบิล"],
+        items: (Array.isArray(b.items) && b.items.length > 0) ? b.items : (dbB.items || [])
+      };
+    });
+
     const targetRole = body.targetRole || "requester";
-    const totalAmount = bills.reduce((sum: number, b: any) => sum + getBillFlexGrossAmount(b), 0);
+    const totalAmount = authoritativeBills.reduce((sum: number, b: any) => sum + getBillFlexGrossAmount(b), 0);
     const amountStr = totalAmount.toLocaleString("th-TH");
 
     if (targetRole === "transfer_summary") {
@@ -105,8 +153,8 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "ไม่พบ LINE User ID ของฝ่ายการเงิน หรือกลุ่มการเงินในระบบ" }, { status: 400 });
       }
 
-      const flex = createDailyTransferSummaryFlex(bills, { title: body.title, dateStr: body.dateStr }, peopleMap, bankInfoMap);
-      const altText = `💸 ยอดโอนประจำวัน (${bills.length} บิลปิดงานแล้ว)`;
+      const flex = createDailyTransferSummaryFlex(authoritativeBills, { title: body.title, dateStr: body.dateStr }, peopleMap, bankInfoMap);
+      const altText = `💸 ยอดโอนประจำวัน (${authoritativeBills.length} บิลปิดงานแล้ว)`;
 
       const results = await Promise.all(
         targetList.map(targetId => sendFlexMessageDetailed(targetId, altText, flex))
@@ -129,10 +177,10 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "ไม่พบ LINE User ID ของฝ่ายการเงิน หรือกลุ่มการเงินในระบบ" }, { status: 400 });
       }
 
-      const flex = createWithdrawApproverFlex(bills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap, pettyCashMap);
-      const altText = bills.length === 1
-        ? `✅ รายการอนุมัติสำเร็จ (รอปิดงาน) #${bills[0]._sheetRow || bills[0].id || bills[0]["ลำดับ"] || ""} (฿${amountStr})`
-        : `✅ รายการอนุมัติสำเร็จ ${bills.length} รายการ (รวม ฿${amountStr})`;
+      const flex = createWithdrawApproverFlex(authoritativeBills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap, pettyCashMap);
+      const altText = authoritativeBills.length === 1
+        ? `✅ รายการอนุมัติสำเร็จ (รอปิดงาน) #${authoritativeBills[0]._sheetRow || authoritativeBills[0].id || authoritativeBills[0]["ลำดับ"] || ""} (฿${amountStr})`
+        : `✅ รายการอนุมัติสำเร็จ ${authoritativeBills.length} รายการ (รวม ฿${amountStr})`;
 
       const results = await Promise.all(
         targetFinanceList.map(financeId => sendFlexMessageDetailed(financeId, altText, flex))
@@ -149,7 +197,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Safety guard: Reject bills that are still "รอตั้งเบิก" (not yet requested for withdrawal)
-      const unsubmittedBills = bills.filter((b: any) => {
+      const unsubmittedBills = authoritativeBills.filter((b: any) => {
         const rawSt = String(b["สถานะ"] || b.status || "").trim();
         return rawSt === "รอตั้งเบิก";
       });
@@ -160,10 +208,10 @@ export async function POST(req: NextRequest) {
         }, { status: 400 });
       }
 
-      const flex = createWithdrawOwnerFlex(bills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap, pettyCashMap);
-      const altText = bills.length === 1
-        ? `📋 คำขออนุมัติเบิกเงิน #${bills[0]._sheetRow || bills[0].id || bills[0]["ลำดับ"] || ""} (฿${amountStr})`
-        : `📋 คำขออนุมัติเบิกเงิน ${bills.length} รายการ (รวม ฿${amountStr})`;
+      const flex = createWithdrawOwnerFlex(authoritativeBills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap, pettyCashMap);
+      const altText = authoritativeBills.length === 1
+        ? `📋 คำขออนุมัติเบิกเงิน #${authoritativeBills[0]._sheetRow || authoritativeBills[0].id || authoritativeBills[0]["ลำดับ"] || ""} (฿${amountStr})`
+        : `📋 คำขออนุมัติเบิกเงิน ${authoritativeBills.length} รายการ (รวม ฿${amountStr})`;
 
       const results = await Promise.all(
         targetApprovers.map(approverId => sendFlexMessageDetailed(approverId, altText, flex))
@@ -178,29 +226,8 @@ export async function POST(req: NextRequest) {
       const cookieName = String(req.cookies.get("auth_name")?.value || "").trim();
       const sessionLineUserId = String(req.cookies.get("auth_line_user_id")?.value || "").trim();
 
-      const billIds = bills
-        .map((b: any) => Number(b.id ?? b["ลำดับ"] ?? b._sheetRow))
-        .filter((n: number) => Number.isFinite(n) && n > 0);
-
-      const dbBillMap = new Map<number, any>();
-      if (billIds.length > 0) {
-        try {
-          const { data: dbBills } = await supabaseAdmin
-            .from("bills")
-            .select("id, requester, created_by, data")
-            .in("id", billIds);
-          if (dbBills && dbBills.length > 0) {
-            dbBills.forEach(dbB => {
-              dbBillMap.set(Number(dbB.id), dbB);
-            });
-          }
-        } catch (e) {
-          console.warn("Could not query bills table for creator/requester lookup:", e);
-        }
-      }
-
       const requesterKeys: string[] = Array.from(new Set<string>(
-        bills.flatMap((b: any) => {
+        authoritativeBills.flatMap((b: any) => {
           const bId = Number(b.id ?? b["ลำดับ"] ?? b._sheetRow);
           const dbB = dbBillMap.get(bId);
           return [
@@ -220,7 +247,7 @@ export async function POST(req: NextRequest) {
 
       const creatorKeys: string[] = Array.from(new Set<string>(
         [
-          ...bills.flatMap((b: any) => {
+          ...authoritativeBills.flatMap((b: any) => {
             const bId = Number(b.id ?? b["ลำดับ"] ?? b._sheetRow);
             const dbB = dbBillMap.get(bId);
             return [
@@ -264,7 +291,7 @@ export async function POST(req: NextRequest) {
         }, { status: 400 });
       }
 
-      const enrichedBills = bills.map((b: any) => {
+      const enrichedBills = authoritativeBills.map((b: any) => {
         const bId = Number(b.id ?? b["ลำดับ"] ?? b._sheetRow);
         const dbB = dbBillMap.get(bId);
         const creator = String(
@@ -288,9 +315,9 @@ export async function POST(req: NextRequest) {
       });
 
       const flex = createWithdrawCompletedRequesterFlex(enrichedBills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap, pettyCashMap);
-      const altText = bills.length === 1
-        ? `🎉 รายการเบิกเงินสำเร็จเรียบร้อย #${bills[0]._sheetRow || bills[0].id || bills[0]["ลำดับ"] || ""} (฿${amountStr})`
-        : `🎉 รายการเบิกเงินสำเร็จเรียบร้อย ${bills.length} รายการ (รวม ฿${amountStr})`;
+      const altText = authoritativeBills.length === 1
+        ? `🎉 รายการเบิกเงินสำเร็จเรียบร้อย #${authoritativeBills[0]._sheetRow || authoritativeBills[0].id || authoritativeBills[0]["ลำดับ"] || ""} (฿${amountStr})`
+        : `🎉 รายการเบิกเงินสำเร็จเรียบร้อย ${authoritativeBills.length} รายการ (รวม ฿${amountStr})`;
 
       const results = [];
       for (const sendTo of recipients) {
@@ -307,29 +334,8 @@ export async function POST(req: NextRequest) {
     const cookieName = String(req.cookies.get("auth_name")?.value || "").trim();
     const sessionLineUserId = String(req.cookies.get("auth_line_user_id")?.value || "").trim();
 
-    const billIds = bills
-      .map((b: any) => Number(b.id ?? b["ลำดับ"] ?? b._sheetRow))
-      .filter((n: number) => Number.isFinite(n) && n > 0);
-
-    const dbBillMap = new Map<number, any>();
-    if (billIds.length > 0) {
-      try {
-        const { data: dbBills } = await supabaseAdmin
-          .from("bills")
-          .select("id, requester, created_by, data")
-          .in("id", billIds);
-        if (dbBills && dbBills.length > 0) {
-          dbBills.forEach(dbB => {
-            dbBillMap.set(Number(dbB.id), dbB);
-          });
-        }
-      } catch (e) {
-        console.warn("Could not query bills table for creator/requester lookup:", e);
-      }
-    }
-
     const requesterKeys: string[] = Array.from(new Set<string>(
-      bills.flatMap((b: any) => {
+      authoritativeBills.flatMap((b: any) => {
         const bId = Number(b.id ?? b["ลำดับ"] ?? b._sheetRow);
         const dbB = dbBillMap.get(bId);
         return [
@@ -349,7 +355,7 @@ export async function POST(req: NextRequest) {
 
     const creatorKeys: string[] = Array.from(new Set<string>(
       [
-        ...bills.flatMap((b: any) => {
+        ...authoritativeBills.flatMap((b: any) => {
           const bId = Number(b.id ?? b["ลำดับ"] ?? b._sheetRow);
           const dbB = dbBillMap.get(bId);
           return [
@@ -393,7 +399,7 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    const enrichedBills = bills.map((b: any) => {
+    const enrichedBills = authoritativeBills.map((b: any) => {
       const bId = Number(b.id ?? b["ลำดับ"] ?? b._sheetRow);
       const dbB = dbBillMap.get(bId);
       const creator = String(
@@ -417,9 +423,9 @@ export async function POST(req: NextRequest) {
     });
 
     const flex = createWithdrawRequesterFlex(enrichedBills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap, pettyCashMap);
-    const altText = bills.length === 1
-      ? `📄 แจ้งเตือนรายการตั้งเบิกเงิน #${bills[0]._sheetRow || bills[0].id || bills[0]["ลำดับ"] || ""} (฿${amountStr})`
-      : `📄 แจ้งเตือนรายการตั้งเบิกเงิน ${bills.length} รายการ (รวม ฿${amountStr})`;
+    const altText = authoritativeBills.length === 1
+      ? `📄 แจ้งเตือนรายการตั้งเบิกเงิน #${authoritativeBills[0]._sheetRow || authoritativeBills[0].id || authoritativeBills[0]["ลำดับ"] || ""} (฿${amountStr})`
+      : `📄 แจ้งเตือนรายการตั้งเบิกเงิน ${authoritativeBills.length} รายการ (รวม ฿${amountStr})`;
 
     const results = [];
     for (const sendTo of recipients) {
