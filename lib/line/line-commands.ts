@@ -1643,6 +1643,12 @@ export async function handleLineCommand(
         });
       }
 
+      // Exclude "รอตั้งเบิก", "ยังไม่ตั้งเบิก", "ยกเลิก" and empty status from daily financial report
+      targetBills = targetBills.filter(b => {
+        const normSt = normalizeBillStatus(b["สถานะ"] || b.status);
+        return normSt && normSt !== "รอตั้งเบิก" && normSt !== "ยังไม่ตั้งเบิก" && normSt !== "ยกเลิก";
+      });
+
       // Count global pending bills (current queue waiting for approval across entire system)
       const globalPendingCount = bills.filter(b => {
         const normSt = normalizeBillStatus(b["สถานะ"] || b.status);
@@ -1673,7 +1679,7 @@ export async function handleLineCommand(
       if (!isAll && targetBills.length === 0) {
         await replyTextMessage(
           replyToken,
-          `ℹ️ วันนี้ (${todayDisplay}) ยังไม่มีรายการบิลใหม่หรือรายการเบิกจ่ายในระบบครับ\n\n(ปัจจุบันมีบิลรออนุมัติค้างในระบบทั้งหมด ${globalPendingCount} รายการ พิมพ์ "รออนุมัติ" เพื่อดูรายการ หรือพิมพ์ "สรุปทั้งหมด" เพื่อดูยอดสะสมได้ครับ)`
+          `ℹ️ วันนี้ (${todayDisplay}) ยังไม่มีรายการบิลที่ตั้งเบิกหรืออนุมัติในระบบครับ\n\n(ปัจจุบันมีบิลรออนุมัติค้างในระบบทั้งหมด ${globalPendingCount} รายการ พิมพ์ "รออนุมัติ" เพื่อดูรายการ หรือพิมพ์ "สรุปทั้งหมด" เพื่อดูยอดสะสมได้ครับ)`
         );
         return true;
       }
@@ -1714,8 +1720,7 @@ export async function handleLineCommand(
             const amt = (typeof rawAmt === "number" ? rawAmt : (Number(String(rawAmt).replace(/,/g, "").trim()) || 0)).toLocaleString("th-TH");
             const payee = b["ร้าน/บุคคล"] || b.vendor_or_person || b["ผู้รับเหมา"] || b["ร้านค้า"] || b["ผู้เบิก"] || "-";
             const proj = b["ชื่อ Project"] || b.project_name || "";
-            const st = b["สถานะ"] || b.status || "-";
-            textFallback += `${idx + 1}. [${b.bill_no || b.id || b["ลำดับ"] || "-"}] ${payee} ${proj ? `(${proj})` : ""} : ฿${amt} [${st}]\n`;
+            textFallback += `${idx + 1}. [${b.bill_no || b.id || b["ลำดับ"] || "-"}] ${payee} ${proj ? `(${proj})` : ""} : ฿${amt}\n`;
           });
           if (targetBills.length > 10) {
             textFallback += `...และอีก ${targetBills.length - 10} รายการ\n`;

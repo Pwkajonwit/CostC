@@ -1127,7 +1127,7 @@ export function createDailySummaryFlex(summary: {
             text: `${idx + 1}. [${b.bill_no || b.id || b["ลำดับ"] || "-"}] ${payee}`,
             size: "xs",
             color: "#334155",
-            flex: 6,
+            flex: 7,
             maxLines: 1
           },
           {
@@ -1138,14 +1138,6 @@ export function createDailySummaryFlex(summary: {
             color: "#0F172A",
             align: "end",
             flex: 4
-          },
-          {
-            type: "text",
-            text: `[${st}]`,
-            size: "xxs",
-            color: stColor,
-            align: "end",
-            flex: 3
           }
         ]
       });
@@ -4702,18 +4694,31 @@ export function createMultiBillFlex(
   const pageSize = 5;
   const maxBubbles = 10; // LINE Carousel supports up to 10 bubbles
 
-  // Sort sub-bills so bills of the same requester/bank account stay contiguous
+  // Sort bills: group all sub-bills together by requester/bank account so they stay in a single box, followed by main bills
   const sortedBills = [...bills].sort((a, b) => {
     const isSubA = isSubBillRecord(a);
     const isSubB = isSubBillRecord(b);
+
+    // Sub-bills grouped first, then main bills
+    if (isSubA && !isSubB) return -1;
+    if (!isSubA && isSubB) return 1;
+
     if (isSubA && isSubB) {
       const bankA = resolveRequesterBankInfo(a, bankInfoMap, peopleMap);
       const bankB = resolveRequesterBankInfo(b, bankInfoMap, peopleMap);
       const reqA = `${bankA.accountNo || ""}_${bankA.accountName || bankA.requesterName || getRequesterDisplayName(a)}`.trim();
       const reqB = `${bankB.accountNo || ""}_${bankB.accountName || bankB.requesterName || getRequesterDisplayName(b)}`.trim();
-      return reqA.localeCompare(reqB, "th");
+      const comp = reqA.localeCompare(reqB, "th");
+      if (comp !== 0) return comp;
+      const idA = Number(a.id || a["ลำดับ"] || a._sheetRow || 0);
+      const idB = Number(b.id || b["ลำดับ"] || b._sheetRow || 0);
+      return idA - idB;
     }
-    return 0;
+
+    // Both are main bills: sort by bill ID
+    const idA = Number(a.id || a["ลำดับ"] || a._sheetRow || 0);
+    const idB = Number(b.id || b["ลำดับ"] || b._sheetRow || 0);
+    return idA - idB;
   });
 
   const displayBills = sortedBills.slice(0, pageSize * maxBubbles);
@@ -6179,28 +6184,12 @@ export function createDailyTransferSummaryFlex(
         paddingAll: "12px",
         contents: [
           {
-            type: "box",
-            layout: "horizontal",
-            contents: [
-              {
-                type: "text",
-                text: title,
-                weight: "bold",
-                color: "#FFFFFF",
-                size: "sm",
-                flex: 7,
-                wrap: true
-              },
-              {
-                type: "text",
-                text: `${categoryBadge} ฿${categoryTotal.toLocaleString("th-TH")}`,
-                weight: "bold",
-                color: isSub ? "#FBBF24" : "#34D399",
-                size: "xs",
-                align: "end",
-                flex: 5
-              }
-            ]
+            type: "text",
+            text: title,
+            weight: "bold",
+            color: "#FFFFFF",
+            size: "sm",
+            wrap: true
           },
           {
             type: "box",
