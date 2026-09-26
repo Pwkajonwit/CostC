@@ -10,7 +10,7 @@ import { getRows, getWithdrawBills, getBillFollowBills } from "@/lib/db";
 import { getUsersListFromSupabase } from "@/lib/supabase/supabase-db";
 import { cookies } from "next/headers";
 import { extractMemberPermissions, findMemberInPeopleRows } from "@/lib/user-permissions";
-import { getRowYear, isProjectInYear } from "@/lib/utils/dates";
+import { getRowYear, isProjectInYear, getTodayDateIso } from "@/lib/utils/dates";
 import { isRowMatchingYearOrPeriod, extractTargetYear } from "@/lib/fiscal-periods/fiscal-period-types";
 import type { SheetRow } from "@/lib/types";
 
@@ -69,13 +69,20 @@ export async function WithdrawDashboard({ filters = {} }: { filters?: WithdrawFi
   const effectiveRole = userPerms ? userPerms.role : (cookieStore.get("auth_role")?.value || "");
   const isAdmin = Boolean(userPerms?.isOwner || effectiveRole === "Owner" || effectiveRole === "Admin");
 
-  // If requester is not explicitly provided, default to the logged-in user ONLY for regular employees (admins see all)
+  const todayIso = getTodayDateIso();
+
+  // If requester is not explicitly provided, default to the logged-in user for everyone
+  let defaultRequester = "";
+  if (authEmpId || authName) {
+    defaultRequester = findMatchingRequesterKey(peopleRows, authEmpId, authName, usersList);
+  }
+
   let effectiveFilters = { ...filters };
-  if (!isAdmin && !effectiveFilters.requester && (authEmpId || authName)) {
-    const defaultRequester = findMatchingRequesterKey(peopleRows, authEmpId, authName, usersList);
-    if (defaultRequester) {
-      effectiveFilters.requester = defaultRequester;
-    }
+  if (!effectiveFilters.requester && defaultRequester) {
+    effectiveFilters.requester = defaultRequester;
+  }
+  if (!effectiveFilters.date) {
+    effectiveFilters.date = todayIso;
   }
   
   const rows = hydrateDataRows(dataRows).filter(row => {
@@ -94,7 +101,18 @@ export async function WithdrawDashboard({ filters = {} }: { filters?: WithdrawFi
     "ชื่อเต็ม": String(s["ชื่อเต็ม"] || "").trim(),
   }));
 
-  return <WithdrawDashboardClient rows={yearFilteredRows} peopleRows={peopleRows} usersList={usersList} stores={lightStoreRows} initialFilters={effectiveFilters} isAdmin={isAdmin} />;
+  return (
+    <WithdrawDashboardClient
+      rows={yearFilteredRows}
+      peopleRows={peopleRows}
+      usersList={usersList}
+      stores={lightStoreRows}
+      initialFilters={effectiveFilters}
+      isAdmin={isAdmin}
+      authEmpId={authEmpId}
+      authName={authName}
+    />
+  );
 }
 
 export async function BillFollowDashboard() {

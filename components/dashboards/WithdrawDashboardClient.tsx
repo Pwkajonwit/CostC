@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback, type FormEvent } from "react";
-import { Banknote, Check, ChevronLeft, ChevronRight, Clock, Filter, List, LoaderCircle, RotateCcw, RotateCw, Search, Send, X } from "lucide-react";
+import { useEffect, useMemo, useState, useCallback, useRef, type FormEvent } from "react";
+import { Banknote, Check, ChevronLeft, ChevronRight, Clock, Filter, List, LoaderCircle, RotateCcw, RotateCw, Search, Send, User, X } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { showToast } from "@/components/shared/ToastProvider";
 import { money, toNumber } from "@/lib/utils/numbers";
@@ -27,6 +27,8 @@ type WithdrawDashboardClientProps = {
   initialFilters?: WithdrawFilters;
   isAdmin?: boolean;
   stores?: SheetRow[];
+  authEmpId?: string;
+  authName?: string;
 };
 
 const ALL_COLUMNS = ["ลำดับ", "ID Project", "ชื่อ Project", "ร้าน/บุคคล", "สินค้า/ทำงาน", "บิล", "ประเภท", "ยอดเงิน", "ยอดโอน", "ผู้เบิก", "ว/ด/ป", "วันจ่าย", "จัดการ"];
@@ -128,7 +130,16 @@ function getBillRowTransfer(row: SheetRow): number {
   return rawTransfer > 0 ? rawTransfer : calculatedTransfer;
 }
 
-export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], initialFilters = {}, isAdmin = false, stores }: WithdrawDashboardClientProps) {
+export function WithdrawDashboardClient({
+  rows,
+  peopleRows,
+  usersList = [],
+  initialFilters = {},
+  isAdmin = false,
+  stores,
+  authEmpId,
+  authName,
+}: WithdrawDashboardClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const urlSearch = searchParams.get("search") || "";
@@ -169,8 +180,36 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
   }, [isAdmin]);
 
   const columns = useMemo(() => ALL_COLUMNS, [effectiveIsAdmin]);
-  const [filters, setFilters] = useState(() => normalizeFilters(initialFilters));
-  const [searchInput, setSearchInput] = useState(() => initialFilters.search || "");
+
+  const defaultRequesterKey = useMemo(() => {
+    if (initialFilters.requester) return String(initialFilters.requester);
+    if (authEmpId || authName) {
+      return findMatchingRequesterKey(peopleRows, authEmpId, authName, usersList);
+    }
+    if (typeof document !== "undefined") {
+      const empMatch = document.cookie.match(/auth_employee_id=([^;]+)/);
+      const nameMatch = document.cookie.match(/auth_name=([^;]+)/);
+      const empId = empMatch ? decodeURIComponent(empMatch[1]) : "";
+      const name = nameMatch ? decodeURIComponent(nameMatch[1]) : "";
+      if (empId || name) {
+        return findMatchingRequesterKey(peopleRows, empId, name, usersList);
+      }
+    }
+    return "";
+  }, [initialFilters.requester, authEmpId, authName, peopleRows, usersList]);
+
+  const todayIso = useMemo(() => getTodayDateIso(), []);
+
+  const [filters, setFilters] = useState(() => ({
+    requester: initialFilters.requester !== undefined ? String(initialFilters.requester) : defaultRequesterKey,
+    date: initialFilters.date !== undefined ? String(initialFilters.date) : todayIso,
+    bill: initialFilters.bill ? String(initialFilters.bill) : "",
+    search: initialFilters.search ? String(initialFilters.search) : (urlSearch || ""),
+  }));
+  const [searchInput, setSearchInput] = useState(() => filters.search || "");
+
+  const hasInitializedRequesterRef = useRef(Boolean(defaultRequesterKey));
+  const isUserClearedRef = useRef(false);
 
   useEffect(() => {
     if (urlSearch !== (filters.search || "")) {
@@ -197,9 +236,10 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
   const [resendMode, setResendMode] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [creditFilter, setCreditFilter] = useState<"all" | "ready" | "locked">("all");
-  const todayIso = useMemo(() => getTodayDateIso(), []);
 
+  // Only update from initialFilters when user has NOT explicitly cleared
   useEffect(() => {
+    if (isUserClearedRef.current) return;
     setFilters(current => ({
       ...current,
       requester: initialFilters.requester !== undefined ? String(initialFilters.requester) : current.requester,
@@ -209,21 +249,62 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
     }));
   }, [initialFilters.requester, initialFilters.date, initialFilters.bill, initialFilters.search]);
 
-  // Client-side fallback to match logged-in requester for non-admin users if not already filtered
+  // Client-side fallback to match logged-in requester only ONCE on initial load
   useEffect(() => {
-    if (!effectiveIsAdmin && !isAdmin && typeof document !== "undefined" && !initialFilters.requester) {
-      const empMatch = document.cookie.match(/auth_employee_id=([^;]+)/);
-      const nameMatch = document.cookie.match(/auth_name=([^;]+)/);
-      const empId = empMatch ? decodeURIComponent(empMatch[1]) : "";
-      const name = nameMatch ? decodeURIComponent(nameMatch[1]) : "";
+    if (hasInitializedRequesterRef.current || isUserClearedRef.current) return;
+    if (peopleRows.length > 0) {
+      const empMatch = typeof document !== "undefined" ? document.cookie.match(/auth_employee_id=([^;]+)/) : null;
+      const nameMatch = typeof document !== "undefined" ? document.cookie.match(/auth_name=([^;]+)/) : null;
+      const empId = authEmpId || (empMatch ? decodeURIComponent(empMatch[1]) : "");
+      const name = authName || (nameMatch ? decodeURIComponent(nameMatch[1]) : "");
       if (empId || name) {
         const matched = findMatchingRequesterKey(peopleRows, empId, name, usersList);
         if (matched) {
+          hasInitializedRequesterRef.current = true;
           setFilters(prev => (prev.requester ? prev : { ...prev, requester: matched }));
         }
       }
     }
-  }, [effectiveIsAdmin, isAdmin, peopleRows, usersList, initialFilters.requester]);
+  }, [peopleRows, usersList, authEmpId, authName]);
+
+  const handleClearAllFilters = useCallback(() => {
+    isUserClearedRef.current = true;
+    setSearchInput("");
+    setFilters({ requester: "", date: "", bill: "", search: "" });
+    setCreditFilter("all");
+  }, []);
+
+  const handleResetToDefault = useCallback(() => {
+    isUserClearedRef.current = false;
+    setSearchInput("");
+    setFilters({
+      requester: defaultRequesterKey,
+      date: todayIso,
+      bill: "",
+      search: "",
+    });
+    setCreditFilter("all");
+  }, [defaultRequesterKey, todayIso]);
+
+  const hasActiveFilter = useMemo(() => {
+    return Boolean(
+      filters.requester ||
+      filters.date ||
+      filters.bill ||
+      searchInput.trim() ||
+      creditFilter !== "all"
+    );
+  }, [filters, searchInput, creditFilter]);
+
+  const isDefaultFilter = useMemo(() => {
+    return (
+      filters.requester === defaultRequesterKey &&
+      filters.date === todayIso &&
+      !filters.bill &&
+      !searchInput.trim() &&
+      creditFilter === "all"
+    );
+  }, [filters, defaultRequesterKey, todayIso, searchInput, creditFilter]);
 
   // High-performance debounced live sync from Supabase PostgreSQL + Local Form Events + Auto Polling
   useRealtimeSync({
@@ -340,6 +421,9 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
     if (name === "search") {
       setSearchInput(value);
     } else {
+      if (name === "requester" || name === "date") {
+        isUserClearedRef.current = true;
+      }
       setFilters(current => ({ ...current, [name]: value }));
     }
   }
@@ -358,6 +442,7 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
 
   // Handle bill filter change from buttons or dropdown
   function handleBillFilterChange(newBill: string) {
+    isUserClearedRef.current = true;
     if (newBill && currentSelectedBillType && newBill !== currentSelectedBillType && selectedRows.size > 0) {
       setSelectedRows(new Set());
       showToast("info", `ล้างรายการที่เลือกไว้ก่อนหน้า เนื่องจากเปลี่ยนตัวกรองเป็น "บิล${newBill}"`);
@@ -767,16 +852,17 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
                 >
                   ทั้งหมด
                 </button>
-              ) : (
+              ) : null}
+              {filters.date !== todayIso ? (
                 <button
                   type="button"
-                  onClick={() => updateFilter("date", getLocalTodayString())}
+                  onClick={() => updateFilter("date", todayIso)}
                   className="h-8 px-2.5 text-xs text-slate-600 hover:text-emerald-700 rounded-lg border border-slate-200 bg-slate-100 hover:bg-emerald-50 transition cursor-pointer flex items-center justify-center font-medium shadow-2xs"
                   title="กรองเฉพาะวันนี้"
                 >
                   วันนี้
                 </button>
-              )}
+              ) : null}
             </div>
 
             {/* Bill Type */}
@@ -857,20 +943,28 @@ export function WithdrawDashboardClient({ rows, peopleRows, usersList = [], init
               </div>
             </div>
 
-            {/* Reset Filters */}
-            {(filters.requester || filters.date || filters.bill || searchInput || creditFilter !== "all") ? (
+            {/* Reset Filters / Default Filters Buttons */}
+            {hasActiveFilter ? (
               <button
                 type="button"
-                onClick={() => {
-                  setSearchInput("");
-                  setFilters({ requester: "", date: "", bill: "", search: "" });
-                  setCreditFilter("all");
-                }}
+                onClick={handleClearAllFilters}
                 className="h-8 px-2.5 text-xs text-rose-600 hover:text-rose-700 bg-rose-50/80 hover:bg-rose-100 border border-rose-200 rounded-lg flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap font-medium shadow-2xs"
-                title="ล้างตัวกรองทั้งหมด"
+                title="ล้างตัวกรองทั้งหมด (ดูบิลทั้งหมดทุกวันทุกคน)"
               >
                 <RotateCcw size={13} className="shrink-0" />
-                <span>ล้างกรอง</span>
+                <span>ล้างกรอง (ดูทั้งหมด)</span>
+              </button>
+            ) : null}
+
+            {!isDefaultFilter ? (
+              <button
+                type="button"
+                onClick={handleResetToDefault}
+                className="h-8 px-2.5 text-xs text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap font-medium shadow-2xs"
+                title="กลับไปค่าเริ่มต้น: บิลของฉันวันนี้"
+              >
+                <User size={13} className="shrink-0 text-emerald-600" />
+                <span>บิลฉันวันนี้</span>
               </button>
             ) : null}
           </div>

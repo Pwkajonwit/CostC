@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDownWideNarrow, ArrowUpWideNarrow, Calendar, ChevronDown, ChevronLeft, ChevronRight, Eye, Filter, Plus, RotateCcw, Search, X } from "lucide-react";
+import { ArrowDownWideNarrow, ArrowUpWideNarrow, Calendar, ChevronDown, ChevronLeft, ChevronRight, Eye, Filter, Plus, RotateCcw, Search, User, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { BillWorkflowActions } from "@/components/bills/BillWorkflowActions";
 import { BillImageThumbnail } from "@/components/bills/BillImageThumbnail";
@@ -163,28 +163,33 @@ export function BillsDashboardClient({
     }
   }, []);
 
+  const defaultRequesterKey = useMemo(() => {
+    return initialRequester || authEmpId || "";
+  }, [initialRequester, authEmpId]);
+
   const [searchInput, setSearchInput] = useState(initialSearch);
   const [filters, setFilters] = useState(() => ({
-    requester: isAdmin ? "" : initialRequester,
-    date: isAdmin ? "" : todayIso,
+    requester: defaultRequesterKey,
+    date: todayIso,
     bill: "",
     status: "",
     search: initialSearch,
   }));
 
-  const hasInitializedRequesterRef = useRef(Boolean(initialRequester));
+  const hasInitializedRequesterRef = useRef(Boolean(defaultRequesterKey));
+  const isUserClearedRef = useRef(false);
 
   // Auto-sync initial requester only ONCE on initial load if peopleRows was not yet ready (never overwrite user manual selection)
   useEffect(() => {
-    if (hasInitializedRequesterRef.current) return;
-    if (!isAdmin && peopleRows.length > 0) {
+    if (hasInitializedRequesterRef.current || isUserClearedRef.current) return;
+    if (peopleRows.length > 0) {
       const resolvedReq = resolveMatchingRequesterKey(peopleRows, authEmpId, authName);
       if (resolvedReq) {
         hasInitializedRequesterRef.current = true;
-        setFilters(prev => ({ ...prev, requester: resolvedReq }));
+        setFilters(prev => (prev.requester ? prev : { ...prev, requester: resolvedReq }));
       }
     }
-  }, [isAdmin, peopleRows, authEmpId, authName]);
+  }, [peopleRows, authEmpId, authName]);
 
   useEffect(() => {
     setSearchInput(initialSearch);
@@ -197,6 +202,44 @@ export function BillsDashboardClient({
     }, 250);
     return () => clearTimeout(timer);
   }, [searchInput]);
+
+  const handleClearAllFilters = useCallback(() => {
+    isUserClearedRef.current = true;
+    setSearchInput("");
+    setFilters({ requester: "", date: "", bill: "", status: "", search: "" });
+  }, []);
+
+  const handleResetToDefault = useCallback(() => {
+    isUserClearedRef.current = false;
+    setSearchInput("");
+    setFilters({
+      requester: defaultRequesterKey,
+      date: todayIso,
+      bill: "",
+      status: "",
+      search: "",
+    });
+  }, [defaultRequesterKey, todayIso]);
+
+  const hasActiveFilter = useMemo(() => {
+    return Boolean(
+      filters.requester ||
+      filters.date ||
+      filters.bill ||
+      filters.status ||
+      searchInput.trim()
+    );
+  }, [filters, searchInput]);
+
+  const isDefaultFilter = useMemo(() => {
+    return (
+      filters.requester === defaultRequesterKey &&
+      filters.date === todayIso &&
+      !filters.bill &&
+      !filters.status &&
+      !searchInput.trim()
+    );
+  }, [filters, defaultRequesterKey, todayIso, searchInput]);
 
   const [page, setPage] = useState(initialPage);
   const [pageSize, setPageSize] = useState(initialPageSize);
@@ -410,6 +453,9 @@ export function BillsDashboardClient({
     if (name === "search") {
       setSearchInput(value);
     } else {
+      if (name === "requester" || name === "date") {
+        isUserClearedRef.current = true;
+      }
       setFilters(cur => ({ ...cur, [name]: value }));
     }
   }
@@ -500,13 +546,26 @@ export function BillsDashboardClient({
                 <Filter size={13} className="text-emerald-700" />
                 <span>ตัวกรองข้อมูล</span>
               </span>
-              <button
-                type="button"
-                onClick={() => setFilters({ requester: "", date: "", bill: "", status: "", search: searchInput })}
-                className="text-[11px] text-rose-600 hover:underline cursor-pointer"
-              >
-                ล้างตัวกรองทั้งหมด
-              </button>
+              <div className="flex items-center gap-2.5">
+                {hasActiveFilter ? (
+                  <button
+                    type="button"
+                    onClick={handleClearAllFilters}
+                    className="text-[11px] text-rose-600 hover:underline cursor-pointer"
+                  >
+                    ล้างตัวกรองทั้งหมด
+                  </button>
+                ) : null}
+                {!isDefaultFilter ? (
+                  <button
+                    type="button"
+                    onClick={handleResetToDefault}
+                    className="text-[11px] text-emerald-700 hover:underline cursor-pointer font-medium"
+                  >
+                    ของฉันวันนี้
+                  </button>
+                ) : null}
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-xs">
@@ -771,19 +830,28 @@ export function BillsDashboardClient({
             <ChevronDown size={13} className="absolute right-2 pointer-events-none text-slate-400" />
           </div>
 
-          {/* Reset Filters (Only when filtered) */}
-          {(filters.requester || filters.date || filters.bill || filters.status || searchInput) ? (
+          {/* Reset Filters / Default Filters Buttons */}
+          {hasActiveFilter ? (
             <button
               type="button"
-              onClick={() => {
-                setSearchInput("");
-                setFilters({ requester: "", date: "", bill: "", status: "", search: "" });
-              }}
+              onClick={handleClearAllFilters}
               className="h-8 px-2.5 text-xs text-rose-600 hover:text-rose-700 bg-rose-50/80 hover:bg-rose-100 border border-rose-200 rounded-lg flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap font-medium shadow-2xs"
-              title="ล้างตัวกรองทั้งหมด"
+              title="ล้างตัวกรองทั้งหมด (ดูบิลทั้งหมดทุกวันทุกคน)"
             >
               <RotateCcw size={13} className="shrink-0" />
-              <span>ล้างกรอง</span>
+              <span>ล้างกรอง (ดูทั้งหมด)</span>
+            </button>
+          ) : null}
+
+          {!isDefaultFilter ? (
+            <button
+              type="button"
+              onClick={handleResetToDefault}
+              className="h-8 px-2.5 text-xs text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap font-medium shadow-2xs"
+              title="กลับไปค่าเริ่มต้น: บิลของฉันวันนี้"
+            >
+              <User size={13} className="shrink-0 text-emerald-600" />
+              <span>บิลฉันวันนี้</span>
             </button>
           ) : null}
         </div>
