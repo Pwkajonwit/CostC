@@ -103,13 +103,20 @@ export async function GET(req: NextRequest) {
       return false;
     });
 
-    const totalBills = todayBills.length;
+    // Exclude "รอตั้งเบิก", "ยังไม่ตั้งเบิก", "ยกเลิก" and empty status from daily financial report
+    const activeTodayBills = todayBills.filter(rawB => {
+      const b = rawB as any;
+      const normSt = normalizeBillStatus(b.status || b["สถานะ"]);
+      return normSt && normSt !== "รอตั้งเบิก" && normSt !== "ยังไม่ตั้งเบิก" && normSt !== "ยกเลิก";
+    });
+
+    const totalBills = activeTodayBills.length;
     let todayPendingCount = 0;
     let todayApprovedCount = 0;
     let todayPaidCount = 0;
     let totalAmount = 0;
 
-    todayBills.forEach(rawB => {
+    activeTodayBills.forEach(rawB => {
       const b = rawB as any;
       const d = (b.data && typeof b.data === "object") ? b.data : {};
       const rawAmt = b.amount ?? b["ยอดเงิน"] ?? d["ยอดเงิน"] ?? b["ค่าแรง+พนักงาน+อื่นๆ"] ?? d["ค่าแรง+พนักงาน+อื่นๆ"] ?? b["ค่าแรง"] ?? d["ค่าแรง"] ?? b["ค่าจ้าง"] ?? d["ค่าจ้าง"] ?? b["ยอดโอน"] ?? d["ยอดโอน"] ?? 0;
@@ -121,7 +128,7 @@ export async function GET(req: NextRequest) {
         todayApprovedCount++;
       } else if (normSt === "เบิกแล้ว") {
         todayPaidCount++;
-      } else if (normSt === "รออนุมัติ" || normSt === "รอตั้งเบิก" || normSt === "ตั้งเบิก" || normSt === "รอตรวจสอบ") {
+      } else if (normSt === "รออนุมัติ" || normSt === "ตั้งเบิก" || normSt === "รอตรวจสอบ") {
         todayPendingCount++;
       }
     });
@@ -129,7 +136,7 @@ export async function GET(req: NextRequest) {
     const globalPendingCount = bills.filter(rawB => {
       const b = rawB as any;
       const normSt = normalizeBillStatus(b.status || b["สถานะ"]);
-      return normSt === "รออนุมัติ" || normSt === "รอตั้งเบิก" || normSt === "ตั้งเบิก" || normSt === "รอตรวจสอบ";
+      return normSt === "รออนุมัติ" || normSt === "ตั้งเบิก" || normSt === "รอตรวจสอบ";
     }).length;
 
     const activeTasks = tasks.filter(t => t.status !== "สำเร็จ");
