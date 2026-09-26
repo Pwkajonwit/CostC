@@ -78,9 +78,9 @@ async function listHydratedContractOptions(column: FieldSchema, preloadedRows?: 
 
       let displayLabel = idVal;
       if (contractorName) {
-        displayLabel = contractorName;
+        displayLabel = contractorName.startsWith(idVal) ? contractorName : `${idVal}-${contractorName}`;
       } else if (details) {
-        displayLabel = details;
+        displayLabel = details.startsWith(idVal) ? details : `${idVal}-${details}`;
       }
 
       const rowData = pick(row, rowColumns);
@@ -88,6 +88,7 @@ async function listHydratedContractOptions(column: FieldSchema, preloadedRows?: 
         rowData["ชื่อเล่น"] = contractorName;
         rowData["ผู้รับเหมา"] = contractorName;
       }
+      rowData["id_Conwork"] = idVal;
 
       return {
         value: idVal,

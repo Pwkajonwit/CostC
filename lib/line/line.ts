@@ -413,10 +413,22 @@ export function getBillFlexGrossAmount(b: Record<string, any>): number {
 }
 
 export function resolveBillDeductionInfo(b: Record<string, any>): { hasDeduct: boolean; deductAmt: number; deductPercent: string } {
-  const rawD = String(b["หัก"] || b.deduct_percent || b.deduct || b.data?.["หัก"] || b.data?.deduct_percent || "").trim();
+  const rawWhtNum = Number(b.withholding_tax ?? b.withholdingTax ?? b["withholding_tax"] ?? b.data?.withholding_tax ?? 0);
+  const rawD = String(
+    b["หัก"] ||
+    b.deduct_percent ||
+    b.deduct ||
+    (rawWhtNum > 0 ? `หัก ${rawWhtNum}%` : "") ||
+    b["หัก ณ ที่จ่าย"] ||
+    b.data?.["หัก"] ||
+    b.data?.deduct_percent ||
+    b.data?.withholding_tax ||
+    ""
+  ).trim();
   const rawDLower = rawD.toLowerCase();
   const isActive = Boolean(
-    rawD &&
+    rawWhtNum > 0 ||
+    (rawD &&
     rawD !== "-" &&
     rawD !== "0" &&
     rawD !== "0%" &&
@@ -424,7 +436,7 @@ export function resolveBillDeductionInfo(b: Record<string, any>): { hasDeduct: b
     !rawDLower.includes("ไม่มีการหักภาษี") &&
     !rawDLower.includes("ไม่มีหัก") &&
     rawDLower !== "false" &&
-    rawDLower !== "no"
+    rawDLower !== "no")
   );
 
   const gross = getBillFlexGrossAmount(b);
@@ -433,7 +445,7 @@ export function resolveBillDeductionInfo(b: Record<string, any>): { hasDeduct: b
   }
 
   const cleanD = rawD.replace(/หัก|\s|%/g, "").trim();
-  const numRate = Number(cleanD);
+  const numRate = Number(cleanD) || (rawWhtNum > 0 ? rawWhtNum : 0);
   const rawCustom = Number(b["จำนวนหัก"] || b.deduct_amount || b.data?.["จำนวนหัก"] || b.data?.deduct_amount || 0);
 
   let deductAmt = 0;
@@ -4789,9 +4801,15 @@ export function createMultiBillFlex(
       const hasDeduct = dInfo.hasDeduct;
       const rawNet = Number(b["ยอดโอน"] || b.net_amount || b.data?.["ยอดโอน"] || b.data?.net_amount || 0);
       const lineItems = extractBillLineItems(b);
-      const netTransferAmt = hasDeduct
-        ? (deductAmt > 0 ? grossAmt - deductAmt : (rawNet > 0 ? rawNet : grossAmt))
+      let netTransferAmt = hasDeduct
+        ? (deductAmt > 0 ? grossAmt - deductAmt : (rawNet > 0 && rawNet <= grossAmt ? rawNet : grossAmt))
         : (lineItems.length > 0 || !rawNet ? grossAmt : (rawNet > 0 ? rawNet : grossAmt));
+
+      const rawVatVal = b.vat ?? b["vat"] ?? b["VAT"] ?? b["Vat"] ?? b["ภาษี"] ?? b.data?.vat ?? b.data?.["vat"];
+      const hasVatFlag = (rawVatVal !== null && rawVatVal !== undefined && String(rawVatVal).trim() !== "" && String(rawVatVal).trim() !== "-" && String(rawVatVal).trim() !== "0" && String(rawVatVal).toLowerCase() !== "ไม่มี" && String(rawVatVal).toLowerCase() !== "false") || Number(b.vat_amount || 0) > 0;
+      if (!hasVatFlag && grossAmt > 0 && netTransferAmt > grossAmt) {
+        netTransferAmt = hasDeduct && deductAmt > 0 ? grossAmt - deductAmt : grossAmt;
+      }
 
       const cleanPercent = dInfo.deductPercent;
       const percentLabel = cleanPercent ? `หัก ${cleanPercent}%` : "หัก ณ ที่จ่าย";
@@ -4913,12 +4931,13 @@ export function createMultiBillFlex(
       const alreadyCountedInPaid = Boolean(billKey && projInfo?.paidBillIds && projInfo.paidBillIds.has(billKey));
 
       const isLaborBill = !isStaffBill && (isContractor || rawCatName.includes("ค่าแรง") || rawCatName.startsWith("2.") || Boolean(matchedContract) || derivedContractTotal > 0);
+      const isIndividualLabor = isLaborBill && (!laborStatus || laborStatus.includes("บุคคลธรรมดา") || Number(b.vat_amount || 0) === 0);
 
-      // Detect VAT tag (แสดงเฉพาะบิลที่มีการระบุ VAT จริงเท่านั้น)
+      // Detect VAT tag (แสดงเฉพาะบิลที่มีการระบุ VAT จริงเท่านั้น และไม่รวมค่าแรงผู้รับเหมาบุคคลธรรมดา)
       let vatTag = "";
       const rawVat = b.vat ?? b["vat"] ?? b["VAT"] ?? b["Vat"] ?? b["ภาษี"] ?? b["ภาษีมูลค่าเพิ่ม"] ??
         b.data?.vat ?? b.data?.["vat"] ?? b.data?.["VAT"] ?? b.data?.["Vat"] ?? b.data?.["ภาษี"] ?? b.data?.["ภาษีมูลค่าเพิ่ม"];
-      if (rawVat !== null && rawVat !== undefined) {
+      if (!isIndividualLabor && rawVat !== null && rawVat !== undefined) {
         const str = String(rawVat).trim();
         const lower = str.toLowerCase();
         if (str && str !== "-" && str !== "0" && str !== "0%" && str !== "0.00" && lower !== "ไม่มี" && lower !== "ไม่มี vat" && lower !== "false" && lower !== "no") {
@@ -4930,7 +4949,7 @@ export function createMultiBillFlex(
           }
         }
       }
-      if (!vatTag) {
+      if (!vatTag && !isIndividualLabor) {
         const rawVatTotal = b["ยอดรวม vat"] ?? b["ยอดรวม VAT"] ?? b.data?.["ยอดรวม vat"] ?? b.data?.["ยอดรวม VAT"];
         if (rawVatTotal !== null && rawVatTotal !== undefined && String(rawVatTotal).trim() !== "" && String(rawVatTotal).trim() !== "-") {
           const num = Number(String(rawVatTotal).replace(/,/g, ""));
@@ -4938,6 +4957,9 @@ export function createMultiBillFlex(
             vatTag = "(VAT 7%)";
           }
         }
+      }
+      if (isIndividualLabor) {
+        vatTag = "";
       }
 
       // Deduction tag (only when deduction is actually active)

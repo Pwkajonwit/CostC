@@ -49,11 +49,13 @@ type PettyCashDashboardClientProps = {
 };
 
 const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; border: string }> = {
-  "รออนุมัติ": { label: "รออนุมัติ", bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200" },
-  "อนุมัติแล้ว": { label: "อนุมัติแล้ว", bg: "bg-sky-50", text: "text-sky-700", border: "border-sky-200" },
+  "เปิดแล้ว": { label: "เปิดแล้ว", bg: "bg-sky-50", text: "text-sky-700", border: "border-sky-200" },
   "จ่ายเงินแล้ว": { label: "จ่ายเงินแล้ว", bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200" },
   "เคลียร์บิลแล้ว": { label: "เคลียร์บิลแล้ว", bg: "bg-purple-50", text: "text-purple-700", border: "border-purple-200" },
   "ยกเลิก": { label: "ยกเลิก", bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200" },
+  // legacy fallback
+  "รออนุมัติ": { label: "เปิดแล้ว", bg: "bg-sky-50", text: "text-sky-700", border: "border-sky-200" },
+  "อนุมัติแล้ว": { label: "จ่ายเงินแล้ว", bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200" },
 };
 
 export function PettyCashDashboardClient({
@@ -110,7 +112,7 @@ export function PettyCashDashboardClient({
     let list = filterRowsByYear(initialRows);
 
     if (selectedStatus !== "all") {
-      list = list.filter((r) => String(r["สถานะ"] || "รออนุมัติ") === selectedStatus);
+      list = list.filter((r) => String(r["สถานะ"] || "เปิดแล้ว") === selectedStatus);
     }
 
     if (selectedProject !== "all") {
@@ -140,7 +142,11 @@ export function PettyCashDashboardClient({
   const totalAmount = useMemo(() => filteredRows.reduce((sum, r) => sum + toNumber(r["จำนวนเงิน"]), 0), [filteredRows]);
   const totalCleared = useMemo(() => filteredRows.reduce((sum, r) => sum + toNumber(r["ยอดเคลียร์แล้ว"]), 0), [filteredRows]);
   const totalRemaining = totalAmount - totalCleared;
-  const pendingCount = useMemo(() => filteredRows.filter((r) => (r["สถานะ"] || "รออนุมัติ") === "รออนุมัติ").length, [filteredRows]);
+  const pendingCount = useMemo(() => filteredRows.filter((r) => {
+    const s = r["สถานะ"] || "เปิดแล้ว";
+    return s === "เปิดแล้ว" || s === "รออนุมัติ"; // รองรับ legacy
+  }).length, [filteredRows]);
+
 
   // Pagination
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
@@ -475,7 +481,7 @@ export function PettyCashDashboardClient({
             >
               ทั้งหมด
             </button>
-            {Object.keys(STATUS_CONFIG).map((st) => (
+            {Object.keys(STATUS_CONFIG).filter(st => !["รออนุมัติ", "อนุมัติแล้ว"].includes(st)).map((st) => (
               <button
                 key={st}
                 type="button"
@@ -562,12 +568,12 @@ export function PettyCashDashboardClient({
                   const amount = toNumber(row["จำนวนเงิน"]);
                   const cleared = toNumber(row["ยอดเคลียร์แล้ว"]);
                   const remaining = toNumber(row["ยอดคงเหลือ"] || (amount - cleared));
-                  const status = String(row["สถานะ"] || "รออนุมัติ");
-                  const badge = STATUS_CONFIG[status] || STATUS_CONFIG["รออนุมัติ"];
+                  const status = String(row["สถานะ"] || "เปิดแล้ว");
+                  const badge = STATUS_CONFIG[status] || STATUS_CONFIG["เปิดแล้ว"];
                   const slipUrl = row["สลิป"] || row["image_url"] || "";
 
                   return (
-                    <tr key={`${String(id)}-${row._sheetRow ?? idx}`} className="hover:bg-slate-50/70 transition">
+                    <tr key={`row-${pageStart + idx}`} className="hover:bg-slate-50/70 transition">
                       <td className="py-2 px-2.5 font-semibold text-slate-900 whitespace-nowrap">
                         {String(id)}
                       </td>

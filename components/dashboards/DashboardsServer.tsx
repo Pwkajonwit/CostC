@@ -86,9 +86,9 @@ export async function WithdrawDashboard({ filters = {} }: { filters?: WithdrawFi
   }
   
   const rows = hydrateDataRows(dataRows).filter(row => {
-    // แสดงบิลสถานะ "รอตั้งเบิก", "ตั้งเบิก" และ "อนุมัติ"
+    // แสดงบิลสถานะ "รอตั้งเบิก", "ตั้งเบิก", "รออนุมัติ", "อนุมัติ" และ "เบิกแล้ว"
     const status = normalizeBillStatus(row["สถานะ"]);
-    if (status !== "รอตั้งเบิก" && status !== "ตั้งเบิก" && status !== "รออนุมัติ" && status !== "อนุมัติ") return false;
+    if (status !== "รอตั้งเบิก" && status !== "ตั้งเบิก" && status !== "รออนุมัติ" && status !== "อนุมัติ" && status !== "เบิกแล้ว") return false;
     return hasValue(row["ลำดับ"]) || hasValue(row["ID Project"]) || hasValue(row["ร้าน/บุคคล"]) || hasValue(row["สินค้า/ทำงาน"]);
   });
   const selectedYear = cookieStore.get("costlab_selected_year")?.value;

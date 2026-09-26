@@ -91,7 +91,12 @@ export function ContractOpenDashboardClient({
       <div className="hidden md:grid grid-cols-4 gap-3">
         <div className="bg-white rounded-md p-3 border border-slate-200 shadow-2xs">
           <span className="text-xs text-slate-500 block truncate">สัญญาจ้างทั้งหมด</span>
-          <div className="text-lg text-slate-900 mt-0.5">{filteredRows.length} <span className="text-xs font-normal text-slate-500">สัญญา</span></div>
+          <div className="flex items-baseline justify-between mt-0.5">
+            <div className="text-lg text-slate-900">{filteredRows.length} <span className="text-xs font-normal text-slate-500">สัญญา</span></div>
+            <span className="text-[11px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 font-medium">
+              {filteredRows.filter(r => toNumber(r["ยอดเงินจ้าง"]) > 0 && toNumber(r["ยอดเงินจ่าย"]) >= toNumber(r["ยอดเงินจ้าง"])).length} ครบสัญญา
+            </span>
+          </div>
         </div>
 
         <div className="bg-white rounded-md p-3 border border-slate-200 shadow-2xs">
@@ -218,17 +223,26 @@ export function ContractOpenDashboardClient({
                 onClick={() => window.location.href = `/contract-open/${encodeURIComponent(contractId)}`}
                 className="bg-white rounded-xl p-3.5 border border-slate-200 shadow-xs hover:border-slate-300 active:bg-slate-50 transition cursor-pointer space-y-2.5"
               >
-                {/* Header Row: id_Conwork badge + Project Name + ยอดเงินจ้าง */}
+                {/* Header Row: id_Conwork badge + Status badge + Project Name + ยอดเงินจ้าง */}
                 <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-1.5 min-w-0">
+                  <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                     <span className="text-xs bg-slate-900 text-white px-2 py-0.5 rounded-md shrink-0">
                       #{contractId}
                     </span>
+                    {hireAmount > 0 && paidAmount >= hireAmount ? (
+                      <span className="text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded shrink-0">
+                        ครบสัญญา
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded shrink-0">
+                        ยังไม่ครบ
+                      </span>
+                    )}
                     <span className="text-xs text-slate-900 truncate">
                       {projectId ? `[${projectId}] ` : ""}{projectName}
                     </span>
                   </div>
-                  <span className="text-xs text-slate-900 shrink-0">
+                  <span className="text-xs text-slate-900 shrink-0 font-medium">
                     {money(hireAmount)} ฿
                   </span>
                 </div>
@@ -358,7 +372,8 @@ export function ContractOpenDashboardClient({
                     <th className="py-2.5 px-3 border-r border-slate-200 text-center whitespace-nowrap">เบอร์โทรศัพท์</th>
                     <th className="py-2.5 px-3 border-r border-slate-200 text-right">ยอดเงินจ้าง</th>
                     <th className="py-2.5 px-3 border-r border-slate-200 text-right">ยอดเงินจ่าย</th>
-                    <th className="py-2.5 px-3 text-right">ค่าแรงคงเหลือ</th>
+                    <th className="py-2.5 px-3 border-r border-slate-200 text-right">ค่าแรงคงเหลือ</th>
+                    <th className="py-2.5 px-3 text-center whitespace-nowrap">ครบสัญญา</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -412,13 +427,31 @@ export function ContractOpenDashboardClient({
                         <td className="py-2 px-3 text-right border-r border-slate-100">
                           {money(paidAmount)}
                         </td>
-                        <td className="py-2 px-3 text-right">
+                        <td className="py-2 px-3 text-right border-r border-slate-100">
                           {remaining < 0 ? (
                             <span className="text-rose-600 font-bold text-xs" style={{ color: "#dc2626" }}>
                               {money(remaining)}
                             </span>
                           ) : (
                             money(remaining)
+                          )}
+                        </td>
+                        <td className="py-2 px-3 text-center whitespace-nowrap">
+                          {hireAmount > 0 && paidAmount >= hireAmount ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-300 shadow-2xs">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                              ครบสัญญา
+                            </span>
+                          ) : paidAmount > 0 ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-sky-50 text-sky-700 border border-sky-200 shadow-2xs">
+                              <span className="w-1.5 h-1.5 rounded-full bg-sky-500"></span>
+                              เบิกบางส่วน
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                              ยังไม่เบิก
+                            </span>
                           )}
                         </td>
                       </tr>

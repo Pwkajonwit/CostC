@@ -400,6 +400,7 @@ export function mapSupabaseRowToSheetRow(dbTable: string, row: Record<string, an
     res["ที่อยู่"] = row.address ?? row["ที่อยู่"] ?? "";
     res["ชื่อ-นามสกุล"] = row.full_name ?? row["ชื่อ-นามสกุล"] ?? "";
     res["ชื่อเล่น"] = row.nickname ?? row["ชื่อเล่น"] ?? "";
+    res["ผู้รับเหมา"] = row.contractor_name ?? row["ผู้รับเหมา"] ?? row.nickname ?? row["ชื่อเล่น"] ?? "";
     res["ค่าแรงคงเหลือ"] = row.remaining_amount ?? row["ค่าแรงคงเหลือ"] ?? "";
   } else if (dbTable === "master_members") {
     res["รหัสพนักงาน"] = row.id ?? row["รหัสพนักงาน"];
@@ -1782,6 +1783,8 @@ export async function getRowsFromSupabase(tableName: string, maxRows = 10_000): 
             const cleanFollow = { ...followData };
             if (!cleanFollow["วันจ่าย"] && res["วันจ่าย"]) delete cleanFollow["วันจ่าย"];
             if (!cleanFollow["paid_date"] && res["วันจ่าย"]) delete cleanFollow["paid_date"];
+            if (row.amount !== null && row.amount !== undefined && res["ยอดเงิน"]) delete cleanFollow["ยอดเงิน"];
+            if (row.transfer_amount !== null && row.transfer_amount !== undefined && res["ยอดโอน"]) delete cleanFollow["ยอดโอน"];
             Object.assign(res, cleanFollow);
             res["paid_date"] = res["วันจ่าย"] || row.paid_date || "";
             res["due_date"] = res["วันจ่าย"] || row.paid_date || "";
@@ -1892,7 +1895,7 @@ export async function getWithdrawBillsFromSupabase(maxRows = 3_000): Promise<She
       supabaseAdmin
         .from("bills")
         .select("*")
-        .or("status.eq.รอตั้งเบิก,status.eq.ตั้งเบิก,status.eq.รออนุมัติ,status.eq.อนุมัติ")
+        .or("status.eq.รอตั้งเบิก,status.eq.ตั้งเบิก,status.eq.รออนุมัติ,status.eq.อนุมัติ,status.eq.เบิกแล้ว")
         .order("id", { ascending: false })
         .range(0, rangeEnd),
       getBillFollowDatesFromSupabase()
@@ -1917,9 +1920,34 @@ export async function getWithdrawBillsFromSupabase(maxRows = 3_000): Promise<She
           const cleanFollow = { ...followData };
           if (!cleanFollow["วันจ่าย"] && res["วันจ่าย"]) delete cleanFollow["วันจ่าย"];
           if (!cleanFollow["paid_date"] && res["วันจ่าย"]) delete cleanFollow["paid_date"];
+          if (row.amount !== null && row.amount !== undefined && res["ยอดเงิน"]) delete cleanFollow["ยอดเงิน"];
+          if (row.transfer_amount !== null && row.transfer_amount !== undefined && res["ยอดโอน"]) delete cleanFollow["ยอดโอน"];
           Object.assign(res, cleanFollow);
           res["paid_date"] = res["วันจ่าย"] || row.paid_date || "";
           res["due_date"] = res["วันจ่าย"] || row.paid_date || "";
+
+          // Re-enforce withholding tax and VAT consistency after followData merge
+          const hasExplicitZeroWht = row.withholding_tax !== null && row.withholding_tax !== undefined && Number(row.withholding_tax) === 0;
+          const isWhtActive = !hasExplicitZeroWht && (
+            Number(row.withholding_tax) > 0 ||
+            isDeductActive(res["หัก"]) ||
+            isDeductActive(row["หัก"])
+          );
+          if (!isWhtActive) {
+            res["หัก"] = "";
+            res["จำนวนหัก"] = "";
+            res["3เปอร์"] = "";
+            res["3เปอร์เซ็น"] = "";
+            res["วันออก 3%"] = "";
+          }
+
+          const hasExplicitZeroVat = row.vat_amount !== null && row.vat_amount !== undefined && Number(row.vat_amount) === 0;
+          const isVat = !hasExplicitZeroVat && (Number(row.vat_amount) > 0 || isVatActive(res["vat"]) || isVatActive(row.vat));
+          if (!isVat) {
+            res["vat"] = "";
+            res.vat = "";
+          }
+
           if (followData["ลำดับ"]) res["ลำดับ"] = followData["ลำดับ"];
           if (followData["ผู้สร้างบิล"]) {
             res["ผู้สร้างบิล"] = followData["ผู้สร้างบิล"];
@@ -1972,9 +2000,34 @@ export async function getBillFollowRowsFromSupabase(maxRows = 3_000): Promise<Sh
           const cleanFollow = { ...followData };
           if (!cleanFollow["วันจ่าย"] && res["วันจ่าย"]) delete cleanFollow["วันจ่าย"];
           if (!cleanFollow["paid_date"] && res["วันจ่าย"]) delete cleanFollow["paid_date"];
+          if (row.amount !== null && row.amount !== undefined && res["ยอดเงิน"]) delete cleanFollow["ยอดเงิน"];
+          if (row.transfer_amount !== null && row.transfer_amount !== undefined && res["ยอดโอน"]) delete cleanFollow["ยอดโอน"];
           Object.assign(res, cleanFollow);
           res["paid_date"] = res["วันจ่าย"] || row.paid_date || "";
           res["due_date"] = res["วันจ่าย"] || row.paid_date || "";
+
+          // Re-enforce withholding tax and VAT consistency after followData merge
+          const hasExplicitZeroWht = row.withholding_tax !== null && row.withholding_tax !== undefined && Number(row.withholding_tax) === 0;
+          const isWhtActive = !hasExplicitZeroWht && (
+            Number(row.withholding_tax) > 0 ||
+            isDeductActive(res["หัก"]) ||
+            isDeductActive(row["หัก"])
+          );
+          if (!isWhtActive) {
+            res["หัก"] = "";
+            res["จำนวนหัก"] = "";
+            res["3เปอร์"] = "";
+            res["3เปอร์เซ็น"] = "";
+            res["วันออก 3%"] = "";
+          }
+
+          const hasExplicitZeroVat = row.vat_amount !== null && row.vat_amount !== undefined && Number(row.vat_amount) === 0;
+          const isVat = !hasExplicitZeroVat && (Number(row.vat_amount) > 0 || isVatActive(res["vat"]) || isVatActive(row.vat));
+          if (!isVat) {
+            res["vat"] = "";
+            res.vat = "";
+          }
+
           if (followData["ลำดับ"]) res["ลำดับ"] = followData["ลำดับ"];
           if (followData["ผู้สร้างบิล"]) {
             res["ผู้สร้างบิล"] = followData["ผู้สร้างบิล"];

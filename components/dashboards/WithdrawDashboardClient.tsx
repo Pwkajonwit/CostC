@@ -236,6 +236,7 @@ export function WithdrawDashboardClient({
   const [resendMode, setResendMode] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [creditFilter, setCreditFilter] = useState<"all" | "ready" | "locked">("all");
+  const [showWithdrawn, setShowWithdrawn] = useState(false);
 
   // Only update from initialFilters when user has NOT explicitly cleared
   useEffect(() => {
@@ -272,6 +273,7 @@ export function WithdrawDashboardClient({
     setSearchInput("");
     setFilters({ requester: "", date: "", bill: "", search: "" });
     setCreditFilter("all");
+    setShowWithdrawn(false);
   }, []);
 
   const handleResetToDefault = useCallback(() => {
@@ -284,6 +286,7 @@ export function WithdrawDashboardClient({
       search: "",
     });
     setCreditFilter("all");
+    setShowWithdrawn(false);
   }, [defaultRequesterKey, todayIso]);
 
   const hasActiveFilter = useMemo(() => {
@@ -292,9 +295,10 @@ export function WithdrawDashboardClient({
       filters.date ||
       filters.bill ||
       searchInput.trim() ||
-      creditFilter !== "all"
+      creditFilter !== "all" ||
+      showWithdrawn
     );
-  }, [filters, searchInput, creditFilter]);
+  }, [filters, searchInput, creditFilter, showWithdrawn]);
 
   const isDefaultFilter = useMemo(() => {
     return (
@@ -302,9 +306,10 @@ export function WithdrawDashboardClient({
       filters.date === todayIso &&
       !filters.bill &&
       !searchInput.trim() &&
-      creditFilter === "all"
+      creditFilter === "all" &&
+      !showWithdrawn
     );
-  }, [filters, defaultRequesterKey, todayIso, searchInput, creditFilter]);
+  }, [filters, defaultRequesterKey, todayIso, searchInput, creditFilter, showWithdrawn]);
 
   // High-performance debounced live sync from Supabase PostgreSQL + Local Form Events + Auto Polling
   useRealtimeSync({
@@ -366,12 +371,7 @@ export function WithdrawDashboardClient({
       const override = statusOverrides[rowKey];
       return override ? { ...row, "สถานะ": override } : row;
     });
-    // แสดงบิลสถานะ "รอตั้งเบิก", "ตั้งเบิก" และ "อนุมัติ" (ยังไม่เบิก/ปิดงาน)
-    return filterWithdrawRows(currentRows, filters, requesterNames, formatVendorDisplay)
-      .filter(row => {
-        const st = normalizedStatus(row["สถานะ"]);
-        return st === "รอตั้งเบิก" || st === "ตั้งเบิก" || st === "รออนุมัติ" || st === "อนุมัติ";
-      });
+    return filterWithdrawRows(currentRows, filters, requesterNames, formatVendorDisplay);
   }, [rows, filters, statusOverrides, requesterNames, formatVendorDisplay, filterRowsByYear]);
 
   const waitingWithdrawRows = useMemo(() => {
@@ -389,15 +389,29 @@ export function WithdrawDashboardClient({
     return waitingWithdrawRows.filter(r => getRowCreditDueDateInfo(r, todayIso).isLocked).length;
   }, [waitingWithdrawRows, todayIso]);
 
+  const withdrawnRows = useMemo(() => {
+    return baseWithdrawRows.filter(r => normalizedStatus(r["สถานะ"]) === "เบิกแล้ว");
+  }, [baseWithdrawRows]);
+
+  const withdrawnCount = useMemo(() => {
+    return withdrawnRows.length;
+  }, [withdrawnRows]);
+
   const displayRows = useMemo(() => {
-    let list = baseWithdrawRows;
+    if (showWithdrawn) {
+      return withdrawnRows.slice().sort((a, b) => Number(b.id ?? b["ลำดับ"] ?? b._sheetRow ?? 0) - Number(a.id ?? a["ลำดับ"] ?? a._sheetRow ?? 0));
+    }
+    let list = baseWithdrawRows.filter(r => {
+      const st = normalizedStatus(r["สถานะ"]);
+      return st === "รอตั้งเบิก" || st === "ตั้งเบิก" || st === "รออนุมัติ" || st === "อนุมัติ";
+    });
     if (creditFilter === "ready") {
       list = list.filter(row => !getRowCreditDueDateInfo(row, todayIso).isLocked);
     } else if (creditFilter === "locked") {
       list = list.filter(row => getRowCreditDueDateInfo(row, todayIso).isLocked);
     }
     return list.slice().sort((a, b) => Number(b.id ?? b["ลำดับ"] ?? b._sheetRow ?? 0) - Number(a.id ?? a["ลำดับ"] ?? a._sheetRow ?? 0));
-  }, [baseWithdrawRows, creditFilter, todayIso]);
+  }, [baseWithdrawRows, withdrawnRows, showWithdrawn, creditFilter, todayIso]);
 
   const totalPages = Math.max(1, Math.ceil(displayRows.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -406,12 +420,15 @@ export function WithdrawDashboardClient({
   const visibleStart = visibleRows.length ? pageStart + 1 : 0;
   const visibleEnd = pageStart + visibleRows.length;
   const amount = displayRows.reduce((sum, row) => sum + getBillRowAmount(row), 0);
-  // ยอดโอน = รวมเฉพาะแถวที่อนุมัติแล้ว
-  const transfer = displayRows.reduce((sum, row) => sum + (normalizedStatus(row["สถานะ"]) === "อนุมัติ" ? getBillRowTransfer(row) : 0), 0);
+  // ยอดโอน = รวมเฉพาะแถวที่อนุมัติแล้ว (หรือเบิกแล้วเมื่อดูรายการเบิกแล้ว)
+  const transfer = displayRows.reduce((sum, row) => {
+    const st = normalizedStatus(row["สถานะ"]);
+    return sum + (st === "อนุมัติ" || (showWithdrawn && st === "เบิกแล้ว") ? getBillRowTransfer(row) : 0);
+  }, 0);
 
   useEffect(() => {
     setPage(1);
-  }, [filters.requester, filters.date, filters.bill, filters.search, creditFilter, pageSize]);
+  }, [filters.requester, filters.date, filters.bill, filters.search, creditFilter, showWithdrawn, pageSize]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -748,42 +765,80 @@ export function WithdrawDashboardClient({
 
       {/* 1. EXECUTIVE SUMMARY KPI CARDS (Hidden on mobile for clean layout) */}
       <div className="hidden md:grid md:grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="bg-white rounded-md p-3 border border-sky-200 bg-sky-50/40">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-sky-800 font-medium">📌 สถานะ: รอตั้งเบิก</span>
-            <span className="text-xs text-sky-900 font-bold">{waitingWithdrawRows.length} รายการ</span>
-          </div>
-          <div className="mt-1.5 flex items-center gap-2 text-xs flex-wrap">
-            <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 font-medium">
-              พร้อมเบิก: <strong>{readyToWithdrawCount}</strong>
-            </span>
-            {creditLockedCount > 0 && (
-              <span className="text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 flex items-center gap-1 font-medium">
-                <Clock size={11} className="text-indigo-600" />
-                รอวันจ่าย: <strong>{creditLockedCount}</strong>
-              </span>
-            )}
-          </div>
-        </div>
+        {showWithdrawn ? (
+          <>
+            <div className="bg-white rounded-md p-3 border border-emerald-300 bg-emerald-50/50">
+              <span className="text-xs text-emerald-800 font-semibold">✅ รายการที่เบิกแล้ว</span>
+              <div className="text-lg text-emerald-950 font-bold mt-1">
+                {displayRows.length} รายการ
+              </div>
+            </div>
+            <div className="bg-white rounded-md p-3 border border-slate-200">
+              <span className="text-xs text-slate-500">ยอดเงินบิลรวม</span>
+              <div className="text-lg text-slate-900 font-bold mt-1">
+                {money(displayRows.reduce((sum, row) => sum + getBillRowAmount(row), 0))}
+              </div>
+            </div>
+            <div className="bg-white rounded-md p-3 border border-emerald-200">
+              <span className="text-xs text-emerald-700">ยอดโอนเงินรวม</span>
+              <div className="text-lg text-emerald-700 font-bold mt-1">
+                {money(transfer)}
+              </div>
+            </div>
+            <div className="bg-white rounded-md p-3 border border-slate-200 flex items-center justify-between">
+              <div>
+                <span className="text-xs text-slate-500 block">มุมมอง</span>
+                <span className="text-xs text-emerald-800 font-medium">บิลที่เบิกแล้ว</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowWithdrawn(false)}
+                className="px-2.5 py-1 text-xs text-slate-600 hover:text-slate-900 border border-slate-300 hover:border-slate-400 rounded-lg cursor-pointer bg-slate-50 font-medium shadow-2xs"
+              >
+                กลับไปรายการตั้งเบิก
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="bg-white rounded-md p-3 border border-sky-200 bg-sky-50/40">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-sky-800 font-medium">📌 สถานะ: รอตั้งเบิก</span>
+                <span className="text-xs text-sky-900 font-bold">{waitingWithdrawRows.length} รายการ</span>
+              </div>
+              <div className="mt-1.5 flex items-center gap-2 text-xs flex-wrap">
+                <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 font-medium">
+                  พร้อมเบิก: <strong>{readyToWithdrawCount}</strong>
+                </span>
+                {creditLockedCount > 0 && (
+                  <span className="text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 flex items-center gap-1 font-medium">
+                    <Clock size={11} className="text-indigo-600" />
+                    รอวันจ่าย: <strong>{creditLockedCount}</strong>
+                  </span>
+                )}
+              </div>
+            </div>
 
-        <div className="bg-white rounded-md p-3 border border-amber-200 bg-amber-50/40">
-          <span className="text-xs text-amber-800">📌 สถานะ: ตั้งเบิก</span>
-          <div className="text-lg text-amber-900 mt-1">
-            {displayRows.filter(r => normalizedStatus(r["สถานะ"]) === "ตั้งเบิก").length} รายการ
-          </div>
-        </div>
+            <div className="bg-white rounded-md p-3 border border-amber-200 bg-amber-50/40">
+              <span className="text-xs text-amber-800">📌 สถานะ: ตั้งเบิก</span>
+              <div className="text-lg text-amber-900 mt-1">
+                {displayRows.filter(r => normalizedStatus(r["สถานะ"]) === "ตั้งเบิก").length} รายการ
+              </div>
+            </div>
 
-        <div className="bg-white rounded-md p-3 border border-emerald-200 bg-emerald-50/40">
-          <span className="text-xs text-emerald-800">✅ สถานะ: อนุมัติแล้ว</span>
-          <div className="text-lg text-emerald-900 mt-1">
-            {displayRows.filter(r => normalizedStatus(r["สถานะ"]) === "อนุมัติ").length} รายการ
-          </div>
-        </div>
+            <div className="bg-white rounded-md p-3 border border-emerald-200 bg-emerald-50/40">
+              <span className="text-xs text-emerald-800">✅ สถานะ: อนุมัติแล้ว</span>
+              <div className="text-lg text-emerald-900 mt-1">
+                {displayRows.filter(r => normalizedStatus(r["สถานะ"]) === "อนุมัติ").length} รายการ
+              </div>
+            </div>
 
-        <div className="bg-white rounded-md p-3 border border-slate-200">
-          <span className="text-xs text-slate-500">ยอดโอนเงินรวม (บิลอนุมัติ)</span>
-          <div className="text-lg text-emerald-700 mt-1">{money(transfer)}</div>
-        </div>
+            <div className="bg-white rounded-md p-3 border border-slate-200">
+              <span className="text-xs text-slate-500">ยอดโอนเงินรวม (บิลอนุมัติ)</span>
+              <div className="text-lg text-emerald-700 mt-1">{money(transfer)}</div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* 2. FILTER TOOLBAR & SEARCH (UNIFIED SINGLE ROW) */}
@@ -910,36 +965,58 @@ export function WithdrawDashboardClient({
                 </button>
               </div>
 
-              {/* Quick Filter: พร้อมตั้งเบิก / รอวันจ่าย */}
+              {/* Quick Filter: พร้อมตั้งเบิก / รอวันจ่าย / เบิกแล้ว */}
               <div className="flex items-center gap-1 ml-1">
                 <button
                   type="button"
-                  onClick={() => setCreditFilter(creditFilter === "ready" ? "all" : "ready")}
+                  onClick={() => {
+                    setShowWithdrawn(false);
+                    setCreditFilter(creditFilter === "ready" ? "all" : "ready");
+                  }}
                   className={`h-8 px-2.5 rounded-lg text-xs font-medium border transition cursor-pointer active:scale-95 flex items-center gap-1 justify-center shadow-2xs ${
-                    creditFilter === "ready"
+                    !showWithdrawn && creditFilter === "ready"
                       ? "bg-emerald-700 text-white border-emerald-700 font-semibold"
                       : "bg-white text-slate-700 border-slate-200 hover:bg-emerald-50 hover:text-emerald-900"
                   }`}
                   title="แสดงเฉพาะบิลที่พร้อมตั้งเบิก (ถึงกำหนดชำระแล้วหรือบิลเงินสด)"
                 >
-                  <Check size={12} className={creditFilter === "ready" ? "text-white" : "text-emerald-600"} />
+                  <Check size={12} className={!showWithdrawn && creditFilter === "ready" ? "text-white" : "text-emerald-600"} />
                   <span>พร้อมเบิก ({readyToWithdrawCount})</span>
                 </button>
                 {creditLockedCount > 0 && (
                   <button
                     type="button"
-                    onClick={() => setCreditFilter(creditFilter === "locked" ? "all" : "locked")}
+                    onClick={() => {
+                      setShowWithdrawn(false);
+                      setCreditFilter(creditFilter === "locked" ? "all" : "locked");
+                    }}
                     className={`h-8 px-2.5 rounded-lg text-xs font-medium border transition cursor-pointer active:scale-95 flex items-center gap-1 justify-center shadow-2xs ${
-                      creditFilter === "locked"
+                      !showWithdrawn && creditFilter === "locked"
                         ? "bg-indigo-700 text-white border-indigo-700 font-semibold"
                         : "bg-white text-indigo-800 border-indigo-300 hover:bg-indigo-50"
                     }`}
                     title="แสดงเฉพาะบิลเครดิตที่ยังไม่ถึงกำหนดวันจ่าย"
                   >
-                    <Clock size={12} className={creditFilter === "locked" ? "text-white" : "text-indigo-600"} />
+                    <Clock size={12} className={!showWithdrawn && creditFilter === "locked" ? "text-white" : "text-indigo-600"} />
                     <span>รอวันจ่าย ({creditLockedCount})</span>
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowWithdrawn(cur => !cur);
+                    setCreditFilter("all");
+                  }}
+                  className={`h-8 px-2.5 rounded-lg text-xs font-medium border transition cursor-pointer active:scale-95 flex items-center gap-1.5 justify-center shadow-2xs ${
+                    showWithdrawn
+                      ? "bg-emerald-800 text-white border-emerald-800 font-semibold ring-2 ring-emerald-400/50"
+                      : "bg-white text-slate-700 border-slate-200 hover:bg-emerald-50 hover:text-emerald-900"
+                  }`}
+                  title="แสดงเฉพาะรายการที่เบิกแล้ว (กดซ้ำเพื่อกลับสู่รายการตั้งเบิก)"
+                >
+                  <span className={`w-2 h-2 rounded-full ${showWithdrawn ? "bg-emerald-300" : "bg-emerald-600"}`} />
+                  <span>เบิกแล้ว ({withdrawnCount})</span>
+                </button>
               </div>
             </div>
 
@@ -1286,7 +1363,7 @@ export function WithdrawDashboardClient({
                     ) : status === "เบิกแล้ว" ? (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-300 shadow-2xs">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                        <span>ปิดงานแล้ว</span>
+                        <span>เบิกแล้ว</span>
                       </span>
                     ) : creditInfo.isLocked ? (
                       <span
@@ -1407,8 +1484,10 @@ function filterWithdrawRows(
     }
     if (bill && String(row["บิล"] || "").trim() !== bill) return false;
     if (filterDateStr) {
-      const rowIsoDate = normalizeDateToIso(row["ว/ด/ป"]);
-      if (rowIsoDate !== filterDateStr) return false;
+      const billIsoDate = normalizeDateToIso(row["ว/ด/ป"]);
+      const dueIsoDate = normalizeDateToIso(row["วันจ่าย"] || (row as any).paid_date || (row as any).due_date);
+      const matchesDate = billIsoDate === filterDateStr || (dueIsoDate && dueIsoDate === filterDateStr);
+      if (!matchesDate) return false;
     }
     if (query) {
       const vendorStr = formatVendorDisplay ? formatVendorDisplay(row["ร้าน/บุคคล"]) : "";
@@ -1547,7 +1626,7 @@ function WithdrawTable({
                       ) : normalizedStatus(row["สถานะ"]) === "เบิกแล้ว" ? (
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-300 shadow-2xs whitespace-nowrap">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                          <span>ปิดงานแล้ว</span>
+                          <span>เบิกแล้ว</span>
                         </span>
                       ) : creditInfo.isLocked ? (
                         <span

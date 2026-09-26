@@ -308,10 +308,6 @@ function computePaidForContract(contractRow: SheetRow, dataRows: SheetRow[]): nu
         isMatch = true;
       }
     }
-    // 3. Match by Contractor Name globally
-    else if (cName && (bContractorRef === cName || bVendorRef === cName)) {
-      isMatch = true;
-    }
 
     if (isMatch) {
       const amt = toNumber(b["ค่าแรง"]) || toNumber(b["ยอดเงิน"]) || toNumber(b["ยอดโอน"]);

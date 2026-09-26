@@ -740,6 +740,7 @@ export function FormModal({
   });
   const [loadingSchema, setLoadingSchema] = useState(false);
   const [open, setOpen] = useState(false);
+  const [showPCProject, setShowPCProject] = useState(false);
   const [values, setValues] = useState<Record<string, string>>(() => activeForm ? getInitialStringValues(activeForm) : {});
   const [editSheetRow, setEditSheetRow] = useState<string | number | null>(null);
   const [enumListSearch, setEnumListSearch] = useState<Record<string, string>>({});
@@ -761,18 +762,21 @@ export function FormModal({
     const projectNameVal = values["ชื่อ Project"] || "";
     const dateVal = values["ว/ด/ป"] || values["วันที่"] || getTodayDateIso();
 
+    const opt = activeForm?.refOptions?.["ผู้รับเหมา"]?.find(o => String(o.value) === contractorVal || String(o.label) === contractorVal);
+    const resolvedContractorId = opt?.row?.id_Contractor || (contractorVal.startsWith("CW") ? "" : contractorVal);
+
     window.dispatchEvent(new CustomEvent("open-contract-form", {
       detail: {
         isNew: true,
         row: {
           "ID Project": projectVal,
-          "id_Contractor": contractorVal,
+          "id_Contractor": resolvedContractorId,
           "ชื่อ Project": projectNameVal,
           "วันที่": dateVal
         }
       }
     }));
-  }, [values]);
+  }, [values, activeForm]);
 
   function handleClose() {
     setOpen(false);
@@ -1160,6 +1164,81 @@ export function FormModal({
     return () => window.removeEventListener("schema-cache-invalidated", handleInvalidate);
   }, [resolvedTableName]);
 
+  // Listen for contract work created via "+ เปิดจ้างงานรับเหมา" to immediately update parent bill form
+  useEffect(() => {
+    if (!isDataForm) return;
+
+    const handleContractCreated = (e: Event) => {
+      const detail = e instanceof CustomEvent ? e.detail : undefined;
+      const createdRow = detail?.row;
+      if (!createdRow) return;
+
+      const conworkId = String(createdRow.id_Conwork || createdRow.id || "").trim();
+      const projId = String(createdRow["ID Project"] || createdRow.project_id || "").trim();
+      const projName = String(createdRow["ชื่อ Project"] || createdRow.project_name || "").trim();
+      const contractorId = String(createdRow.id_Contractor || createdRow.contractor_id || "").trim();
+      const contractorName = String(createdRow["ชื่อเล่น"] || createdRow["ผู้รับเหมา"] || createdRow["ชื่อ-นามสกุล"] || "").trim();
+      const totalAmount = createdRow["ยอดเงินจ้าง"] || createdRow.total_contract_amount || "";
+      const paidAmount = createdRow["ยอดเงินจ่าย"] || createdRow.paid_amount || "0";
+      const details = createdRow["รายละเอียดงาน"] || createdRow.work_details || "";
+
+      const label = contractorName
+        ? (contractorName.startsWith(conworkId) ? contractorName : `${conworkId}-${contractorName}`)
+        : conworkId;
+
+      // 1. Immediately inject the new contract into activeForm.refOptions["ผู้รับเหมา"]
+      setActiveForm(prev => {
+        if (!prev) return prev;
+        const currentList = prev.refOptions?.["ผู้รับเหมา"] || [];
+        const filteredList = currentList.filter(opt => String(opt.value) !== conworkId);
+
+        const newOpt: RefOption = {
+          value: conworkId,
+          label,
+          row: {
+            id_Conwork: conworkId,
+            id_Contractor: contractorId,
+            "ชื่อเล่น": contractorName,
+            "ผู้รับเหมา": contractorName,
+            "รายละเอียดงาน": details,
+            "ค่าแรงคงเหลือ": toNumber(totalAmount) - toNumber(paidAmount),
+            "ยอดเงินจ้าง": toNumber(totalAmount),
+            "ยอดเงินจ่าย": toNumber(paidAmount),
+            "ID Project": projId
+          }
+        };
+        return {
+          ...prev,
+          refOptions: {
+            ...prev.refOptions,
+            "ผู้รับเหมา": [newOpt, ...filteredList]
+          }
+        };
+      });
+
+      // 2. Auto-fill the bill form with the contract's project, contractor, and remaining labor!
+      setValues(prev => {
+        const next = { ...prev };
+        if (projId) {
+          next["ID Project"] = projId;
+          if (projName) next["ชื่อ Project"] = projName;
+        }
+        next["ร้านค้า/ผู้รับเหมา"] = "ผู้รับเหมา";
+        next["ผู้รับเหมา"] = conworkId;
+        if (details) next["รายละเอียดงาน"] = details;
+        if (totalAmount) {
+          const remain = toNumber(totalAmount) - toNumber(paidAmount);
+          next["ค่าแรงคงเหลือ"] = `${new Intl.NumberFormat("th-TH").format(remain)} จาก ${new Intl.NumberFormat("th-TH").format(toNumber(totalAmount))}`;
+        }
+        applyLocalFormulas(next, resolvedTableName);
+        return next;
+      });
+    };
+
+    window.addEventListener("contract-work-created", handleContractCreated);
+    return () => window.removeEventListener("contract-work-created", handleContractCreated);
+  }, [isDataForm, resolvedTableName]);
+
   function populateFormValues(targetForm: FormPayload, detail?: OpenFormDetail) {
     const nextValues = detail?.row
       ? getRowStringValues(targetForm, detail.row)
@@ -1257,6 +1336,11 @@ export function FormModal({
     setError("");
     setSuccessMessage("");
 
+    // Reset petty cash project toggle — auto-show if editing a row that already has a project
+    const isPettyCashForm = resolvedTableName === "petty_cash" || resolvedTableName === "เปิดเงินสดย่อย";
+    const editRowHasProject = !!(detail?.row?.["ID Project"] || detail?.row?.["id_project"]);
+    setShowPCProject(isPettyCashForm ? editRowHasProject : false);
+
     // If editing existing row, populate directly
     if (detail?.row && !detail?.isNew && activeForm) {
       populateFormValues(activeForm, detail);
@@ -1314,10 +1398,15 @@ export function FormModal({
     }
   }
 
+  const isPettyCashForm = resolvedTableName === "petty_cash" || resolvedTableName === "เปิดเงินสดย่อย";
   const visibleFields = (activeForm?.schema || []).filter(field => {
     if (field.type === "Hidden") return false;
     if ((resolvedTableName === TABLES.PROJECT || resolvedTableName === "Project") && (field.name.startsWith("งบไม่เกิน") || field.name === "คุมงบประเภทงาน")) {
       return false;
+    }
+    // ซ่อนฟิลด์โครงการในฟอร์มเปิดเงินสดย่อย จนกว่าจะกดแสดง
+    if (isPettyCashForm && (field.name === "ID Project" || field.name === "ชื่อ Project")) {
+      return showPCProject;
     }
     return isFieldVisible(field, values);
   });
@@ -1613,6 +1702,17 @@ export function FormModal({
         window.dispatchEvent(new CustomEvent("schema-cache-invalidated"));
         window.dispatchEvent(new CustomEvent("bills-data-updated", { detail: { row: payload.row, rows: payload.rows } }));
         window.dispatchEvent(new CustomEvent("data-updated", { detail: { tableName: activeForm.tableName, row: payload.row, rows: payload.rows } }));
+        if (isContractModal) {
+          window.dispatchEvent(new CustomEvent("contract-work-created", {
+            detail: {
+              row: {
+                ...(payload.row || {}),
+                ...submitValues,
+                id_Conwork: payload.row?.id_Conwork || payload.row?.id || submitValues["id_Conwork"] || submitValues.id
+              }
+            }
+          }));
+        }
       }
 
       setAttachedFilesByField({});
@@ -1892,8 +1992,9 @@ export function FormModal({
                                       <button
                                         type="button"
                                         onClick={() => {
-                                          const today = values["ว/ด/ป"] || values["วันที่"] || getTodayDateIso();
-                                          updateValue({ name: "วันจ่าย" } as FieldSchema, today);
+                                          const base = values["ว/ด/ป"] || values["วันที่"] || getTodayDateIso();
+                                          const nextDueDate = calculateMonthlyCutoffDueDate(base, 15) || calculateDueDate(base, 15);
+                                          updateValue({ name: "วันจ่าย" } as FieldSchema, nextDueDate);
                                         }}
                                         className="text-[11px] font-medium text-slate-500 hover:text-slate-800 hover:bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200/80 transition cursor-pointer"
                                         title="ระบุวันจ่ายสำหรับบิลนี้เป็นกรณีพิเศษ"
@@ -2054,6 +2155,32 @@ export function FormModal({
                     ) : (
                       /* Standard Grid for Non-Data forms */
                       <div className="bg-white rounded-lg p-4 border border-slate-200 shadow-2xs">
+                        {/* Petty Cash: toggle โครงการ */}
+                        {isPettyCashForm && (
+                          <div className="mb-3">
+                            {showPCProject ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowPCProject(false);
+                                  // ล้างค่าโครงการเมื่อซ่อน
+                                  setValues(prev => ({ ...prev, "ID Project": "", "ชื่อ Project": "" }));
+                                }}
+                                className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-rose-600 border border-slate-200 hover:border-rose-300 bg-slate-50 hover:bg-rose-50 px-2.5 py-1 rounded-md transition cursor-pointer"
+                              >
+                                <X size={12} /> ซ่อนโครงการ
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setShowPCProject(true)}
+                                className="inline-flex items-center gap-1.5 text-xs text-emerald-700 hover:text-emerald-900 border border-dashed border-emerald-300 hover:border-emerald-500 bg-emerald-50/50 hover:bg-emerald-50 px-2.5 py-1 rounded-md transition cursor-pointer"
+                              >
+                                <Plus size={12} /> กำหนดโครงการ (ถ้ามี)
+                              </button>
+                            )}
+                          </div>
+                        )}
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
                           {visibleFields.map(field => {
                             const isContractWorkForm =
@@ -3077,6 +3204,63 @@ function renderField(
         onChange={event => onChange(isDateField ? normalizeBillDateInput(event.target.value) : event.target.value)}
         className="w-full min-w-0 max-w-full block box-border h-10 sm:h-9 px-3 bg-white border border-slate-300 focus:border-slate-800 focus:outline-none rounded-lg text-xs sm:text-sm font-normal text-slate-800 placeholder:text-slate-400 transition-all appearance-none cursor-pointer"
       />
+      {field.name === "วันจ่าย" ? (
+        <div className="space-y-1.5 pt-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-2xs text-slate-500 font-medium">ปุ่มลัด:</span>
+            {[
+              { label: "+7 วัน", days: 7 },
+              { label: "+15 วัน", days: 15 },
+              { label: "+30 วัน", days: 30 },
+              { label: "วันที่ 15", dayOfMonth: 15 },
+              { label: "วันที่ 25", dayOfMonth: 25 },
+              { label: "สิ้นเดือน", dayOfMonth: 30 },
+            ].map(shortcut => {
+              const baseIso = currentValues["ว/ด/ป"] || currentValues["วันที่"] || getTodayDateIso();
+              let targetIso = "";
+              if (shortcut.days) {
+                targetIso = calculateDueDate(baseIso, shortcut.days);
+              } else if (shortcut.dayOfMonth) {
+                targetIso = calculateMonthlyCutoffDueDate(baseIso, shortcut.dayOfMonth);
+              }
+              const isSelected = value === targetIso;
+              return (
+                <button
+                  key={shortcut.label}
+                  type="button"
+                  onClick={() => onChange(targetIso)}
+                  className={`px-2 py-0.5 text-2xs rounded border transition cursor-pointer ${
+                    isSelected
+                      ? "bg-indigo-600 text-white border-indigo-700 font-semibold shadow-2xs"
+                      : "bg-indigo-50 text-indigo-800 border-indigo-200 hover:bg-indigo-100"
+                  }`}
+                >
+                  {shortcut.label}
+                </button>
+              );
+            })}
+          </div>
+          {value ? (() => {
+            const todayIso = getTodayDateIso();
+            const isFuture = value > todayIso;
+            const diffDays = Math.ceil((new Date(value).getTime() - new Date(todayIso).getTime()) / (1000 * 60 * 60 * 24));
+            if (isFuture) {
+              return (
+                <div className="text-[11px] text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-1 rounded-md flex items-center gap-1">
+                  <span>⏳</span>
+                  <span>รอวันจ่ายอีก <strong>{diffDays} วัน</strong> (จะขึ้นแท็บ <strong>&quot;รอวันจ่าย&quot;</strong> ในหน้าตั้งเบิก)</span>
+                </div>
+              );
+            }
+            return (
+              <div className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-md flex items-center gap-1">
+                <span>✅</span>
+                <span>ถึงกำหนดวันจ่ายแล้ว (จะขึ้นเป็น <strong>&quot;พร้อมเบิกทันที&quot;</strong>)</span>
+              </div>
+            );
+          })() : null}
+        </div>
+      ) : null}
       {field.name === "เครดิตจ่าย" ? (
         <div className="flex flex-wrap items-center gap-1.5 pt-1">
           <span className="text-2xs text-slate-500 font-medium">ปุ่มลัดวันตัดรอบ:</span>
@@ -3171,6 +3355,7 @@ function SearchableRefSelect({
     String(option.label) === value ||
     (option.row && (
       String(option.row.id) === value ||
+      String(option.row.id_Conwork) === value ||
       String(option.row.id_store) === value ||
       String(option.row["ชื่อร้านค้า"]) === value ||
       String(option.row.id_Contractor) === value ||
@@ -3178,13 +3363,14 @@ function SearchableRefSelect({
       String(option.row["ชื่อธนาคาร"]) === value ||
       String(option.row.name) === value ||
       String(option.row["ชื่อเล่น"]) === value ||
+      String(option.row["ผู้รับเหมา"]) === value ||
       String(option.row["ชื่อ-นามสกุล"]) === value ||
       Object.values(option.row).some(v => v !== null && v !== undefined && String(v).trim() !== "" && String(v) === value)
     ))
   ) : undefined;
 
   const rawLabel = selectedOption ? optionLabel(selectedOption, name) : value;
-  const selectedLabel = (name === "id_Contractor" || name === "id_contractor" || name === "ผู้รับเหมา" || name === "ช่าง") && rawLabel.includes(" - ")
+  const selectedLabel = (name === "id_Contractor" || name === "id_contractor" || name === "ช่าง") && rawLabel.includes(" - ")
     ? rawLabel.split(" - ").slice(1).join(" - ").trim() || rawLabel
     : rawLabel;
   const selectedImgUrl = (selectedOption?.row?.image || selectedOption?.row?.image_url || "") as string;
@@ -3547,6 +3733,9 @@ function DropdownOption({
           />
         ) : null}
         <span className="truncate text-slate-800 font-normal">{optionLabel(option, fieldName)}</span>
+        {fieldName === "ผู้รับเหมา" && option.row && toNumber(option.row["ยอดเงินจ้าง"]) > 0 && (toNumber(option.row["ยอดเงินจ้าง"]) <= toNumber(option.row["ยอดเงินจ่าย"])) ? (
+          <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 shrink-0 font-medium">ครบสัญญา</span>
+        ) : null}
       </div>
       {isActive ? <Check size={14} className="text-emerald-600 shrink-0 ml-1" /> : null}
     </button>
@@ -3558,10 +3747,22 @@ function optionLabel(option: RefOption | undefined, fieldName?: string) {
   const val = String(option.value || "").trim();
   const rawLabel = String(option.label || option.value || "").trim();
 
+  if (fieldName === "ผู้รับเหมา") {
+    const idConwork = String(option.row?.id_Conwork || option.value || "").trim();
+    const contractorName = String(option.row?.["ชื่อเล่น"] || option.row?.["ผู้รับเหมา"] || option.row?.["ชื่อ-นามสกุล"] || "").trim();
+    if (idConwork && contractorName) {
+      return contractorName.startsWith(idConwork) ? contractorName : `${idConwork}-${contractorName}`;
+    }
+    if (rawLabel) {
+      if (idConwork && !rawLabel.startsWith(idConwork)) return `${idConwork}-${rawLabel}`;
+      return rawLabel;
+    }
+    return idConwork || val;
+  }
+
   if (
     fieldName === "id_Contractor" ||
     fieldName === "id_contractor" ||
-    fieldName === "ผู้รับเหมา" ||
     fieldName === "ช่าง" ||
     fieldName === "contractor" ||
     fieldName === "id_Contractor_name"
@@ -3830,7 +4031,7 @@ function getRowStringValues(form: FormPayload, row: SheetRow) {
       (field.name === "id_Company" ? row.id : undefined),
       (field.name === "id_Conwork" ? row.id : undefined),
       (field.name === "id_petty_cash" ? (row.id_petty_cash || row.id) : undefined),
-      (field.name === "ID Project" ? (row["ID Project"] || row.id || row.project_id) : undefined),
+      (field.name === "ID Project" ? (row["ID Project"] || row.project_id || (form.tableName === TABLES.PROJECT || form.tableName === "Project" ? row.id : undefined)) : undefined),
       form.initialValues[field.name]
     );
 
@@ -3991,18 +4192,30 @@ function filterRefOptions(field: FieldSchema, options: RefOption[], values: Reco
   if (!expectedValue) return [];
 
   const currentValue = String(values[field.name] || "").trim();
+  const expectedId = expectedValue.includes(" - ") ? expectedValue.split(" - ")[0].trim() : expectedValue;
 
   return options.filter(option => {
     const rowVal = String(option.row?.[field.filterBy!.column] ?? "").trim();
-    if (rowVal !== expectedValue) return false;
+    const rowId = rowVal.includes(" - ") ? rowVal.split(" - ")[0].trim() : rowVal;
 
-    // หากเป็นค่าเดิมที่ถูกเลือกไว้ในบิลปัจจุบัน ให้แสดงเสมอแม้สัญญาจะจ่ายครบแล้ว
+    // ตรวจสอบทั้งรหัสโครงการตรงๆ และข้อความชื่อโครงการเต็ม
+    if (rowVal !== expectedValue && rowId !== expectedId && rowId !== expectedValue && rowVal !== expectedId) {
+      return false;
+    }
+
+    // หากเป็นค่าเดิมที่ถูกเลือกไว้ในบิลปัจจุบัน ให้แสดงเสมอ (เช่น เข้ามาแก้ไขบิลเดิมที่เคยบันทึกไว้)
     if (currentValue && (String(option.value) === currentValue || String(option.label) === currentValue)) {
       return true;
     }
 
-    if (!field.filterBy!.openContract) return true;
-    return toNumber(option.row?.["ยอดเงินจ้าง"]) > toNumber(option.row?.["ยอดเงินจ่าย"]);
+    // ฟอร์มตัวเลือกครบสัญญาไม่ต้องแสดง (แสดงเฉพาะสัญญาที่ยังมียอดคงเหลือ)
+    if (field.filterBy?.openContract) {
+      const hireAmt = toNumber(option.row?.["ยอดเงินจ้าง"]);
+      const paidAmt = toNumber(option.row?.["ยอดเงินจ่าย"]);
+      return hireAmt > paidAmt;
+    }
+
+    return true;
   });
 }
 
@@ -4157,14 +4370,7 @@ function normalizeDependentValues(values: Record<string, string>, changedField: 
           values["วันจ่าย"] = cutoffDueDate;
         }
         values["เครดิต"] = "";
-      } else {
-        // ร้านค้านี้ไม่มีเครดิตจ่าย (เป็นร้านเงินสด) ให้เคลียร์วันจ่ายออก
-        if (!hasValue(values["เครดิต"])) {
-          values["วันจ่าย"] = "";
-        }
       }
-    } else {
-      values["วันจ่าย"] = "";
     }
   }
 
@@ -4474,6 +4680,7 @@ function sanitizeValuesForSubmit(values: Record<string, string>, form: FormPaylo
       }
       next["ผู้รับเหมา"] = "";
       next["ร้านค้า"] = "";
+      next["statusค่าแรง"] = "";
     } else if (vType === "ผู้รับเหมา") {
       if (!next["ประเภท"] || next["ประเภท"] === "2.ค่าแรง" || !ALL_CONTRACTOR_CATEGORIES.includes(next["ประเภท"])) {
         next["ประเภท"] = "201 เตรียมงาน";
@@ -4484,6 +4691,7 @@ function sanitizeValuesForSubmit(values: Record<string, string>, form: FormPaylo
       next["ร้านค้า/ผู้รับเหมา"] = "ร้านค้า";
       next["ผู้รับเหมา"] = "";
       next["ชื่อพนักงาน"] = "";
+      next["statusค่าแรง"] = "";
       if (!next["ประเภท"] || next["ประเภท"] === "1.ค่าของ") {
         next["ประเภท"] = deriveCategoryFromProduct(next["สินค้า"]) || "101 เตรียมงาน";
       }
@@ -4503,6 +4711,9 @@ function isFieldRequired(field: FieldSchema, values: Record<string, string>, tab
   if (field.name === "ผู้รับเหมา") {
     return vendorType === "ผู้รับเหมา";
   }
+  if (field.name === "statusค่าแรง") {
+    return vendorType === "ผู้รับเหมา";
+  }
   if (field.name === "ชื่อพนักงาน") {
     return vendorType === "พนักงาน";
   }
@@ -4516,7 +4727,7 @@ function isFieldRequired(field: FieldSchema, values: Record<string, string>, tab
 function validateVisibleRequiredFields(values: Record<string, string>, form: FormPayload) {
   const missingField = form.schema.find(field => {
     if (!isFieldRequired(field, values, form.tableName)) return false;
-    if (!isFieldVisible(field, values)) return false;
+    if (!isFieldVisible(field, values, form)) return false;
     return !hasValue(values[field.name]);
   });
 
@@ -4547,6 +4758,9 @@ function isFieldVisible(field: FieldSchema, values: Record<string, string>, form
   if (field.name === "ผู้รับเหมา" || field.name === "ค่าแรงคงเหลือ") {
     return vendorType === "ผู้รับเหมา";
   }
+  if (field.name === "statusค่าแรง") {
+    return vendorType === "ผู้รับเหมา";
+  }
   if (field.name === "รายละเอียดงาน") {
     return false; // ค่าแรง รายละเอียดงานไม่ต้องมี เพราะ ใช้ประเภทงาน แทน
   }
@@ -4555,7 +4769,7 @@ function isFieldVisible(field: FieldSchema, values: Record<string, string>, form
   }
 
   // 2. Expense amounts & specifics
-  if (field.name === "ค่าแรง" || field.name === "statusค่าแรง") {
+  if (field.name === "ค่าแรง") {
     return vendorType === "ผู้รับเหมา" || isLaborCost(cat);
   }
   if (field.name === "พนักงาน") {

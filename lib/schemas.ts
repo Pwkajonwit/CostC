@@ -29,7 +29,7 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
     { name: "ซ่อมรถ", label: "ค่าใช้จ่าย", type: "Decimal", required: true, showIf: { column: "ประเภท", in: ["502 ซ่อมรถ", "5.ซ่อมรถ"] } },
     { name: "ทะเบียน", type: "Ref", refTable: TABLES.CAR, refKey: "id_car", refLabel: "หมายเลขทะเบียน", required: true, showIf: { column: "ประเภท", in: ["501 น้ำมัน", "502 ซ่อมรถ", "4.น้ำมัน", "5.ซ่อมรถ"] } },
     { name: "เครื่องจักร", label: "ค่าใช้จ่าย", type: "Decimal", required: true, showIf: { column: "ประเภท", in: ["503 เครื่องจักร", "6.เครื่องจักร"] } },
-    { name: "statusค่าแรง", type: "Enum", values: ["บุคคลธรรมดา", "บริษัท"], inputMode: "buttons", required: true, dynamicValues: "fieldOptions", showIf: { column: "ประเภท", in: [...ALL_CONTRACTOR_CATEGORIES, "2.ค่าแรง"] } },
+    { name: "statusค่าแรง", type: "Enum", values: ["บุคคลธรรมดา", "บริษัท"], inputMode: "buttons", required: true, dynamicValues: "fieldOptions", showIf: { column: "ร้านค้า/ผู้รับเหมา", equals: "ผู้รับเหมา" } },
     { name: "ค่าแรงคงเหลือ", type: "Text", readonly: true, showIf: { column: "ร้านค้า/ผู้รับเหมา", equals: "ผู้รับเหมา" } },
     { name: "อื่นๆ", label: "ค่าใช้จ่าย", type: "Decimal", required: true, showIf: { column: "ประเภท", in: ["123 ดำเนินการ(อื่นๆ)", "223 ค่าบริการ(อื่นๆ)", "8.อื่นๆ"] } },
     { name: "รายการ", type: "Enum", values: [...SUB_ITEMS_123, ...SUB_ITEMS_223], dynamicValues: "fieldOptions", showIf: { column: "ประเภท", in: ["123 ดำเนินการ(อื่นๆ)", "223 ค่าบริการ(อื่นๆ)", "8.อื่นๆ"] } },
@@ -257,17 +257,18 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
       refKey: "ID Project",
       refLabel: "ชื่อ Project",
       validIf: "activeProjects",
-      required: true,
+      required: false,
+      initialValue: "",
       refFill: {
         "ชื่อ Project": "ชื่อ Project"
       }
     },
     { name: "ชื่อ Project", type: "Hidden" },
     { name: "จำนวนเงิน", label: "ยอดเงินเบิกล่วงหน้า (บาท)", type: "Decimal", required: true },
-    { name: "วัตถุประสงค์", label: "วัตถุประสงค์ / รายละเอียด", type: "Text", required: true },
+    { name: "วัตถุประสงค์", label: "วัตถุประสงค์ / รายละเอียด", type: "Text" },
     { name: "วันที่", label: "วันที่เบิก", type: "Date", initialValue: "today", required: true },
     { name: "กำหนดเคลียร์", label: "กำหนดเคลียร์บิล", type: "Date" },
-    { name: "สถานะ", label: "สถานะ", type: "Enum", values: ["รออนุมัติ", "อนุมัติแล้ว", "จ่ายเงินแล้ว", "เคลียร์บิลแล้ว", "ยกเลิก"], initialValue: "รออนุมัติ", inputMode: "dropdown" },
+    { name: "สถานะ", label: "สถานะ", type: "Enum", values: ["เปิดแล้ว", "จ่ายเงินแล้ว", "เคลียร์บิลแล้ว", "ยกเลิก"], initialValue: "เปิดแล้ว", inputMode: "dropdown" },
     { name: "เลขบัญชี", label: "เลขบัญชีรับเงิน", type: "Text" },
     {
       name: "ธนาคาร",
