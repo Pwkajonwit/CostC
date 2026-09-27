@@ -319,17 +319,35 @@ export type ProjectBudgetSummary = {
 };
 
 /**
- * Calculate full budget control & allocation alignment for a project.
+ * Calculate allocated budget totals supporting BOTH:
+ * 1. Main categories (งบไม่เกินค่าของ, งบไม่เกินค่าแรง, งบไม่เกินพนักงาน)
+ * 2. Granular sub-items (101-123, 201-223, 501-504)
  */
-export function calculateProjectBudgetControl(
-  project: SheetRow,
-  projectBills: SheetRow[]
-): ProjectBudgetSummary {
+export function getProjectAllocationTotals(project: SheetRow) {
+  if (!project) {
+    return {
+      projectBudget: 0,
+      materialBudget: 0,
+      materialSubTotal: 0,
+      rawMaterialCap: 0,
+      laborBudget: 0,
+      laborSubTotal: 0,
+      rawLaborCap: 0,
+      staffBudget: 0,
+      totalAllocated: 0,
+      unallocatedBudget: 0,
+      allocatedPercent: 0,
+      allocPercent: 0,
+      hasAllocation: false,
+      hasSubAllocations: false,
+      hasMainAllocationsOnly: false,
+    };
+  }
+
   const workAmount = toNumber(project["ยอดงาน"]);
   const rawBudget = toNumber(project["งบไม่เกิน"]);
   const vatTotal = toNumber(project["ยอดรวม vat"] || project["ยอดรวม VAT"] || (workAmount > 0 ? workAmount * 1.07 : 0));
 
-  // งบประมาณโครงการ (ตามเกณฑ์ของ ProjectBudgetAllocator)
   const projectBudget = workAmount > 0
     ? workAmount
     : vatTotal > 0
@@ -343,7 +361,7 @@ export function calculateProjectBudgetControl(
     .filter(i => i.group === "ค่าของ (Material Cost Code)")
     .reduce((sum, item) => sum + getProjectBudgetValue(project, item.field, item.code), 0);
 
-  const rawMaterialCap = toNumber(project["งบไม่เกินค่าของ"]);
+  const rawMaterialCap = toNumber(project["งบไม่เกินค่าของ"] ?? (project?.data && typeof project.data === "object" ? (project.data as any)["งบไม่เกินค่าของ"] : 0));
   const materialBudget = Math.max(rawMaterialCap, materialSubTotal);
 
   // 2. คำนวณยอดจัดสรรของ 24 รายการค่าแรง (รวมพนักงาน 301)
@@ -351,15 +369,60 @@ export function calculateProjectBudgetControl(
     .filter(i => i.group === "ค่าแรง (Labor Cost Code)")
     .reduce((sum, item) => sum + getProjectBudgetValue(project, item.field, item.code), 0);
 
-  const rawLaborCap = toNumber(project["งบไม่เกินค่าแรง"]);
-  const staffBudget = toNumber(project["งบไม่เกินพนักงาน"]);
+  const rawLaborCap = toNumber(project["งบไม่เกินค่าแรง"] ?? (project?.data && typeof project.data === "object" ? (project.data as any)["งบไม่เกินค่าแรง"] : 0));
+  const staffBudget = toNumber(project["งบไม่เกินพนักงาน"] ?? (project?.data && typeof project.data === "object" ? (project.data as any)["งบไม่เกินพนักงาน"] : 0));
   const laborBudget = Math.max(rawLaborCap, laborSubTotal, (rawLaborCap + staffBudget));
-  const laborDirectBudget = laborBudget;
 
-  // 3. รวมจัดสรรทั้งหมด
+  // 3. รวมจัดสรรทั้งหมด (รองรับทั้งจัดสรรหมวดหลัก และจัดสรรหมวดย่อย)
   const totalAllocated = materialBudget + laborBudget;
   const unallocatedBudget = projectBudget - totalAllocated;
   const allocatedPercent = projectBudget > 0 ? (totalAllocated / projectBudget) * 100 : 0;
+  const allocPercent = Math.round(allocatedPercent);
+  const hasAllocation = totalAllocated > 0;
+  const hasSubAllocations = (materialSubTotal > 0 || laborSubTotal > 0);
+  const hasMainAllocationsOnly = hasAllocation && !hasSubAllocations;
+
+  return {
+    projectBudget,
+    materialBudget,
+    materialSubTotal,
+    rawMaterialCap,
+    laborBudget,
+    laborSubTotal,
+    rawLaborCap,
+    staffBudget,
+    totalAllocated,
+    unallocatedBudget,
+    allocatedPercent,
+    allocPercent,
+    hasAllocation,
+    hasSubAllocations,
+    hasMainAllocationsOnly,
+  };
+}
+
+/**
+ * Calculate full budget control & allocation alignment for a project.
+ */
+export function calculateProjectBudgetControl(
+  project: SheetRow,
+  projectBills: SheetRow[]
+): ProjectBudgetSummary {
+  const alloc = getProjectAllocationTotals(project);
+  const projectBudget = alloc.projectBudget;
+  const workAmount = toNumber(project["ยอดงาน"]);
+  const vatTotal = toNumber(project["ยอดรวม vat"] || project["ยอดรวม VAT"] || (workAmount > 0 ? workAmount * 1.07 : 0));
+  const materialBudget = alloc.materialBudget;
+  const materialSubTotal = alloc.materialSubTotal;
+  const rawMaterialCap = alloc.rawMaterialCap;
+  const laborBudget = alloc.laborBudget;
+  const laborSubTotal = alloc.laborSubTotal;
+  const rawLaborCap = alloc.rawLaborCap;
+  const laborDirectBudget = laborBudget;
+  const staffBudget = alloc.staffBudget;
+  const totalAllocated = alloc.totalAllocated;
+  const unallocatedBudget = alloc.unallocatedBudget;
+  const allocatedPercent = alloc.allocatedPercent;
 
   // 4. สกัดและจับคู่บิลทั้งหมด
   const parsedItems = extractBillItems(projectBills);

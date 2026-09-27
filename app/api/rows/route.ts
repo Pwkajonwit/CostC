@@ -591,6 +591,9 @@ export async function PATCH(request: NextRequest) {
       revalidatePath("/bills", "page");
       revalidatePath("/bills", "layout");
       revalidatePath("/bills/follow-up", "page");
+      revalidatePath("/work-status", "page");
+      revalidatePath("/work-status", "layout");
+      revalidatePath("/work-status/[projectId]", "page");
       if (tableName === TABLES.DATA || tableName === "Data" || tableName === "bills") {
         if (targetRowKey) revalidatePath(`/bills/${targetRowKey}`, "page");
         if (originalTarget && String(originalTarget) !== String(targetRowKey)) revalidatePath(`/bills/${originalTarget}`, "page");
