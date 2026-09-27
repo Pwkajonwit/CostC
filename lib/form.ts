@@ -197,7 +197,7 @@ async function getFormSchemaWithSheetOptions(tableName: string): Promise<FieldSc
       const masterData = (systemOptions as any)["PRODUCT_MASTER_DATA"];
       if (Array.isArray(masterData) && masterData.length > 0) {
         masterProducts = masterData
-          .filter((item: any) => item && item.active !== false)
+          .filter((item: any) => item && item.active !== false && String(item.code || "").length >= 3)
           .map((item: any) => {
             const code = String(item.code || item.id || "").trim();
             const name = String(item.name || "").trim();
@@ -206,14 +206,8 @@ async function getFormSchemaWithSheetOptions(tableName: string): Promise<FieldSc
           .filter(Boolean);
       }
 
-      const productOptions = (Array.isArray(systemOptions["สินค้า"]) && systemOptions["สินค้า"].length > 1)
-        ? systemOptions["สินค้า"]
-        : undefined;
-
-      const defaultProducts = DEFAULT_SYSTEM_OPTIONS["สินค้า"] || [];
-      const finalProducts = masterProducts.length > 0
-        ? masterProducts
-        : (productOptions && productOptions.length > 0 ? productOptions : defaultProducts);
+      const defaultProducts = ALL_STORE_CATEGORIES;
+      const finalProducts = masterProducts.length > 0 ? masterProducts : defaultProducts;
 
       return {
         ...field,

@@ -3,7 +3,7 @@ export { supabaseAdmin };
 import { normalizeDateToIso, formatDateDisplay, getTodayDateIso } from "@/lib/utils/dates";
 import { cached, clearCache } from "@/lib/utils/cache";
 import { isVatActive, isDeductActive, parseDeductPercent, parseCreditDays } from "@/lib/project-summary";
-import { ALL_STORE_CATEGORIES, ALL_CONTRACTOR_CATEGORIES } from "@/lib/cost-codes";
+import { MATERIAL_100_CODES, EQUIPMENT_500_CODES, ALL_STORE_CATEGORIES, ALL_CONTRACTOR_CATEGORIES } from "@/lib/cost-codes";
 
 export type SheetRow = Record<string, any>;
 
@@ -159,30 +159,20 @@ export function getDbTableName(tableName: string): string {
 }
 
 export const DEFAULT_PRODUCT_CATEGORIES: SheetRow[] = [
-  { _sheetRow: 1, id_product: "1", รหัสสินค้า: "1", ชื่อประเภทสินค้า: "ปูน/ทราย/หิน", หมายเหตุ: "" },
-  { _sheetRow: 2, id_product: "2", รหัสสินค้า: "2", ชื่อประเภทสินค้า: "เหล็กเส้น/รูปพรรณ", หมายเหตุ: "" },
-  { _sheetRow: 3, id_product: "3", รหัสสินค้า: "3", ชื่อประเภทสินค้า: "คอนกรีตผสมเสร็จ", หมายเหตุ: "" },
-  { _sheetRow: 4, id_product: "4", รหัสสินค้า: "4", ชื่อประเภทสินค้า: "ไม้แบบ/ไม้อัด", หมายเหตุ: "" },
-  { _sheetRow: 5, id_product: "5", รหัสสินค้า: "5", ชื่อประเภทสินค้า: "วัสดุมุง", หมายเหตุ: "" },
-  { _sheetRow: 6, id_product: "6", รหัสสินค้า: "6", ชื่อประเภทสินค้า: "ฝ้าผนัง", หมายเหตุ: "" },
-  { _sheetRow: 7, id_product: "7", รหัสสินค้า: "7", ชื่อประเภทสินค้า: "ปูพื้น", หมายเหตุ: "" },
-  { _sheetRow: 8, id_product: "8", รหัสสินค้า: "8", ชื่อประเภทสินค้า: "กระจก", หมายเหตุ: "" },
-  { _sheetRow: 9, id_product: "9", รหัสสินค้า: "9", ชื่อประเภทสินค้า: "ไฟฟ้า", หมายเหตุ: "" },
-  { _sheetRow: 10, id_product: "10", รหัสสินค้า: "10", ชื่อประเภทสินค้า: "ประปา", หมายเหตุ: "" },
-  { _sheetRow: 11, id_product: "11", รหัสสินค้า: "11", ชื่อประเภทสินค้า: "อื่นๆ(วัสดุ)", หมายเหตุ: "" },
-  { _sheetRow: 12, id_product: "12", รหัสสินค้า: "12", ชื่อประเภทสินค้า: "สีเคมี", หมายเหตุ: "" },
-  { _sheetRow: 13, id_product: "13", รหัสสินค้า: "13", ชื่อประเภทสินค้า: "สุขภัณฑ์", หมายเหตุ: "" },
-  { _sheetRow: 14, id_product: "14", รหัสสินค้า: "14", ชื่อประเภทสินค้า: "บิวอิน", หมายเหตุ: "" },
-  { _sheetRow: 15, id_product: "15", รหัสสินค้า: "15", ชื่อประเภทสินค้า: "แอร์", หมายเหตุ: "" },
-  { _sheetRow: 16, id_product: "16", รหัสสินค้า: "16", ชื่อประเภทสินค้า: "ดิน", หมายเหตุ: "" },
-  { _sheetRow: 17, id_product: "17", รหัสสินค้า: "17", ชื่อประเภทสินค้า: "หินทราย", หมายเหตุ: "" },
-  { _sheetRow: 18, id_product: "18", รหัสสินค้า: "18", ชื่อประเภทสินค้า: "เตรียมงาน", หมายเหตุ: "" },
-  { _sheetRow: 19, id_product: "101", รหัสสินค้า: "101", ชื่อประเภทสินค้า: "น้ำมัน", หมายเหตุ: "" },
-  { _sheetRow: 20, id_product: "102", รหัสสินค้า: "102", ชื่อประเภทสินค้า: "ค่าขนส่ง", หมายเหตุ: "" },
-  { _sheetRow: 21, id_product: "103", รหัสสินค้า: "103", ชื่อประเภทสินค้า: "เครื่องจักร", หมายเหตุ: "" },
-  { _sheetRow: 22, id_product: "104", รหัสสินค้า: "104", ชื่อประเภทสินค้า: "ซ่อมรถ", หมายเหตุ: "" },
-  { _sheetRow: 23, id_product: "200", รหัสสินค้า: "200", ชื่อประเภทสินค้า: "ดำเนินการ(อื่นๆ)", หมายเหตุ: "" },
-  { _sheetRow: 24, id_product: "non", รหัสสินค้า: "non", ชื่อประเภทสินค้า: "non (7.เครื่องมือ 8.อื่นๆ ที่พัก)", หมายเหตุ: "" }
+  ...MATERIAL_100_CODES.map((c, idx) => ({
+    _sheetRow: idx + 1,
+    id_product: c.code,
+    รหัสสินค้า: c.code,
+    ชื่อประเภทสินค้า: c.name,
+    หมายเหตุ: ""
+  })),
+  ...EQUIPMENT_500_CODES.map((c, idx) => ({
+    _sheetRow: MATERIAL_100_CODES.length + idx + 1,
+    id_product: c.code,
+    รหัสสินค้า: c.code,
+    ชื่อประเภทสินค้า: c.name,
+    หมายเหตุ: ""
+  }))
 ];
 
 export function cleanDataPayload(obj: any): Record<string, any> {
