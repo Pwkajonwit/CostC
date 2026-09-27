@@ -30,7 +30,7 @@ import {
 import dynamic from "next/dynamic";
 
 const FormModal = dynamic(
-  () => import("@/components/forms/FormModal").then((mod) => mod.FormModal),
+  () => import("@/components/forms/PettyCashFormModal").then((mod) => mod.PettyCashFormModal),
   { ssr: false }
 );
 
