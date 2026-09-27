@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   PieChart,
@@ -21,26 +21,34 @@ type ProjectBudgetAllocationManagerProps = {
   project: SheetRow;
   projectId: string | number;
   initialEditing?: boolean;
+  onSaveSuccess?: (updatedProject: SheetRow) => void;
 };
 
 export function ProjectBudgetAllocationManager({
   project,
   projectId,
-  initialEditing = false
+  initialEditing = false,
+  onSaveSuccess,
 }: ProjectBudgetAllocationManagerProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [editing, setEditing] = useState(initialEditing);
+  const [currentProject, setCurrentProject] = useState<Record<string, any>>({ ...project });
   const [draft, setDraft] = useState<Record<string, any>>({ ...project });
   const [changedFields, setChangedFields] = useState<Record<string, any>>({});
   const [error, setError] = useState<string>("");
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState(false);
 
+  useEffect(() => {
+    setCurrentProject({ ...project });
+    setDraft({ ...project });
+  }, [project]);
+
   const rowKey = project.id || project["ID Project"] || project._sheetRow || projectId;
 
   function beginEdit() {
-    setDraft({ ...project });
+    setDraft({ ...currentProject });
     setChangedFields({});
     setError("");
     setSaveSuccess(false);
@@ -48,7 +56,7 @@ export function ProjectBudgetAllocationManager({
   }
 
   function cancelEdit() {
-    setDraft({ ...project });
+    setDraft({ ...currentProject });
     setChangedFields({});
     setError("");
     setEditing(false);
@@ -99,9 +107,23 @@ export function ProjectBudgetAllocationManager({
         throw new Error(payload.error || "บันทึกการจัดสรรงบประมาณไม่สำเร็จ");
       }
 
+      // Merge updated fields immediately for instant rendering without needing F5/refresh
+      const updatedProject = {
+        ...currentProject,
+        ...draft,
+        ...(payload.row || {})
+      };
+
+      setCurrentProject(updatedProject);
+      setDraft(updatedProject);
       setEditing(false);
       setChangedFields({});
       setSaveSuccess(true);
+
+      // Trigger parent callback to update list and badges immediately
+      if (onSaveSuccess) {
+        onSaveSuccess(updatedProject);
+      }
 
       startTransition(() => {
         router.refresh();
@@ -195,7 +217,7 @@ export function ProjectBudgetAllocationManager({
       {/* Main Allocator Component */}
       <div className="border border-slate-200 rounded-xl bg-white p-2 sm:p-4 shadow-2xs">
         <ProjectBudgetAllocator
-          values={editing ? draft : project}
+          values={editing ? draft : currentProject}
           onChange={editing ? handleDraftChange : () => beginEdit()}
           defaultExpanded={true}
         />

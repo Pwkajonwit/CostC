@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -97,22 +97,28 @@ export function ProjectDetailClient({
     "ค่าแรง (Labor Cost Code)": true
   });
 
-  const colorInfo = getProjectColorInfo(hydratedProject.color);
+  const [currentProject, setCurrentProject] = useState<SheetRow>(hydratedProject);
+
+  useEffect(() => {
+    setCurrentProject(hydratedProject);
+  }, [hydratedProject]);
+
+  const colorInfo = getProjectColorInfo(currentProject.color);
 
   // Derive complete budget control summary aligned with ProjectBudgetAllocator
   const bCtrl = useMemo(() => {
-    return budgetControl || calculateProjectBudgetControl(hydratedProject, summaryRows);
-  }, [budgetControl, hydratedProject, summaryRows]);
+    return calculateProjectBudgetControl(currentProject, summaryRows);
+  }, [currentProject, summaryRows]);
 
   // List of overbudget items for alerts
   const overbudgetItems = useMemo(() => {
     return bCtrl.items.filter(i => i.isOver === 1);
   }, [bCtrl]);
 
-  const customer = customerDisplay || String(hydratedProject["ชื่อลูกค้า"] || hydratedProject["ลูกค้า"] || "-");
-  const company = companyDisplay || String(hydratedProject["บริษัท"] || hydratedProject["บริษัทรับงาน"] || "-");
-  const owner = String(hydratedProject["รับผิดชอบ"] || "-");
-  const date = formatDateDisplay(hydratedProject["วันที่"]);
+  const customer = customerDisplay || String(currentProject["ชื่อลูกค้า"] || currentProject["ลูกค้า"] || "-");
+  const company = companyDisplay || String(currentProject["บริษัท"] || currentProject["บริษัทรับงาน"] || "-");
+  const owner = String(currentProject["รับผิดชอบ"] || "-");
+  const date = formatDateDisplay(currentProject["วันที่"]);
   const location = String(hydratedProject["สถานที่"] || "-");
 
   // Distinct filter options extracted from summaryRows
@@ -1070,9 +1076,12 @@ export function ProjectDetailClient({
       {/* 7. TAB 3: PROJECT BUDGET ALLOCATION (DEDICATED ALLOCATOR TAB) */}
       {activeTab === "allocation" && (
         <ProjectBudgetAllocationManager
-          project={hydratedProject}
+          project={currentProject}
           projectId={projectId}
           initialEditing={autoEditAllocation}
+          onSaveSuccess={(updated) => {
+            setCurrentProject((prev) => ({ ...prev, ...updated }));
+          }}
         />
       )}
 

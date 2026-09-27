@@ -13,6 +13,7 @@ import {
   LayoutGrid,
   List,
   PieChart,
+  Plus,
   Search,
   Sliders,
   User,
@@ -22,7 +23,7 @@ import {
 } from "lucide-react";
 import { money, toNumber } from "@/lib/utils/numbers";
 import type { SheetRow } from "@/lib/types";
-import { ALLOCATED_BUDGET_ITEMS } from "@/lib/project-budget-control";
+import { ALLOCATED_BUDGET_ITEMS, getProjectAllocationTotals } from "@/lib/project-budget-control";
 import { ProjectBudgetAllocationManager } from "@/components/dashboards/ProjectBudgetAllocationManager";
 
 type WorkStatusDashboardClientProps = {
@@ -98,8 +99,15 @@ export function WorkStatusDashboardClient({ projects }: WorkStatusDashboardClien
   const searchParams = useSearchParams();
   const urlSearch = searchParams.get("search") || "";
 
+  const [projectList, setProjectList] = useState<SheetRow[]>(projects);
+
+  useEffect(() => {
+    setProjectList(projects);
+  }, [projects]);
+
   const [searchTerm, setSearchTerm] = useState(urlSearch);
   const [filterTab, setFilterTab] = useState<"all" | "red" | "green" | "complete">("all");
+  const [allocationFilter, setAllocationFilter] = useState<"all" | "allocated" | "unallocated">("all");
   const [viewMode, setViewMode] = useState<"table" | "grid">("table");
   const [selectedProjectForAllocation, setSelectedProjectForAllocation] = useState<SheetRow | null>(null);
 
@@ -108,7 +116,7 @@ export function WorkStatusDashboardClient({ projects }: WorkStatusDashboardClien
   }, [urlSearch]);
 
   const filteredProjects = useMemo(() => {
-    let list = projects;
+    let list = projectList;
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase().trim();
       list = list.filter((p) =>
@@ -116,7 +124,7 @@ export function WorkStatusDashboardClient({ projects }: WorkStatusDashboardClien
       );
     }
     return list;
-  }, [projects, searchTerm]);
+  }, [projectList, searchTerm]);
 
   const redProjects = useMemo(() => {
     return filteredProjects.filter((p) => getProjectColorInfo(p.color).key === "red");
@@ -135,33 +143,56 @@ export function WorkStatusDashboardClient({ projects }: WorkStatusDashboardClien
     return filteredProjects.filter((p) => getProjectColorInfo(p.color).key !== "black");
   }, [filteredProjects]);
 
-  const displayList = useMemo(() => {
+  // Base list by status tab
+  const statusFilteredList = useMemo(() => {
     if (filterTab === "red") return redProjects;
     if (filterTab === "green") return greenProjects;
     if (filterTab === "complete") return completeProjects;
     return activeProjects;
   }, [filterTab, redProjects, greenProjects, completeProjects, activeProjects]);
 
+  // Allocation counts within current status tab (supports both main categories & sub-items)
+  const allocatedCount = useMemo(() => {
+    return statusFilteredList.filter((p) => {
+      return getProjectAllocationTotals(p).hasAllocation;
+    }).length;
+  }, [statusFilteredList]);
+
+  const unallocatedCount = useMemo(() => {
+    return statusFilteredList.length - allocatedCount;
+  }, [statusFilteredList, allocatedCount]);
+
+  // Final display list applying allocation filter
+  const displayList = useMemo(() => {
+    if (allocationFilter === "allocated") {
+      return statusFilteredList.filter((p) => getProjectAllocationTotals(p).hasAllocation);
+    }
+    if (allocationFilter === "unallocated") {
+      return statusFilteredList.filter((p) => !getProjectAllocationTotals(p).hasAllocation);
+    }
+    return statusFilteredList;
+  }, [statusFilteredList, allocationFilter]);
+
   // Overall financial statistics
   const totalBudget = useMemo(() => {
-    return projects.reduce((sum, p) => sum + toNumber(p["งบไม่เกิน"]), 0);
-  }, [projects]);
+    return projectList.reduce((sum, p) => sum + toNumber(p["งบไม่เกิน"]), 0);
+  }, [projectList]);
 
   const totalPaid = useMemo(() => {
-    return projects.reduce((sum, p) => sum + toNumber(p["เงินจ่ายแล้ว"]), 0);
-  }, [projects]);
+    return projectList.reduce((sum, p) => sum + toNumber(p["เงินจ่ายแล้ว"]), 0);
+  }, [projectList]);
 
   const totalPending = useMemo(() => {
-    return projects.reduce((sum, p) => sum + toNumber(p["หนี้สินรอจ่าย"]), 0);
-  }, [projects]);
+    return projectList.reduce((sum, p) => sum + toNumber(p["หนี้สินรอจ่าย"]), 0);
+  }, [projectList]);
 
   const totalSpent = useMemo(() => {
-    return projects.reduce((sum, p) => sum + toNumber(p["รวม ALL"]), 0);
-  }, [projects]);
+    return projectList.reduce((sum, p) => sum + toNumber(p["รวม ALL"]), 0);
+  }, [projectList]);
 
-  const allRedCount = useMemo(() => projects.filter((p) => getProjectColorInfo(p.color).key === "red").length, [projects]);
-  const allGreenCount = useMemo(() => projects.filter((p) => getProjectColorInfo(p.color).key === "green").length, [projects]);
-  const allCompleteCount = useMemo(() => projects.filter((p) => getProjectColorInfo(p.color).key === "black").length, [projects]);
+  const allRedCount = useMemo(() => projectList.filter((p) => getProjectColorInfo(p.color).key === "red").length, [projectList]);
+  const allGreenCount = useMemo(() => projectList.filter((p) => getProjectColorInfo(p.color).key === "green").length, [projectList]);
+  const allCompleteCount = useMemo(() => projectList.filter((p) => getProjectColorInfo(p.color).key === "black").length, [projectList]);
 
   return (
     <div className="w-full flex flex-col gap-5 p-4 sm:p-6 max-w-[1600px] mx-auto font-sans">
@@ -233,65 +264,138 @@ export function WorkStatusDashboardClient({ projects }: WorkStatusDashboardClien
       </div>
 
       {/* 2. FILTER TABS & SEARCH TOOLBAR */}
-      <div className="bg-white rounded-xl md:rounded-lg p-2 sm:p-3 border border-slate-200/90 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        {/* Status Filter Tabs (Scrollable on mobile) */}
-        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
-          <button
-            type="button"
-            onClick={() => setFilterTab("all")}
-            className={`px-3 py-1.5 rounded-lg text-xs transition-all whitespace-nowrap active:scale-95 cursor-pointer ${
-              filterTab === "all"
-                ? "bg-slate-900 text-white shadow-2xs"
-                : "text-slate-600 hover:bg-slate-100 bg-slate-50 border border-slate-200/60"
-            }`}
-          >
-            ทั้งหมด ({activeProjects.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilterTab("red")}
-            className={`px-3 py-1.5 rounded-lg text-xs transition-all whitespace-nowrap active:scale-95 cursor-pointer flex items-center gap-1.5 ${
-              filterTab === "red"
-                ? "bg-rose-600 text-white shadow-2xs"
-                : "text-rose-700 hover:bg-rose-50 bg-rose-50/50 border border-rose-200/60"
-            }`}
-          >
-            <span>🔴 (งานใหญ่) ({redProjects.length})</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilterTab("green")}
-            className={`px-3 py-1.5 rounded-lg text-xs transition-all whitespace-nowrap active:scale-95 cursor-pointer flex items-center gap-1.5 ${
-              filterTab === "green"
-                ? "bg-emerald-700 text-white shadow-2xs"
-                : "text-emerald-700 hover:bg-emerald-50 bg-emerald-50/50 border border-emerald-200/60"
-            }`}
-          >
-            <span>🟢 (งานเล็ก) ({greenProjects.length})</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilterTab("complete")}
-            className={`px-3 py-1.5 rounded-lg text-xs transition-all whitespace-nowrap active:scale-95 cursor-pointer flex items-center gap-1.5 ${
-              filterTab === "complete"
-                ? "bg-slate-800 text-white shadow-2xs"
-                : "text-slate-700 hover:bg-slate-100 bg-slate-50 border border-slate-200/60"
-            }`}
-          >
-            <span>⚫ (เสร็จแล้ว) ({completeProjects.length})</span>
-          </button>
+      <div className="bg-white rounded-xl md:rounded-lg p-2 sm:p-3 border border-slate-200/90 shadow-2xs flex flex-col gap-2.5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          {/* Status Filter Tabs (Scrollable on mobile) */}
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+            <button
+              type="button"
+              onClick={() => setFilterTab("all")}
+              className={`px-3 py-1.5 rounded-lg text-xs transition-all whitespace-nowrap active:scale-95 cursor-pointer ${
+                filterTab === "all"
+                  ? "bg-slate-900 text-white shadow-2xs"
+                  : "text-slate-600 hover:bg-slate-100 bg-slate-50 border border-slate-200/60"
+              }`}
+            >
+              ทั้งหมด ({activeProjects.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterTab("red")}
+              className={`px-3 py-1.5 rounded-lg text-xs transition-all whitespace-nowrap active:scale-95 cursor-pointer flex items-center gap-1.5 ${
+                filterTab === "red"
+                  ? "bg-rose-600 text-white shadow-2xs"
+                  : "text-rose-700 hover:bg-rose-50 bg-rose-50/50 border border-rose-200/60"
+              }`}
+            >
+              <span>🔴 (งานใหญ่) ({redProjects.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterTab("green")}
+              className={`px-3 py-1.5 rounded-lg text-xs transition-all whitespace-nowrap active:scale-95 cursor-pointer flex items-center gap-1.5 ${
+                filterTab === "green"
+                  ? "bg-emerald-700 text-white shadow-2xs"
+                  : "text-emerald-700 hover:bg-emerald-50 bg-emerald-50/50 border border-emerald-200/60"
+              }`}
+            >
+              <span>🟢 (งานเล็ก) ({greenProjects.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterTab("complete")}
+              className={`px-3 py-1.5 rounded-lg text-xs transition-all whitespace-nowrap active:scale-95 cursor-pointer flex items-center gap-1.5 ${
+                filterTab === "complete"
+                  ? "bg-slate-800 text-white shadow-2xs"
+                  : "text-slate-700 hover:bg-slate-100 bg-slate-50 border border-slate-200/60"
+              }`}
+            >
+              <span>⚫ (เสร็จแล้ว) ({completeProjects.length})</span>
+            </button>
+          </div>
+
+          {/* Right side: View switcher + Search */}
+          <div className="flex items-center gap-2">
+            <div className="hidden md:flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+              <button
+                type="button"
+                onClick={() => setViewMode("table")}
+                className={`p-1.5 rounded-md transition cursor-pointer ${viewMode === "table" ? "bg-white text-slate-800 shadow-2xs" : "text-slate-400 hover:text-slate-600"}`}
+                title="มุมมองตาราง"
+              >
+                <List size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("grid")}
+                className={`p-1.5 rounded-md transition cursor-pointer ${viewMode === "grid" ? "bg-white text-slate-800 shadow-2xs" : "text-slate-400 hover:text-slate-600"}`}
+                title="มุมมองการ์ด"
+              >
+                <LayoutGrid size={14} />
+              </button>
+            </div>
+
+            {/* Live Search Input Box */}
+            <div className="relative flex items-center flex-1 sm:w-60 min-w-0">
+              <Search size={14} className="absolute left-2.5 text-slate-400 pointer-events-none shrink-0" />
+              <input
+                type="text"
+                placeholder="ค้นหาชื่อ Project, ID, ลูกค้า..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full bg-slate-50 md:bg-white text-slate-800 text-xs pl-8 pr-7 py-1.5 rounded-lg md:rounded-md border border-slate-200 md:border-slate-300 focus:outline-none focus:bg-white focus:border-slate-400 placeholder:text-slate-400"
+              />
+            </div>
+          </div>
         </div>
 
-        {/* Live Search Input Box */}
-        <div className="relative flex items-center flex-1 sm:max-w-xs min-w-0">
-          <Search size={14} className="absolute left-2.5 text-slate-400 pointer-events-none shrink-0" />
-          <input
-            type="text"
-            placeholder="ค้นหาชื่อ Project, ID, ลูกค้า..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-slate-50 md:bg-white text-slate-800 text-xs pl-8 pr-7 py-1.5 rounded-lg md:rounded-md border border-slate-200 md:border-slate-300 focus:outline-none focus:bg-white focus:border-slate-400 placeholder:text-slate-400"
-          />
+        {/* Sub-strip: Quick Allocation Filter Pills */}
+        <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs">
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+            <span className="text-slate-400 text-[11px] font-medium shrink-0 flex items-center gap-1">
+              <PieChart size={12} className="text-slate-400" />
+              <span>การจัดสรรงบ:</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setAllocationFilter("all")}
+              className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition cursor-pointer whitespace-nowrap active:scale-95 ${
+                allocationFilter === "all"
+                  ? "bg-slate-800 text-white shadow-2xs font-semibold"
+                  : "bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200/60"
+              }`}
+            >
+              ทั้งหมด ({statusFilteredList.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setAllocationFilter("allocated")}
+              className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition cursor-pointer whitespace-nowrap active:scale-95 flex items-center gap-1.5 ${
+                allocationFilter === "allocated"
+                  ? "bg-emerald-600 text-white shadow-2xs font-semibold"
+                  : "bg-emerald-50/70 hover:bg-emerald-100/70 text-emerald-800 border border-emerald-200/80"
+              }`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${allocationFilter === "allocated" ? "bg-white" : "bg-emerald-600"}`} />
+              <span>จัดสรรแล้ว ({allocatedCount})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setAllocationFilter("unallocated")}
+              className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition cursor-pointer whitespace-nowrap active:scale-95 flex items-center gap-1.5 ${
+                allocationFilter === "unallocated"
+                  ? "bg-slate-700 text-white shadow-2xs font-semibold"
+                  : "bg-slate-100/80 hover:bg-slate-200/80 text-slate-600 border border-dashed border-slate-300"
+              }`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${allocationFilter === "unallocated" ? "bg-white" : "bg-slate-400"}`} />
+              <span>ยังไม่จัดสรร ({unallocatedCount})</span>
+            </button>
+          </div>
+
+          <div className="text-[11px] text-slate-400 shrink-0 hidden sm:block">
+            แสดง {displayList.length} โครงการ
+          </div>
         </div>
       </div>
 
@@ -385,19 +489,44 @@ export function WorkStatusDashboardClient({ projects }: WorkStatusDashboardClien
                         {money(remaining)} ฿
                       </span>
                     </span>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setSelectedProjectForAllocation(p);
-                      }}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-[11px] font-semibold transition"
-                      title="เปิดการจัดสรรงบประมาณโครงการนี้"
-                    >
-                      <PieChart size={11} />
-                      <span>จัดสรรงบ</span>
-                    </button>
+                    {(() => {
+                      const { totalAllocated, hasAllocation, allocPercent, projectBudget, hasMainAllocationsOnly } = getProjectAllocationTotals(p);
+
+                      return (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setSelectedProjectForAllocation(p);
+                          }}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold transition active:scale-95 cursor-pointer ${
+                            hasAllocation
+                              ? allocPercent > 100
+                                ? "bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300"
+                                : "bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300"
+                              : "bg-slate-50 hover:bg-slate-100 text-slate-500 border border-dashed border-slate-300"
+                          }`}
+                          title={
+                            hasAllocation
+                              ? `จัดสรรงบแล้ว ฿${money(totalAllocated)} (${allocPercent}%)${hasMainAllocationsOnly ? " [จัดสรรหมวดหลัก]" : ""} - คลิกเพื่อแก้ไข`
+                              : "ยังไม่ได้จัดสรรงบ - คลิกเพื่อเริ่มตั้งค่า"
+                          }
+                        >
+                          {hasAllocation ? (
+                            <>
+                              <PieChart size={11} className={allocPercent > 100 ? "text-amber-700 shrink-0" : "text-emerald-700 shrink-0"} />
+                              <span>จัดสรรแล้ว {allocPercent > 0 ? `${allocPercent}%` : "✓"}</span>
+                            </>
+                          ) : (
+                            <>
+                              <Plus size={11} className="text-slate-400 shrink-0" />
+                              <span>ยังไม่จัดสรร</span>
+                            </>
+                          )}
+                        </button>
+                      );
+                    })()}
                   </div>
 
                   <span className="text-slate-600 text-xs flex items-center gap-0.5 group-hover:text-slate-900">
@@ -482,30 +611,52 @@ export function WorkStatusDashboardClient({ projects }: WorkStatusDashboardClien
                         {/* Budget Allocation Column */}
                         <td className="py-2.5 px-3.5 text-center whitespace-nowrap">
                           {(() => {
-                            const allocatedTotal = ALLOCATED_BUDGET_ITEMS.reduce((sum, item) => sum + toNumber(p[item.field]), 0);
-                            const hasAllocation = allocatedTotal > 0;
-                            const allocPercent = budget > 0 ? Math.round((allocatedTotal / budget) * 100) : 0;
+                            const {
+                              totalAllocated,
+                              hasAllocation,
+                              allocPercent,
+                              projectBudget,
+                              hasMainAllocationsOnly,
+                              materialBudget,
+                              laborBudget,
+                            } = getProjectAllocationTotals(p);
 
                             return (
                               <div className="inline-flex items-center gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => setSelectedProjectForAllocation(p)}
-                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold shadow-2xs transition cursor-pointer active:scale-95 border ${
-                                    hasAllocation
-                                      ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300"
-                                      : "bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200"
-                                  }`}
-                                  title={hasAllocation ? `จัดสรรงบแล้ว ฿${money(allocatedTotal)} (${allocPercent}%) - คลิกเพื่อเปิดแก้ไข` : "คลิกเพื่อเปิดการจัดสรรงบประมาณโครงการ"}
-                                >
-                                  <PieChart size={13} className={hasAllocation ? "text-emerald-700 shrink-0" : "text-indigo-600 shrink-0"} />
-                                  <span>{hasAllocation ? "จัดสรรแล้ว" : "เปิดจัดสรรงบ"}</span>
-                                  {hasAllocation && (
-                                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-600 text-white font-mono font-bold">
-                                      {budget > 0 ? `${allocPercent}%` : "✓"}
+                                {hasAllocation ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedProjectForAllocation(p)}
+                                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold shadow-2xs transition cursor-pointer active:scale-95 border ${
+                                      allocPercent > 100
+                                        ? "bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300"
+                                        : "bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300"
+                                    }`}
+                                    title={`จัดสรรงบแล้ว ฿${money(totalAllocated)} จากงบ ฿${money(projectBudget || budget)} (${allocPercent}%)${
+                                      hasMainAllocationsOnly ? ` [หมวดหลัก: ค่าของ ฿${money(materialBudget)} / ค่าแรง ฿${money(laborBudget)}]` : ""
+                                    } - คลิกเพื่อแก้ไข`}
+                                  >
+                                    <PieChart size={13} className={allocPercent > 100 ? "text-amber-700 shrink-0" : "text-emerald-700 shrink-0"} />
+                                    <span>จัดสรรแล้ว</span>
+                                    <span
+                                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold leading-none ${
+                                        allocPercent > 100 ? "bg-amber-600 text-white" : "bg-emerald-600 text-white"
+                                      }`}
+                                    >
+                                      {allocPercent > 0 ? `${allocPercent}%` : "✓"}
                                     </span>
-                                  )}
-                                </button>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedProjectForAllocation(p)}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition cursor-pointer active:scale-95 border border-dashed border-slate-300 hover:border-slate-400 bg-slate-50/70 hover:bg-slate-100 text-slate-500 hover:text-slate-800"
+                                    title="ยังไม่ได้ตั้งการจัดสรรงบประมาณโครงการ - คลิกเพื่อเริ่มจัดสรรงบ"
+                                  >
+                                    <Plus size={12} className="text-slate-400 shrink-0" />
+                                    <span>ยังไม่จัดสรร</span>
+                                  </button>
+                                )}
                                 <Link
                                   href={`/work-status/${encodeURIComponent(id)}?tab=allocation`}
                                   className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
@@ -579,13 +730,40 @@ export function WorkStatusDashboardClient({ projects }: WorkStatusDashboardClien
                 href={`/work-status/${encodeURIComponent(id)}`}
                 className="bg-white rounded-lg p-4 border border-slate-200/90 hover:border-indigo-400 shadow-2xs hover:shadow-md transition-all flex flex-col justify-between gap-3 group cursor-pointer"
               >
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-1.5">
                   <span
                     className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs ${colorInfo.badgeClass}`}
                   >
                     <span>{colorInfo.label}</span>
                   </span>
-                  <span className="font-mono text-xs text-slate-400">#{id}</span>
+                  <div className="flex items-center gap-1.5">
+                    {(() => {
+                      const { totalAllocated, hasAllocation, allocPercent } = getProjectAllocationTotals(p);
+
+                      return hasAllocation ? (
+                        <span
+                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold border ${
+                            allocPercent > 100
+                              ? "bg-amber-50 text-amber-800 border-amber-300"
+                              : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          }`}
+                          title={`จัดสรรงบแล้ว ฿${money(totalAllocated)} (${allocPercent}%)`}
+                        >
+                          <PieChart size={10} className={allocPercent > 100 ? "text-amber-700" : "text-emerald-700"} />
+                          <span>จัดสรร {allocPercent > 0 ? `${allocPercent}%` : "✓"}</span>
+                        </span>
+                      ) : (
+                        <span
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-50 text-slate-500 border border-dashed border-slate-300"
+                          title="ยังไม่ได้ตั้งการจัดสรรงบ"
+                        >
+                          <Plus size={10} className="text-slate-400" />
+                          <span>ยังไม่จัดสรร</span>
+                        </span>
+                      );
+                    })()}
+                    <span className="font-mono text-xs text-slate-400">#{id}</span>
+                  </div>
                 </div>
 
                 <h3 className="text-slate-900 text-xs group-hover:text-indigo-600 transition-colors line-clamp-2">
@@ -682,6 +860,21 @@ export function WorkStatusDashboardClient({ projects }: WorkStatusDashboardClien
                 project={selectedProjectForAllocation}
                 projectId={String(selectedProjectForAllocation["ID Project"] || selectedProjectForAllocation.id || "-")}
                 initialEditing={false}
+                onSaveSuccess={(updatedProject) => {
+                  const targetId = String(updatedProject["ID Project"] || updatedProject.id || updatedProject._sheetRow || "");
+                  setProjectList((prev) =>
+                    prev.map((p) => {
+                      const pid = String(p["ID Project"] || p.id || p._sheetRow || "");
+                      if (pid === targetId) {
+                        return { ...p, ...updatedProject };
+                      }
+                      return p;
+                    })
+                  );
+                  setSelectedProjectForAllocation((prev) =>
+                    prev ? { ...prev, ...updatedProject } : null
+                  );
+                }}
               />
             </div>
           </div>
