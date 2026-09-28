@@ -23,7 +23,8 @@ import {
   getCarsMap,
   createDailyTransferSummaryFlex,
   createDailySummaryFlex,
-  isSubBillRecord
+  isSubBillRecord,
+  replyMultipleFlexMessages
 } from "@/lib/line/line";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 import { insertRowToSupabase } from "@/lib/supabase/supabase-db";
@@ -864,23 +865,47 @@ export async function handleLineCommand(
         getProjectBudgetMap(),
         getCarsMap()
       ]);
-      const flexForApprovers = createWithdrawOwnerFlex(pendingBills, resolvedPeopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap);
       const totalAmount = pendingBills.reduce((sum, b) => sum + Number(b["ยอดเงิน"] || b.amount || 0), 0);
       const amountStr = totalAmount.toLocaleString("th-TH");
 
-      const altText = pendingBills.length === 1
-        ? `📋 คำขออนุมัติเบิกเงิน #${pendingBills[0]["ลำดับ"] || pendingBills[0].id || ""} (฿${amountStr})`
-        : `📋 คำขออนุมัติเบิกเงิน ${pendingBills.length} รายการ (รวม ฿${amountStr})`;
+      const mainPending = pendingBills.filter(b => !isSubBillRecord(b));
+      const subPending = pendingBills.filter(b => isSubBillRecord(b));
+
+      let sendList: Array<{ altText: string; contents: Record<string, any> }> = [];
+
+      if (mainPending.length > 0 && subPending.length > 0) {
+        const mainAmt = mainPending.reduce((sum, b) => sum + Number(b["ยอดเงิน"] || b.amount || 0), 0);
+        const subAmt = subPending.reduce((sum, b) => sum + Number(b["ยอดเงิน"] || b.amount || 0), 0);
+        const mainFlex = createWithdrawOwnerFlex(mainPending, resolvedPeopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap, undefined, `📋 คำขออนุมัติบิลหลัก (${mainPending.length} รายการ)`);
+        const subFlex = createWithdrawOwnerFlex(subPending, resolvedPeopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap, undefined, `🧾 คำขออนุมัติเงินสดบิลย่อย (${subPending.length} รายการ)`);
+        sendList = [
+          { altText: `📋 คำขออนุมัติบิลหลัก ${mainPending.length} รายการ (รวม ฿${mainAmt.toLocaleString("th-TH")})`, contents: mainFlex },
+          { altText: `🧾 คำขออนุมัติเงินสดบิลย่อย ${subPending.length} รายการ (รวม ฿${subAmt.toLocaleString("th-TH")})`, contents: subFlex }
+        ];
+      } else {
+        const isSub = subPending.length > 0;
+        const title = isSub ? `🧾 คำขออนุมัติเงินสดบิลย่อย (${pendingBills.length} รายการ)` : `📋 คำขออนุมัติบิลหลัก (${pendingBills.length} รายการ)`;
+        const flexForApprovers = createWithdrawOwnerFlex(pendingBills, resolvedPeopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap, undefined, title);
+        const altText = pendingBills.length === 1
+          ? `${title} #${pendingBills[0]["ลำดับ"] || pendingBills[0].id || ""} (฿${amountStr})`
+          : `${title} (รวม ฿${amountStr})`;
+        sendList = [{ altText, contents: flexForApprovers }];
+      }
 
       let successCount = 0;
       let lastError = "";
 
       for (const targetUserId of targetApprovers) {
-        const result = await sendFlexMessageDetailed(targetUserId, altText, flexForApprovers);
-        if (result.success) {
+        let allSuccess = true;
+        for (const item of sendList) {
+          const result = await sendFlexMessageDetailed(targetUserId, item.altText, item.contents);
+          if (!result.success) {
+            allSuccess = false;
+            lastError = result.error || "";
+          }
+        }
+        if (allSuccess) {
           successCount++;
-        } else {
-          lastError = result.error || "";
         }
       }
 
@@ -1301,6 +1326,48 @@ export async function handleLineCommand(
       return true;
     }
 
+    const isWaitingApprovalCmd = (
+      lowerText === "รออนุมัติ" ||
+      lowerText === "รอ อนุมัติ" ||
+      lowerText === "ตั้งเบิก" ||
+      rawText.startsWith("รออนุมัติ:") ||
+      rawText.startsWith("รอ อนุมัติ:") ||
+      rawText.startsWith("ตั้งเบิก:") ||
+      lowerText.startsWith("รออนุมัติ ") ||
+      lowerText.startsWith("รอ อนุมัติ ") ||
+      lowerText.startsWith("ตั้งเบิก ")
+    );
+
+    const isApprovedCmd = (
+      lowerText === "รอปิดงาน" ||
+      lowerText === "รอ ปิดงาน" ||
+      lowerText === "รอจ่าย" ||
+      lowerText === "รอโอน" ||
+      lowerText === "อนุมัติแล้ว" ||
+      lowerText === "รอปิดบิล" ||
+      rawText.startsWith("รอปิดงาน:") ||
+      rawText.startsWith("รอ ปิดงาน:") ||
+      rawText.startsWith("รอจ่าย:") ||
+      rawText.startsWith("รอโอน:") ||
+      rawText.startsWith("อนุมัติแล้ว:") ||
+      rawText.startsWith("รอปิดบิล:") ||
+      lowerText.startsWith("รอปิดงาน ") ||
+      lowerText.startsWith("รอ ปิดงาน ") ||
+      lowerText.startsWith("รอจ่าย ") ||
+      lowerText.startsWith("รอโอน ") ||
+      lowerText.startsWith("อนุมัติแล้ว ") ||
+      lowerText.startsWith("รอปิดบิล ")
+    );
+
+    const isWaitingWithdrawCmd = (
+      lowerText === "รอตั้งเบิก" ||
+      lowerText === "รอ ตั้งเบิก" ||
+      rawText.startsWith("รอตั้งเบิก:") ||
+      rawText.startsWith("รอ ตั้งเบิก:") ||
+      lowerText.startsWith("รอตั้งเบิก ") ||
+      lowerText.startsWith("รอ ตั้งเบิก ")
+    );
+
     // 6. Query Bills Specific Commands
     // "หลัก", "ย่อย", "บิลหลัก", "บิลย่อย", "หลัก:", "บิลหลัก:", "ย่อย:", "บิลย่อย:", "ทั้งหมด:", "รออนุมัติ", "ตั้งเบิก", "รอปิดงาน", "รอจ่าย", "อนุมัติแล้ว"
     // "บิล:", "bill:" — ค้นหาทั่วไป (ทั้งบิลหลักและย่อย)
@@ -1316,63 +1383,15 @@ export async function handleLineCommand(
       rawText.startsWith("ทั้งหมด:") ||
       rawText.startsWith("บิล:") ||
       rawText.toLowerCase().startsWith("bill:") ||
-      lowerText === "รอตั้งเบิก" ||
-      lowerText === "รออนุมัติ" ||
-      lowerText === "ตั้งเบิก" ||
-      rawText.startsWith("รอตั้งเบิก:") ||
-      rawText.startsWith("รออนุมัติ:") ||
-      rawText.startsWith("ตั้งเบิก:") ||
-      lowerText.startsWith("รอตั้งเบิก ") ||
-      lowerText.startsWith("รออนุมัติ ") ||
-      lowerText.startsWith("ตั้งเบิก ") ||
-      lowerText === "รอปิดงาน" ||
-      lowerText === "รอจ่าย" ||
-      lowerText === "รอโอน" ||
-      lowerText === "อนุมัติแล้ว" ||
-      lowerText === "รอปิดบิล" ||
-      rawText.startsWith("รอปิดงาน:") ||
-      rawText.startsWith("รอจ่าย:") ||
-      rawText.startsWith("รอโอน:") ||
-      rawText.startsWith("อนุมัติแล้ว:") ||
-      rawText.startsWith("รอปิดบิล:") ||
-      lowerText.startsWith("รอปิดงาน ") ||
-      lowerText.startsWith("รอจ่าย ") ||
-      lowerText.startsWith("รอโอน ") ||
-      lowerText.startsWith("อนุมัติแล้ว ") ||
-      lowerText.startsWith("รอปิดบิล ")
+      isWaitingApprovalCmd ||
+      isApprovedCmd ||
+      isWaitingWithdrawCmd
     ) {
       const isSub = rawText.includes("ย่อย");
       const isMain = rawText.includes("หลัก");
-      const isApprovedFilter = (
-        lowerText === "รอปิดงาน" ||
-        lowerText === "รอจ่าย" ||
-        lowerText === "รอโอน" ||
-        lowerText === "อนุมัติแล้ว" ||
-        lowerText === "รอปิดบิล" ||
-        rawText.startsWith("รอปิดงาน:") ||
-        rawText.startsWith("รอจ่าย:") ||
-        rawText.startsWith("รอโอน:") ||
-        rawText.startsWith("อนุมัติแล้ว:") ||
-        rawText.startsWith("รอปิดบิล:") ||
-        lowerText.startsWith("รอปิดงาน ") ||
-        lowerText.startsWith("รอจ่าย ") ||
-        lowerText.startsWith("รอโอน ") ||
-        lowerText.startsWith("อนุมัติแล้ว ") ||
-        lowerText.startsWith("รอปิดบิล ")
-      );
-      const isWaitingWithdrawOnly = (
-        lowerText === "รอตั้งเบิก" ||
-        rawText.startsWith("รอตั้งเบิก:") ||
-        lowerText.startsWith("รอตั้งเบิก ")
-      );
-      const isWaitingApprovalOnly = (
-        lowerText === "รออนุมัติ" ||
-        lowerText === "ตั้งเบิก" ||
-        rawText.startsWith("รออนุมัติ:") ||
-        rawText.startsWith("ตั้งเบิก:") ||
-        lowerText.startsWith("รออนุมัติ ") ||
-        lowerText.startsWith("ตั้งเบิก ")
-      );
+      const isApprovedFilter = isApprovedCmd;
+      const isWaitingWithdrawOnly = isWaitingWithdrawCmd;
+      const isWaitingApprovalOnly = isWaitingApprovalCmd;
       const isPendingFilter = !isApprovedFilter && (
         isMain ||
         isSub ||
@@ -1381,7 +1400,7 @@ export async function handleLineCommand(
       );
 
       const filterQuery = rawText
-        .replace(/^(หลัก|ย่อย|บิลหลัก|บิลย่อย|ทั้งหมด|บิล|bill|รออนุมัติ|รอตั้งเบิก|ตั้งเบิก|รอปิดงาน|รอจ่าย|รอโอน|อนุมัติแล้ว|รอปิดบิล)(:|\s+|$)/i, "")
+        .replace(/^(หลัก|ย่อย|บิลหลัก|บิลย่อย|ทั้งหมด|บิล|bill|รออนุมัติ|รอ\s+อนุมัติ|รอตั้งเบิก|รอ\s+ตั้งเบิก|ตั้งเบิก|รอปิดงาน|รอ\s+ปิดงาน|รอจ่าย|รอโอน|อนุมัติแล้ว|รอปิดบิล)(:|\s+|$)/i, "")
         .trim();
 
       // ดึงข้อมูลบิลและตารางอ้างอิงทั้งหมดผ่าน In-Memory Cache เพื่อความเร็วสูงสุด (< 2ms)
@@ -1472,11 +1491,7 @@ export async function handleLineCommand(
 
       // กรองประเภท บิลย่อย vs บิลหลัก
       function checkIsSubBill(b: any): boolean {
-        const billVal = String(b["บิล"] || b.bill || b.bill_type || "").trim();
-        if (billVal.includes("ย่อย")) return true;
-        if (billVal.includes("หลัก")) return false;
-        const cat = String(b["ประเภท"] || b.category || "").trim();
-        return cat.includes("ย่อย") || cat.startsWith("2.") || cat.startsWith("3.") || cat.startsWith("8.");
+        return isSubBillRecord(b);
       }
 
       if (isSub) {
@@ -1488,10 +1503,8 @@ export async function handleLineCommand(
       const totalCount = filtered.length;
       const totalSumAmount = filtered.reduce((sum, b) => sum + Number(b["ยอดเงิน"] || b.amount || 0), 0);
 
-      const targetBills = filtered.slice(0, 40);
-
       // ✅ FIX: ลบ hardcoded fallback — แสดง "ไม่พบรายการ" แทนข้อมูลปลอม
-      if (!targetBills || targetBills.length === 0) {
+      if (!filtered || filtered.length === 0) {
         const noResultMsg = isApprovedFilter
           ? (filterQuery
               ? `✅ ไม่พบรายการบิลที่รอปิดงาน/จ่ายเงินสำหรับ "${filterQuery}"\n\n(บิลทั้งหมดได้รับการปิดงานเรียบร้อยแล้ว หรือยังไม่ผ่านการอนุมัติ)`
@@ -1511,16 +1524,6 @@ export async function handleLineCommand(
         return true;
       }
 
-      const flexTitle = isApprovedFilter
-        ? (filterQuery ? `รายการอนุมัติแล้วของ "${filterQuery}" (รอปิดงาน)` : `รายการอนุมัติแล้ว (รอปิดงาน/จ่ายเงิน)`)
-        : isWaitingApprovalOnly
-          ? (filterQuery ? `รายการรออนุมัติของ "${filterQuery}"` : `รายการรออนุมัติ`)
-          : isWaitingWithdrawOnly
-            ? (filterQuery ? `รายการรอตั้งเบิกของ "${filterQuery}"` : `รายการรอตั้งเบิก`)
-            : filterQuery
-              ? `ผลการค้นหาบิล${isSub ? "ย่อย" : isMain ? "หลัก" : ""}ของ "${filterQuery}"`
-              : `รายการเบิกเงิน${isSub ? "บิลย่อย" : isMain ? "บิลหลัก" : "บิล"}`;
-
       const [bankInfoMap, contractsMap, projectBudgetMap, carsMap] = await Promise.all([
         getBankInfoMap(),
         getContractWorkMap(),
@@ -1536,13 +1539,89 @@ export async function handleLineCommand(
             ? "requester"
             : "search";
 
-      // ใช้ createMultiBillFlex รูปแบบใหม่ที่สวยงาม มีแถบคุมงบ บัญชีธนาคาร และรูปใบเสร็จ
+      // 🎯 แยกบิลหลัก และ บิลย่อย เมื่อผู้ใช้เรียก "รออนุมัติ", "รอปิดงาน", "รอจ่าย", "รอตั้งเบิก"
+      const mainBills = filtered.filter(b => !checkIsSubBill(b));
+      const subBills = filtered.filter(b => checkIsSubBill(b));
+
+      // Case 1: มีทั้งบิลหลักและบิลย่อย -> ส่ง Flex แยก 2 ใบอย่างชัดเจน
+      if (!isSub && !isMain && mainBills.length > 0 && subBills.length > 0) {
+        const mainTarget = mainBills.slice(0, 30);
+        const subTarget = subBills.slice(0, 30);
+
+        const mainTitle = isApprovedFilter
+          ? (filterQuery ? `📋 บิลหลักรอปิดงานของ "${filterQuery}"` : `📋 บิลหลักรอปิดงาน (จ่ายเงิน)`)
+          : isWaitingApprovalOnly
+            ? (filterQuery ? `📋 บิลหลักรออนุมัติของ "${filterQuery}"` : `📋 บิลหลักรออนุมัติ`)
+            : isWaitingWithdrawOnly
+              ? (filterQuery ? `📋 บิลหลักรอตั้งเบิกของ "${filterQuery}"` : `📋 บิลหลักรอตั้งเบิก`)
+              : (filterQuery ? `📋 บิลหลักของ "${filterQuery}"` : `📋 รายการบิลหลัก`);
+
+        const subTitle = isApprovedFilter
+          ? (filterQuery ? `🧾 บิลย่อยรอปิดงานของ "${filterQuery}"` : `🧾 บิลย่อยรอปิดงาน (จ่ายเงิน)`)
+          : isWaitingApprovalOnly
+            ? (filterQuery ? `🧾 บิลย่อยรออนุมัติของ "${filterQuery}"` : `🧾 บิลย่อยรออนุมัติ`)
+            : isWaitingWithdrawOnly
+              ? (filterQuery ? `🧾 บิลย่อยรอตั้งเบิกของ "${filterQuery}"` : `🧾 บิลย่อยรอตั้งเบิก`)
+              : (filterQuery ? `🧾 บิลย่อยของ "${filterQuery}"` : `🧾 รายการบิลย่อย`);
+
+        const mainFlex = isApprovedFilter
+          ? createWithdrawApproverFlex(mainTarget, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap, undefined, mainTitle)
+          : createMultiBillFlex(mainTarget, { title: mainTitle, mode: flexMode }, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap);
+
+        const subFlex = isApprovedFilter
+          ? createWithdrawApproverFlex(subTarget, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap, undefined, subTitle)
+          : createMultiBillFlex(subTarget, { title: subTitle, mode: flexMode }, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap);
+
+        const sent = await replyMultipleFlexMessages(replyToken, [
+          { altText: `${mainTitle} (${mainTarget.length} รายการ)`, contents: mainFlex },
+          { altText: `${subTitle} (${subTarget.length} รายการ)`, contents: subFlex },
+        ]);
+
+        if (!sent && replyToken) {
+          let textResponse = `📋 ${mainTitle} (${mainTarget.length} รายการ):\n`;
+          mainTarget.forEach((b, idx) => {
+            const amt = Number(b["ยอดเงิน"] || b.amount || 0).toLocaleString("th-TH");
+            const billNo = b["ลำดับ"] || b.id || b.bill_no || String(idx + 1);
+            const proj = b["ชื่อ Project"] || b.project_name || "โครงการ";
+            const req = b["ผู้เบิก"] || b.requester || b["ร้าน/บุคคล"] || "-";
+            textResponse += `${idx + 1}. [บิล #${billNo}] ${proj} | ${req} : ฿${amt}\n`;
+          });
+          textResponse += `\n-------------------------\n\n`;
+          textResponse += `🧾 ${subTitle} (${subTarget.length} รายการ):\n`;
+          subTarget.forEach((b, idx) => {
+            const amt = Number(b["ยอดเงิน"] || b.amount || 0).toLocaleString("th-TH");
+            const billNo = b["ลำดับ"] || b.id || b.bill_no || String(idx + 1);
+            const proj = b["ชื่อ Project"] || b.project_name || "โครงการ";
+            const req = b["ผู้เบิก"] || b.requester || b["ร้าน/บุคคล"] || "-";
+            textResponse += `${idx + 1}. [บิล #${billNo}] ${proj} | ${req} : ฿${amt}\n`;
+          });
+          await replyTextMessage(replyToken, textResponse.trim());
+        }
+        return true;
+      }
+
+      // Case 2: มีเฉพาะบิลหลัก หรือ เฉพาะบิลย่อย (หรือผู้ใช้ระบุเฉพาะเจาะจง เช่น "บิลหลัก", "บิลย่อย")
+      const targetBills = filtered.slice(0, 40);
+      const isOnlySub = targetBills.every(b => checkIsSubBill(b));
+      const isOnlyMain = targetBills.every(b => !checkIsSubBill(b));
+
+      const typePrefix = isOnlySub ? "🧾 บิลย่อย" : isOnlyMain ? "📋 บิลหลัก" : "🧾 บิล";
+      const flexTitle = isApprovedFilter
+        ? (filterQuery ? `${typePrefix}รอปิดงานของ "${filterQuery}"` : `${typePrefix}รอปิดงาน (จ่ายเงิน)`)
+        : isWaitingApprovalOnly
+          ? (filterQuery ? `${typePrefix}รออนุมัติของ "${filterQuery}"` : `${typePrefix}รออนุมัติ`)
+          : isWaitingWithdrawOnly
+            ? (filterQuery ? `${typePrefix}รอตั้งเบิกของ "${filterQuery}"` : `${typePrefix}รอตั้งเบิก`)
+            : filterQuery
+              ? `ผลการค้นหา${typePrefix}ของ "${filterQuery}"`
+              : `รายการเบิกเงิน${typePrefix}`;
+
       const flexPayload = isApprovedFilter
-        ? createWithdrawApproverFlex(targetBills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap)
+        ? createWithdrawApproverFlex(targetBills, peopleMap, bankInfoMap, contractsMap, projectBudgetMap, carsMap, undefined, flexTitle)
         : createMultiBillFlex(
             targetBills,
             {
-              title: `🧾 ${flexTitle}`,
+              title: flexTitle,
               mode: flexMode
             },
             peopleMap,
@@ -1552,9 +1631,9 @@ export async function handleLineCommand(
             carsMap
           );
 
-      const sent = await replyFlexMessage(replyToken, `🧾 ${flexTitle} (${targetBills.length} รายการ)`, flexPayload);
+      const sent = await replyFlexMessage(replyToken, `${flexTitle} (${targetBills.length} รายการ)`, flexPayload);
       if (!sent && replyToken) {
-        let textResponse = `🧾 ${flexTitle} (${targetBills.length} รายการ):\n\n`;
+        let textResponse = `${flexTitle} (${targetBills.length} รายการ):\n\n`;
         targetBills.forEach((b, idx) => {
           const amt = Number(b["ยอดเงิน"] || b.amount || 0).toLocaleString("th-TH");
           const billNo = b["ลำดับ"] || b.id || b.bill_no || String(idx + 1);

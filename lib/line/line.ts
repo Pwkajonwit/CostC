@@ -355,6 +355,56 @@ export async function replyFlexMessage(replyToken: string, altText: string, flex
 }
 
 /**
+ * Send multiple Flex messages in a single reply (up to 5 messages)
+ */
+export async function replyMultipleFlexMessages(
+  replyToken: string,
+  flexList: Array<{ altText: string; contents: Record<string, any> }>
+): Promise<boolean> {
+  const token = await getDynamicAccessToken();
+  if (!token || token.includes("your-line") || !replyToken) {
+    if (replyToken) {
+      await replyTextMessage(replyToken, flexList.map(f => f.altText).join("\n\n"));
+    }
+    return false;
+  }
+  try {
+    const validList = flexList.filter(f => f && f.contents).slice(0, 5);
+    if (validList.length === 0) return false;
+
+    const messages = validList.map(f => ({
+      type: "flex",
+      altText: f.altText,
+      contents: f.contents,
+    }));
+
+    const res = await fetch(`${LINE_API_BASE}/reply`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        replyToken,
+        messages,
+      }),
+    });
+
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      console.warn("⚠️ Multiple Flex reply failed, falling back to text reply:", errJson);
+      await replyTextMessage(replyToken, validList.map(f => f.altText).join("\n\n"));
+      return true;
+    }
+    return true;
+  } catch (error: any) {
+    console.error("❌ Failed to reply multiple flex messages to LINE:", error.message || error);
+    await replyTextMessage(replyToken, flexList.map(f => f.altText).join("\n\n"));
+    return false;
+  }
+}
+
+/**
  * Helper to determine if a bill record is a sub-bill ("บิลย่อย")
  */
 export function isSubBillRecord(b: Record<string, any> | undefined | null): boolean {
@@ -4675,6 +4725,9 @@ export function createMultiBillFlex(
   const firstRawReq = firstBill["ผู้เบิก"] || firstBill.requester || firstBill.data?.["ผู้เบิก"] || firstBill.data?.requester;
   const firstPettyCash = resolvePettyCashInfo(firstRawReq, pettyCashMap, peopleMap);
   const hasSubBills = bills.some(b => isSubBillRecord(b));
+  const hasMainBills = bills.some(b => !isSubBillRecord(b));
+  const isOnlySubBills = hasSubBills && !hasMainBills;
+  const isOnlyMainBills = hasMainBills && !hasSubBills;
 
   const allBillTypes = Array.from(new Set(bills.map(b => {
     const bt = String(b["บิล"] || b.bill || b.bill_type || "").trim();
@@ -4682,9 +4735,13 @@ export function createMultiBillFlex(
     if (bt.includes("หลัก")) return "บิลหลัก";
     return bt ? (bt.includes("บิล") ? bt : `บิล${bt}`) : "";
   }).filter(Boolean)));
-  const firstBillTypeTag = allBillTypes.length === 1
-    ? `[${allBillTypes[0]}]`
-    : (allBillTypes.length > 1 ? "[บิลหลัก+ย่อย]" : "");
+  const firstBillTypeTag = isOnlySubBills
+    ? "[บิลย่อย]"
+    : (isOnlyMainBills
+      ? "[บิลหลัก]"
+      : (allBillTypes.length === 1
+        ? `[${allBillTypes[0]}]`
+        : (allBillTypes.length > 1 ? "[บิลหลัก+ย่อย]" : "")));
   const sheetRowIds = bills.map(b => String(b.id || b["ลำดับ"] || b._sheetRow || b.bill_no || "").trim()).filter(Boolean);
   const sheetRowStr = sheetRowIds.join(",");
 
@@ -4745,7 +4802,7 @@ export function createMultiBillFlex(
       type: "box",
       layout: "horizontal",
       paddingAll: "8px",
-      backgroundColor: "#ECFDF5",
+      backgroundColor: isOnlySubBills ? "#FEF3C7" : "#ECFDF5",
       cornerRadius: "6px",
       margin: "none",
       contents: [
@@ -4758,7 +4815,7 @@ export function createMultiBillFlex(
               type: "text",
               text: options.title,
               weight: "bold",
-              color: "#065F46",
+              color: isOnlySubBills ? "#92400E" : "#065F46",
               size: "xs"
             },
             {
@@ -4766,7 +4823,7 @@ export function createMultiBillFlex(
               text: totalPages > 1
                 ? `หน้า ${pageIndex + 1}/${totalPages} • ${firstBillTypeTag} ${bills.length} รายการ${firstReq && firstReq !== "-" ? ` | ผู้เบิก: ${firstReq}` : ""}`
                 : `${firstBillTypeTag} ${bills.length} รายการ${firstReq && firstReq !== "-" ? ` | ผู้เบิก: ${firstReq}` : ""}`,
-              color: "#047857",
+              color: isOnlySubBills ? "#B45309" : "#047857",
               size: "xxs"
             }
           ]
@@ -4775,7 +4832,7 @@ export function createMultiBillFlex(
           type: "text",
           text: `฿${hasAnyDeduction ? formattedNetTotal : formattedGrossTotal}`,
           weight: "bold",
-          color: "#059669",
+          color: isOnlySubBills ? "#D97706" : "#059669",
           size: "sm",
           align: "end",
           gravity: "center",
@@ -5786,7 +5843,11 @@ export function createMultiBillFlex(
           height: "sm",
           action: {
             type: "message",
-            label: bills.length > 1 ? `ส่งไปเพื่ออนุมัติ (${bills.length} รายการ)` : `ส่งไปเพื่ออนุมัติ (#${sheetRowStr})`,
+            label: isOnlySubBills
+              ? `ส่งอนุมัติบิลย่อย (${bills.length})`
+              : (isOnlyMainBills
+                ? `ส่งอนุมัติบิลหลัก (${bills.length})`
+                : (bills.length > 1 ? `ส่งไปเพื่ออนุมัติ (${bills.length} รายการ)` : `ส่งไปเพื่ออนุมัติ (#${sheetRowStr})`)),
             text: bills.length === 1 ? `ส่งไปเพื่ออนุมัติบิลลำดับที่: ${sheetRowStr}` : `ส่งไปเพื่ออนุมัติ:${sheetRowStr}`
           }
         }
@@ -5801,8 +5862,16 @@ export function createMultiBillFlex(
           flex: 6,
           action: {
             type: "message",
-            label: `อนุมัติทั้งหมด (${bills.length} รายการ)`,
-            text: bills.length === 1 ? `อนุมัติบิลลำดับที่: ${sheetRowStr}` : `อนุมัติบิลลำดับที่: ${sheetRowStr}`
+            label: isOnlySubBills
+              ? `อนุมัติบิลย่อย (${bills.length})`
+              : (isOnlyMainBills
+                ? `อนุมัติบิลหลัก (${bills.length})`
+                : `อนุมัติทั้งหมด (${bills.length} รายการ)`),
+            text: isOnlySubBills
+              ? `อนุมัติเงินสดบิลย่อยลำดับที่: ${sheetRowStr}`
+              : (isOnlyMainBills
+                ? `อนุมัติบิลหลักลำดับที่: ${sheetRowStr}`
+                : `อนุมัติบิลลำดับที่: ${sheetRowStr}`)
           }
         },
         {
@@ -5813,25 +5882,12 @@ export function createMultiBillFlex(
           flex: 6,
           action: {
             type: "message",
-            label: `ไม่อนุมัติ (${bills.length} รายการ)`,
-            text: bills.length === 1 ? `ไม่อนุมัติบิลลำดับที่: ${sheetRowStr}` : `ไม่อนุมัติบิลลำดับที่: ${sheetRowStr}`
+            label: `ไม่อนุมัติ (${bills.length})`,
+            text: `ไม่อนุมัติบิลลำดับที่: ${sheetRowStr}`
           }
         }
       ];
     } else if (mode === "approver") {
-      footerButtons = [
-        {
-          type: "button",
-          style: "primary",
-          color: "#DC2626",
-          height: "sm",
-          action: {
-            type: "message",
-            label: `ปิดงานทั้งหมด (${bills.length} รายการ)`,
-            text: bills.length === 1 ? `ปิดงานบิลลำดับที่: ${sheetRowStr}` : `ปิดงานบิลลำดับที่: ${sheetRowStr}`
-          }
-        }
-      ];
       const approvableBills = displayBills.filter(b => {
         const st = String(b["สถานะ"] || b.status || "").trim();
         return st === "ตั้งเบิก" || st === "รออนุมัติ" || st === "รอตรวจสอบ" || st === "รอดำเนินการ" || st === "รอเบิก";
@@ -5852,8 +5908,16 @@ export function createMultiBillFlex(
           flex: 6,
           action: {
             type: "message",
-            label: `อนุมัติ (${approvableBills.length})`,
-            text: `อนุมัติบิลลำดับที่: ${approvableIds}`
+            label: isOnlySubBills
+              ? `อนุมัติบิลย่อย (${approvableBills.length})`
+              : (isOnlyMainBills
+                ? `อนุมัติบิลหลัก (${approvableBills.length})`
+                : `อนุมัติ (${approvableBills.length})`),
+            text: isOnlySubBills
+              ? `อนุมัติเงินสดบิลย่อยลำดับที่: ${approvableIds}`
+              : (isOnlyMainBills
+                ? `อนุมัติบิลหลักลำดับที่: ${approvableIds}`
+                : `อนุมัติบิลลำดับที่: ${approvableIds}`)
           }
         });
       }
@@ -5867,8 +5931,16 @@ export function createMultiBillFlex(
           flex: 6,
           action: {
             type: "message",
-            label: `ปิดงาน (${closableBills.length})`,
-            text: `ปิดงานบิลลำดับที่: ${closableIds}`
+            label: isOnlySubBills
+              ? `ปิดงานบิลย่อย (${closableBills.length})`
+              : (isOnlyMainBills
+                ? `ปิดงานบิลหลัก (${closableBills.length})`
+                : `ปิดงาน (${closableBills.length})`),
+            text: isOnlySubBills
+              ? `ปิดงานเงินสดบิลย่อยลำดับที่: ${closableIds}`
+              : (isOnlyMainBills
+                ? `ปิดงานบิลหลักลำดับที่: ${closableIds}`
+                : `ปิดงานบิลลำดับที่: ${closableIds}`)
           }
         });
       }
@@ -5946,7 +6018,8 @@ export function createWithdrawOwnerFlex(
   contractMap?: Map<string, any> | Record<string, any>,
   projectBudgetMap?: Map<string, any> | Record<string, any>,
   carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>,
-  pettyCashMap?: Map<string, PettyCashLookupInfo> | Record<string, PettyCashLookupInfo>
+  pettyCashMap?: Map<string, PettyCashLookupInfo> | Record<string, PettyCashLookupInfo>,
+  customTitle?: string
 ): Record<string, any> {
   const bills = (Array.isArray(billsInput) ? billsInput : [billsInput]).map(b => ({
     ...b,
@@ -5954,7 +6027,7 @@ export function createWithdrawOwnerFlex(
     status: b.status || b["สถานะ"] || "รออนุมัติ"
   }));
   return createMultiBillFlex(bills, {
-    title: "📋 คำขออนุมัติเบิกเงิน (ส่งจากผู้เบิก)",
+    title: customTitle || "📋 คำขออนุมัติเบิกเงิน (ส่งจากผู้เบิก)",
     mode: "owner"
   }, peopleMap, bankInfoMap, contractMap, projectBudgetMap, carsMap, pettyCashMap);
 }
@@ -5966,7 +6039,8 @@ export function createWithdrawApproverFlex(
   contractMap?: Map<string, any> | Record<string, any>,
   projectBudgetMap?: Map<string, any> | Record<string, any>,
   carsMap?: Map<string, CarLookupInfo> | Record<string, CarLookupInfo>,
-  pettyCashMap?: Map<string, PettyCashLookupInfo> | Record<string, PettyCashLookupInfo>
+  pettyCashMap?: Map<string, PettyCashLookupInfo> | Record<string, PettyCashLookupInfo>,
+  customTitle?: string
 ): Record<string, any> {
   const bills = (Array.isArray(billsInput) ? billsInput : [billsInput]).map(b => ({
     ...b,
@@ -5974,7 +6048,7 @@ export function createWithdrawApproverFlex(
     status: !b.status || b.status === "ตั้งเบิก" || b.status === "รออนุมัติ" ? "อนุมัติ" : b.status
   }));
   return createMultiBillFlex(bills, {
-    title: "✅ รายการอนุมัติสำเร็จ (รอปิดงาน)",
+    title: customTitle || "✅ รายการอนุมัติสำเร็จ (รอปิดงาน)",
     mode: "approver"
   }, peopleMap, bankInfoMap, contractMap, projectBudgetMap, carsMap, pettyCashMap);
 }
