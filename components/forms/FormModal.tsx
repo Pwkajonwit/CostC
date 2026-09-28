@@ -692,7 +692,11 @@ export function FormModal({
   openEventName,
   hideLauncher = false,
   buttonClassName,
-  buttonIcon
+  buttonIcon,
+  isOpen,
+  onClose,
+  onSuccess,
+  zIndex,
 }: FormModalProps) {
   const router = useRouter();
   const resolvedTableName = tableName || form?.tableName || "Data";
@@ -705,7 +709,9 @@ export function FormModal({
     return formSchemaCache.get(resolvedTableName) || null;
   });
   const [loadingSchema, setLoadingSchema] = useState(false);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(() => isOpen ?? false);
+  const [quickContractorOpen, setQuickContractorOpen] = useState(false);
+  const [quickStoreOpen, setQuickStoreOpen] = useState(false);
   const [showPCProject, setShowPCProject] = useState(false);
   const [values, setValues] = useState<Record<string, string>>(() => activeForm ? getInitialStringValues(activeForm) : {});
   const [editSheetRow, setEditSheetRow] = useState<string | number | null>(null);
@@ -717,10 +723,23 @@ export function FormModal({
   const isEditing = editSheetRow !== null && editSheetRow !== undefined;
   const isDataForm = resolvedTableName === TABLES.DATA || resolvedTableName === "Data" || resolvedTableName === "bills" || resolvedTableName === "DATA" || resolvedTableName === "กรอกบิล";
   const isContractModal = resolvedTableName === TABLES.CONTRACT_WORK || resolvedTableName === "งานรับเหมา" || resolvedTableName === "Contract_work" || openEventName === "open-contract-form";
-  const modalZIndex = isContractModal ? "z-[60]" : "z-50";
-  const modalBackdropClass = isContractModal ? "bg-slate-950/45 backdrop-blur-sm" : "bg-slate-900/65 backdrop-blur-md sm:backdrop-blur-lg";
+  const isContractorModal = resolvedTableName === TABLES.CONTRACTOR || resolvedTableName === "contractors" || resolvedTableName === "รับเหมา" || resolvedTableName === "5. รับเหมา" || openEventName === "open-contractor-form";
+  const isStoreModal = resolvedTableName === TABLES.STORE || resolvedTableName === "stores" || resolvedTableName === "ร้านค้า" || resolvedTableName === "4. ร้านค้า" || openEventName === "open-store-form";
+  const isSubModal = isContractorModal || isStoreModal;
+  const modalZIndex = zIndex || (isSubModal ? "z-[70]" : isContractModal ? "z-[60]" : "z-50");
+  const modalBackdropClass = (isSubModal || isContractModal) ? "bg-slate-950/45 backdrop-blur-sm" : "bg-slate-900/65 backdrop-blur-md sm:backdrop-blur-lg";
   const hasSavedDuringSession = useRef(false);
   const effectiveSubmitPath = submitPath || activeForm?.submitPath || "/api/sheets/update";
+
+  useEffect(() => {
+    if (isOpen !== undefined) {
+      if (isOpen) {
+        handleOpen();
+      } else {
+        setOpen(false);
+      }
+    }
+  }, [isOpen]);
 
   const handleQuickOpenContract = useCallback(() => {
     const projectVal = values["ID Project"] || "";
@@ -746,6 +765,7 @@ export function FormModal({
 
   function handleClose() {
     setOpen(false);
+    onClose?.();
     setEditSheetRow(null);
     setMultiLineItems([]);
     setIsMultiItemMode(false);
@@ -757,7 +777,9 @@ export function FormModal({
         window.dispatchEvent(new CustomEvent("bills-data-updated"));
         window.dispatchEvent(new CustomEvent("data-updated", { detail: { tableName: resolvedTableName } }));
       }
-      router.refresh();
+      if (!isContractorModal && !isStoreModal) {
+        router.refresh();
+      }
     }
   }
 
@@ -1206,6 +1228,188 @@ export function FormModal({
     return () => window.removeEventListener("contract-work-created", handleContractCreated);
   }, [isDataForm, resolvedTableName]);
 
+  // Handle contractor saved - update contract form immediately
+  const handleContractorSaved = useCallback((createdRow: SheetRow) => {
+    const contractorId = String(createdRow.id_Contractor || createdRow.id || "").trim();
+    const contractorNick = String(createdRow["ชื่อเล่น"] || createdRow.nickname || "").trim();
+    const contractorFullName = String(createdRow["ชื่อ-นามสกุล"] || createdRow.fullname || "").trim();
+    const phone = String(createdRow["เบอร์โทรศัพท์"] || createdRow.phone || "").trim();
+    let bank = String(createdRow["ธนาคาร"] || createdRow.bank || "").trim();
+    const bankAccount = String(createdRow["เลขบัญชี"] || createdRow.bank_account || "").trim();
+    const idCard = String(createdRow["บัตรประจำตัวประชาชน"] || createdRow.id_card || "").trim();
+    const address = String(createdRow["ที่อยู่"] || createdRow.address || "").trim();
+
+    // Map bank if activeForm has bank options
+    const bankOptions = activeForm?.refOptions?.["ธนาคาร"] || [];
+    if (bank && bankOptions.length > 0) {
+      const bOpt = bankOptions.find(b =>
+        String(b.value) === bank ||
+        String(b.label) === bank ||
+        String(b.row?.id_bank) === bank ||
+        String(b.row?.["ชื่อธนาคาร"]) === bank
+      );
+      if (bOpt) {
+        bank = String(bOpt.value || bOpt.row?.["ชื่อธนาคาร"] || bOpt.label);
+      }
+    }
+
+    const label = contractorNick
+      ? (contractorFullName ? `${contractorNick} (${contractorFullName})` : contractorNick)
+      : (contractorFullName || contractorId);
+
+    // 1. Immediately inject new contractor option into activeForm.refOptions
+    setActiveForm(prev => {
+      if (!prev) return prev;
+      const currentList = prev.refOptions?.["id_Contractor"] || [];
+      const filteredList = currentList.filter(opt => String(opt.value) !== contractorId);
+
+      const newOpt: RefOption = {
+        value: contractorId,
+        label: contractorNick || label,
+        row: {
+          ...createdRow,
+          id: contractorId,
+          id_Contractor: contractorId,
+          "ชื่อเล่น": contractorNick,
+          "ชื่อ-นามสกุล": contractorFullName,
+          "เลขบัญชี": bankAccount,
+          "ธนาคาร": bank,
+          "บัตรประจำตัวประชาชน": idCard,
+          "เบอร์โทรศัพท์": phone,
+          "ที่อยู่": address,
+        }
+      };
+
+      const currentVendors = prev.refOptions?.["ผู้รับเหมา"] || [];
+      const filteredVendors = currentVendors.filter(opt => String(opt.value) !== contractorId);
+
+      return {
+        ...prev,
+        refOptions: {
+          ...prev.refOptions,
+          "id_Contractor": [newOpt, ...filteredList],
+          "ผู้รับเหมา": [newOpt, ...filteredVendors]
+        }
+      };
+    });
+
+    // 2. Auto-fill the contract open form fields immediately!
+    setValues(prev => {
+      const next = { ...prev };
+      next["id_Contractor"] = contractorId;
+      if (next["ผู้รับเหมา"] !== undefined) next["ผู้รับเหมา"] = contractorId;
+      if (contractorNick) next["ชื่อเล่น"] = contractorNick;
+      if (contractorFullName) next["ชื่อ-นามสกุล"] = contractorFullName;
+      if (bankAccount) next["เลขบัญชี"] = bankAccount;
+      if (bank) next["ธนาคาร"] = bank;
+      if (idCard) next["บัตรประจำตัวประชาชน"] = idCard;
+      if (phone) next["เบอร์โทรศัพท์"] = phone;
+      if (address) next["ที่อยู่"] = address;
+      applyLocalFormulas(next, resolvedTableName);
+      return next;
+    });
+  }, [activeForm, resolvedTableName]);
+
+  // Listen for contractor created via quick add to immediately update active contract work form
+  useEffect(() => {
+    if (!isContractModal) return;
+
+    const handleContractorCreated = (e: Event) => {
+      const detail = e instanceof CustomEvent ? e.detail : undefined;
+      const createdRow = detail?.row;
+      if (createdRow) {
+        handleContractorSaved(createdRow);
+      }
+    };
+
+    window.addEventListener("contractor-created", handleContractorCreated);
+    return () => window.removeEventListener("contractor-created", handleContractorCreated);
+  }, [isContractModal, handleContractorSaved]);
+
+  // Handle store saved - update bill form immediately
+  const handleStoreSaved = useCallback((createdRow: SheetRow) => {
+    const storeId = String(createdRow.id_store || createdRow.id || "").trim();
+    const storeName = String(createdRow["ชื่อร้านค้า"] || createdRow.name || createdRow.title || storeId).trim();
+    const creditPaymentDay = String(createdRow["เครดิตจ่าย"] || createdRow.credit_payment_day || "").trim();
+    const bankAccount = String(createdRow["เลขบัญชี"] || createdRow.bank_account || "").trim();
+    const bank = String(createdRow["ธนาคาร"] || createdRow.bank || "").trim();
+    const fullName = String(createdRow["ชื่อเต็ม"] || "").trim();
+
+    const newOpt: RefOption = {
+      value: storeId,
+      label: storeName,
+      row: {
+        ...createdRow,
+        id: storeId,
+        id_store: storeId,
+        "ชื่อร้านค้า": storeName,
+        "ชื่อเต็ม": fullName,
+        "เครดิตจ่าย": creditPaymentDay,
+        credit_payment_day: creditPaymentDay,
+        "เลขบัญชี": bankAccount,
+        "ธนาคาร": bank,
+      }
+    };
+
+    // 1. Immediately inject new store option into activeForm.refOptions
+    setActiveForm(prev => {
+      if (!prev) return prev;
+      const currentStores = prev.refOptions?.["ร้านค้า"] || [];
+      const filteredStores = currentStores.filter(opt => String(opt.value) !== storeId);
+      return {
+        ...prev,
+        refOptions: {
+          ...prev.refOptions,
+          "ร้านค้า": [newOpt, ...filteredStores]
+        }
+      };
+    });
+
+    // 2. Auto-fill the store field in the active bill form immediately!
+    setValues(prev => {
+      const next = { ...prev };
+      next["ร้านค้า"] = storeId;
+      if (creditPaymentDay) {
+        next["เครดิต"] = creditPaymentDay;
+      }
+      applyLocalFormulas(next, resolvedTableName);
+      return next;
+    });
+
+    // 3. Update multiLineItems if needed
+    setMultiLineItems(prev => {
+      if (!prev.length) return prev;
+      return prev.map((item, idx) => {
+        if (!item.storeGroup || item.storeGroup === "ร้านที่ 1" || idx === 0) {
+          return { ...item, storeGroup: storeName };
+        }
+        return item;
+      });
+    });
+
+    // 4. Invalidate global table caches
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("bills-data-updated"));
+      window.dispatchEvent(new CustomEvent("data-updated", { detail: { tableName: TABLES.STORE } }));
+    }
+  }, [resolvedTableName]);
+
+  // Listen for store created via quick add to immediately update active bill form
+  useEffect(() => {
+    if (!isDataForm) return;
+
+    const handleStoreCreated = (e: Event) => {
+      const detail = e instanceof CustomEvent ? e.detail : undefined;
+      const createdRow = detail?.row;
+      if (createdRow) {
+        handleStoreSaved(createdRow);
+      }
+    };
+
+    window.addEventListener("store-created", handleStoreCreated);
+    return () => window.removeEventListener("store-created", handleStoreCreated);
+  }, [isDataForm, handleStoreSaved]);
+
   function populateFormValues(targetForm: FormPayload, detail?: OpenFormDetail) {
     const nextValues = detail?.row
       ? getRowStringValues(targetForm, detail.row)
@@ -1346,6 +1550,12 @@ export function FormModal({
             if (freshInitial["ID Project"] && !next["ID Project"]) next["ID Project"] = freshInitial["ID Project"];
             if (freshInitial["id_Conwork"] && !next["id_Conwork"]) next["id_Conwork"] = freshInitial["id_Conwork"];
             if (freshInitial["id_petty_cash"] && !next["id_petty_cash"]) next["id_petty_cash"] = freshInitial["id_petty_cash"];
+            if (freshInitial["id_Contractor"] && !next["id_Contractor"]) next["id_Contractor"] = freshInitial["id_Contractor"];
+            Object.entries(freshInitial).forEach(([k, v]) => {
+              if (v && !next[k]) {
+                next[k] = v;
+              }
+            });
             fresh.schema.forEach(field => {
               if (field.initialValue === "today" || (field.type === "Date" && (field.name === "ว/ด/ป" || field.name === "วันที่" || field.name === "ดู/ทำ"))) {
                 if (!next[field.name]) {
@@ -1680,18 +1890,43 @@ export function FormModal({
             }
           }));
         }
+        if (isContractorModal) {
+          const contractorRow = {
+            ...(payload.row || {}),
+            ...submitValues,
+            id_Contractor: payload.row?.id_Contractor || payload.row?.id || submitValues["id_Contractor"] || submitValues.id
+          };
+          window.dispatchEvent(new CustomEvent("contractor-created", {
+            detail: { row: contractorRow }
+          }));
+          onSuccess?.(contractorRow);
+        }
+        if (isStoreModal) {
+          const storeRow = {
+            ...(payload.row || {}),
+            ...submitValues,
+            id_store: payload.row?.id_store || payload.row?.id || submitValues["id_store"] || submitValues.id
+          };
+          window.dispatchEvent(new CustomEvent("store-created", {
+            detail: { row: storeRow }
+          }));
+          onSuccess?.(storeRow);
+        }
       }
 
       setAttachedFilesByField({});
 
-      if (isEditing || isContractModal) {
+      if (isEditing || isContractModal || isContractorModal || isStoreModal) {
         setOpen(false);
+        onClose?.();
         setEditSheetRow(null);
         setValues(getInitialStringValues(activeForm));
         setMultiLineItems([]);
         setIsMultiItemMode(false);
         setResetKey(k => k + 1);
-        router.refresh();
+        if (!isContractorModal && !isStoreModal) {
+          router.refresh();
+        }
       } else {
         // Reset form & verify fresh sequence from server for the next entry
         formElement.reset();
@@ -1941,6 +2176,17 @@ export function FormModal({
                                     <span>+ เปิดจ้างงานรับเหมา</span>
                                   </button>
                                 )}
+                                {section.id === "vendor" && isStoreVendor && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setQuickStoreOpen(true)}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] sm:text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 border border-emerald-300 transition cursor-pointer shadow-2xs active:scale-[0.98]"
+                                    title="เปิดฟอร์มสร้างร้านค้าใหม่"
+                                  >
+                                    <Plus size={12} className="shrink-0 stroke-[2.5]" />
+                                    <span>สร้างร้านค้าใหม่</span>
+                                  </button>
+                                )}
                                 {section.id === "tax" && (() => {
                                   const storeOption = (activeForm?.refOptions?.["ร้านค้า"] || []).find(opt => opt.value === values["ร้านค้า"]);
                                   const storeCutoffRaw = storeOption?.row?.["เครดิตจ่าย"] || storeOption?.row?.["credit_payment_day"];
@@ -2156,6 +2402,13 @@ export function FormModal({
                               activeForm.tableName === "contract_works" ||
                               activeForm.tableName === "งานรับเหมา";
                             const isHireAmountField = isContractWorkForm && field.name === "ยอดเงินจ้าง";
+                            const isContractorField = isContractWorkForm && (
+                              field.name === "id_Contractor" ||
+                              field.name === "id_contractor" ||
+                              field.refTable === TABLES.CONTRACTOR ||
+                              field.refTable === "รับเหมา" ||
+                              field.refTable === "contractors"
+                            );
 
                             return (
                               <Fragment key={field.name}>
@@ -2174,6 +2427,19 @@ export function FormModal({
                                     resetKey={resetKey}
                                     attachedFiles={attachedFilesByField[field.name] || []}
                                     onAttachedFilesChange={files => setAttachedFilesByField(current => ({ ...current, [field.name]: files }))}
+                                    labelRight={
+                                      isContractorField ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => setQuickContractorOpen(true)}
+                                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 border border-emerald-300 transition cursor-pointer shadow-2xs active:scale-[0.98]"
+                                          title="เปิดฟอร์มเพิ่มข้อมูลผู้รับเหมาใหม่"
+                                        >
+                                          <Plus size={11} className="stroke-[2.5]" />
+                                          <span>เพิ่มผู้รับเหมา</span>
+                                        </button>
+                                      ) : undefined
+                                    }
                                   />
                                 </div>
 
@@ -2265,6 +2531,38 @@ export function FormModal({
             </footer>
           </form>
         </div>
+      ) : null}
+
+      {open && isContractModal && quickContractorOpen ? (
+        <FormModal
+          tableName={TABLES.CONTRACTOR}
+          title="เพิ่ม 5. รับเหมา"
+          buttonLabel="เพิ่มผู้รับเหมา"
+          submitPath="/api/rows"
+          isOpen={true}
+          onClose={() => setQuickContractorOpen(false)}
+          zIndex="z-[70]"
+          onSuccess={(savedContractor) => {
+            setQuickContractorOpen(false);
+            handleContractorSaved(savedContractor);
+          }}
+        />
+      ) : null}
+
+      {open && isDataForm && quickStoreOpen ? (
+        <FormModal
+          tableName={TABLES.STORE}
+          title="เพิ่ม 4. ร้านค้า"
+          buttonLabel="เพิ่มร้านค้า"
+          submitPath="/api/rows"
+          isOpen={true}
+          onClose={() => setQuickStoreOpen(false)}
+          zIndex="z-[70]"
+          onSuccess={(savedStore) => {
+            setQuickStoreOpen(false);
+            handleStoreSaved(savedStore);
+          }}
+        />
       ) : null}
     </>
   );

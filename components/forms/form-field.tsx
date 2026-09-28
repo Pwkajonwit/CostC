@@ -676,7 +676,9 @@ function renderField(
   onEnumSearchChange: (value: string) => void = () => {},
   resetKey = 0,
   attachedFiles: File[] = [],
-  onAttachedFilesChange: (files: File[]) => void = () => {}
+  onAttachedFilesChange: (files: File[]) => void = () => {},
+  onAddNew?: () => void,
+  addNewLabel?: string
 ) {
   const readOnly = Boolean(field.readonly || (isEditing && field.readonlyOnEdit));
   if (field.type === "Image" || field.type === "File") {
@@ -714,6 +716,8 @@ function renderField(
           readOnly={readOnly}
           placeholder="พิมพ์ชื่อร้านค้า หรือรหัสร้านค้า"
           onChange={onChange}
+          onAddNew={onAddNew}
+          addNewLabel={addNewLabel}
         />
       );
     }
@@ -893,6 +897,8 @@ function renderField(
           placeholder={customPlaceholder}
           onChange={onChange}
           creatable={field.name === "ชื่อเครื่องมือ"}
+          onAddNew={onAddNew}
+          addNewLabel={addNewLabel}
         />
       );
     }
@@ -912,6 +918,8 @@ function renderField(
         readOnly={readOnly || isWaitingForParent}
         placeholder={placeholderText}
         onChange={onChange}
+        onAddNew={onAddNew}
+        addNewLabel={addNewLabel}
       />
     );
   }
@@ -1088,7 +1096,9 @@ function SearchableRefSelect({
   readOnly,
   placeholder,
   onChange,
-  creatable = false
+  creatable = false,
+  onAddNew,
+  addNewLabel
 }: {
   name: string;
   value: string;
@@ -1097,6 +1107,8 @@ function SearchableRefSelect({
   placeholder: string;
   onChange: (value: string) => void;
   creatable?: boolean;
+  onAddNew?: () => void;
+  addNewLabel?: string;
 }) {
   const selectedOption = value ? options.find(option =>
     String(option.value) === value ||
@@ -1302,6 +1314,23 @@ function SearchableRefSelect({
                     </div>
                   ) : null}
 
+                  {/* Quick Add Button if provided */}
+                  {onAddNew ? (
+                    <div className="px-3 pt-1 pb-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOpen(false);
+                          onAddNew();
+                        }}
+                        className="w-full py-2 px-3 rounded-xl text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 flex items-center justify-center gap-1.5 transition cursor-pointer shadow-2xs active:scale-[0.98]"
+                      >
+                        <Plus size={14} className="stroke-[2.5]" />
+                        <span>{addNewLabel || "เพิ่มข้อมูลใหม่"}</span>
+                      </button>
+                    </div>
+                  ) : null}
+
                   {/* Scrollable list */}
                   <div className="flex-1 overflow-y-auto px-2 py-2 divide-y divide-slate-100 space-y-0.5">
                     {filteredOptions.length ? (
@@ -1342,8 +1371,21 @@ function SearchableRefSelect({
                         );
                       })
                     ) : !showCreateOption ? (
-                      <div className="p-8 text-center text-slate-400 text-xs">
-                        🔍 ไม่พบข้อมูลที่ตรงกับคำค้นหา
+                      <div className="p-6 text-center text-slate-400 text-xs space-y-2">
+                        <div>🔍 ไม่พบข้อมูลที่ตรงกับคำค้นหา</div>
+                        {onAddNew ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpen(false);
+                              onAddNew();
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 transition cursor-pointer shadow-2xs"
+                          >
+                            <Plus size={13} className="stroke-[2.5]" />
+                            <span>{addNewLabel || "เพิ่มข้อมูลใหม่"}</span>
+                          </button>
+                        ) : null}
                       </div>
                     ) : null}
                     {showCreateOption ? (
@@ -1402,6 +1444,22 @@ function SearchableRefSelect({
                     </div>
                   ) : null}
 
+                  {onAddNew ? (
+                    <div className="p-1 border-b border-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOpen(false);
+                          onAddNew();
+                        }}
+                        className="w-full py-1.5 px-2.5 rounded-lg text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 flex items-center justify-center gap-1.5 transition cursor-pointer shadow-2xs active:scale-[0.98]"
+                      >
+                        <Plus size={13} className="stroke-[2.5]" />
+                        <span>{addNewLabel || "เพิ่มข้อมูลใหม่"}</span>
+                      </button>
+                    </div>
+                  ) : null}
+
                   <div className="overflow-y-auto max-h-52 space-y-0.5 pt-1">
                     {filteredOptions.length ? (
                       filteredOptions.map((option, index) => {
@@ -1422,8 +1480,21 @@ function SearchableRefSelect({
                         );
                       })
                     ) : !showCreateOption ? (
-                      <div className="p-3 text-center text-slate-400 text-xs font-normal">
-                        ไม่พบข้อมูล
+                      <div className="p-3 text-center text-slate-400 text-xs font-normal space-y-2">
+                        <div>ไม่พบข้อมูล</div>
+                        {onAddNew ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpen(false);
+                              onAddNew();
+                            }}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 transition cursor-pointer shadow-2xs"
+                          >
+                            <Plus size={12} className="stroke-[2.5]" />
+                            <span>{addNewLabel || "เพิ่มข้อมูลใหม่"}</span>
+                          </button>
+                        ) : null}
                       </div>
                     ) : null}
                     {showCreateOption ? (
@@ -1503,6 +1574,9 @@ type MemoizedFormFieldProps = {
   attachedFiles?: File[];
   onAttachedFilesChange?: (files: File[]) => void;
   className?: string;
+  labelRight?: React.ReactNode;
+  onAddNew?: () => void;
+  addNewLabel?: string;
 };
 
 const MemoizedFormField = memo(function MemoizedFormField({
@@ -1518,6 +1592,9 @@ const MemoizedFormField = memo(function MemoizedFormField({
   attachedFiles = [],
   onAttachedFilesChange = () => {},
   className,
+  labelRight,
+  onAddNew,
+  addNewLabel,
 }: MemoizedFormFieldProps) {
   const isRequired = isFieldRequired(field, currentValues, activeForm?.tableName);
 
@@ -1535,7 +1612,9 @@ const MemoizedFormField = memo(function MemoizedFormField({
           onEnumSearchChange,
           resetKey,
           attachedFiles,
-          onAttachedFilesChange
+          onAttachedFilesChange,
+          onAddNew,
+          addNewLabel
         )}
       </div>
     );
@@ -1543,10 +1622,13 @@ const MemoizedFormField = memo(function MemoizedFormField({
 
   return (
     <div className={`${className || getFieldClassName(field, currentValues)} space-y-1 min-w-0 w-full overflow-hidden`} key={field.name}>
-      <label className="text-xs font-medium text-slate-700 block">
-        {getFieldLabel(field, currentValues)}
-        {isRequired ? <span className="text-rose-600 font-medium ml-0.5">*</span> : ""}
-      </label>
+      <div className="flex items-center justify-between gap-1">
+        <label className="text-xs font-medium text-slate-700 block">
+          {getFieldLabel(field, currentValues)}
+          {isRequired ? <span className="text-rose-600 font-medium ml-0.5">*</span> : ""}
+        </label>
+        {labelRight}
+      </div>
       {renderField(
         field,
         activeForm,
@@ -1558,7 +1640,9 @@ const MemoizedFormField = memo(function MemoizedFormField({
         onEnumSearchChange,
         resetKey,
         attachedFiles,
-        onAttachedFilesChange
+        onAttachedFilesChange,
+        onAddNew,
+        addNewLabel
       )}
     </div>
   );
@@ -1568,6 +1652,9 @@ const MemoizedFormField = memo(function MemoizedFormField({
     prev.value === next.value &&
     prev.isEditing === next.isEditing &&
     prev.className === next.className &&
+    prev.labelRight === next.labelRight &&
+    prev.onAddNew === next.onAddNew &&
+    prev.addNewLabel === next.addNewLabel &&
     prev.enumSearchValue === next.enumSearchValue &&
     prev.resetKey === next.resetKey &&
     prev.attachedFiles === next.attachedFiles &&

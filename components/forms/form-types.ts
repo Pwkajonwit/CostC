@@ -20,6 +20,10 @@ export type FormModalProps = {
   hideLauncher?: boolean;
   buttonClassName?: string;
   buttonIcon?: ReactNode;
+  isOpen?: boolean;
+  onClose?: () => void;
+  onSuccess?: (createdRow: SheetRow) => void;
+  zIndex?: string;
 };
 
 export type OpenFormDetail = {
