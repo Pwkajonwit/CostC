@@ -4798,6 +4798,63 @@ export function createMultiBillFlex(
     const endNum = startNum + pageBills.length - 1;
 
     // 1. Top Summary Banner (Compact Header with Bill Type & Total)
+    function cleanHeaderTitle(rawTitle: string): string {
+      let t = (rawTitle || "").trim();
+      t = t.replace(/แจ้งเตือนรายการตั้งเบิกเงิน/g, "ตั้งเบิก");
+      t = t.replace(/แจ้งเตือนรายการตั้งเบิก/g, "ตั้งเบิก");
+      t = t.replace(/แจ้งเตือนตั้งเบิก/g, "ตั้งเบิก");
+      t = t.replace(/รายการตั้งเบิกเงิน/g, "ตั้งเบิก");
+      t = t.replace(/รายการตั้งเบิก/g, "ตั้งเบิก");
+      t = t.replace(/คำขออนุมัติเบิกเงิน/g, "ขออนุมัติ");
+      t = t.replace(/คำขออนุมัติเงินสด/g, "ขออนุมัติ");
+      t = t.replace(/คำขออนุมัติ/g, "ขออนุมัติ");
+      t = t.replace(/รายการอนุมัติสำเร็จ/g, "อนุมัติแล้ว");
+      t = t.replace(/ปิดงานเบิกเงินเรียบร้อยแล้ว/g, "ปิดงานแล้ว");
+      t = t.replace(/รายการเบิกเงินสำเร็จเรียบร้อย/g, "ปิดงานแล้ว");
+      t = t.replace(/\s*\([^)]*ส่งจากผู้เบิก[^)]*\)/g, "");
+      t = t.replace(/\s*\([^)]*จ่ายเงิน[^)]*\)/g, "");
+      t = t.replace(/\s*\(\d+\s*รายการ\)/g, "");
+      t = t.trim();
+
+      // If title does not mention bill type yet, attach it cleanly
+      if (!t.includes("บิลหลัก") && !t.includes("บิลย่อย")) {
+        if (isOnlySubBills) {
+          t = t.includes("📄") ? t.replace("📄", "🧾") + "บิลย่อย" : `${t}บิลย่อย`;
+        } else if (isOnlyMainBills) {
+          t = t.includes("📄") ? t.replace("📄", "📋") + "บิลหลัก" : `${t}บิลหลัก`;
+        }
+      }
+      return t.trim();
+    }
+
+    const cleanTitle = cleanHeaderTitle(options.title);
+    const titleMentionsType = cleanTitle.includes("บิลหลัก") || cleanTitle.includes("บิลย่อย");
+
+    const distinctReqs = Array.from(new Set(
+      bills.map(b => getRequesterDisplayName(b)).filter(r => r && r !== "-" && r !== "non")
+    ));
+    const reqText = distinctReqs.length === 1
+      ? `ผู้เบิก: ${distinctReqs[0]}`
+      : distinctReqs.length > 1
+        ? `${distinctReqs.length} ผู้เบิก`
+        : (firstReq && firstReq !== "-" ? `ผู้เบิก: ${firstReq}` : "");
+
+    const firstPayee = firstBill?.["ร้าน/บุคคล"] || firstBill?.payee || firstBill?.contractor || "";
+    const displayPayeeOrReq = reqText || (firstPayee ? `ผู้รับ: ${firstPayee}` : "");
+
+    const subtitleParts: string[] = [];
+    if (totalPages > 1) {
+      subtitleParts.push(`${pageIndex + 1}/${totalPages}`);
+    }
+    if (!titleMentionsType && firstBillTypeTag) {
+      subtitleParts.push(firstBillTypeTag);
+    }
+    if (displayPayeeOrReq) {
+      subtitleParts.push(displayPayeeOrReq);
+    }
+    subtitleParts.push(`${bills.length} รายการ`);
+    const cleanSubtitle = subtitleParts.join(" • ");
+
     const topSummaryBanner = {
       type: "box",
       layout: "horizontal",
@@ -4809,22 +4866,22 @@ export function createMultiBillFlex(
         {
           type: "box",
           layout: "vertical",
-          flex: 8,
+          flex: 7,
           contents: [
             {
               type: "text",
-              text: options.title,
+              text: cleanTitle,
               weight: "bold",
               color: isOnlySubBills ? "#92400E" : "#065F46",
-              size: "xs"
+              size: "xs",
+              wrap: true
             },
             {
               type: "text",
-              text: totalPages > 1
-                ? `หน้า ${pageIndex + 1}/${totalPages} • ${firstBillTypeTag} ${bills.length} รายการ${firstReq && firstReq !== "-" ? ` | ผู้เบิก: ${firstReq}` : ""}`
-                : `${firstBillTypeTag} ${bills.length} รายการ${firstReq && firstReq !== "-" ? ` | ผู้เบิก: ${firstReq}` : ""}`,
+              text: cleanSubtitle,
               color: isOnlySubBills ? "#B45309" : "#047857",
-              size: "xxs"
+              size: "xxs",
+              wrap: true
             }
           ]
         },
@@ -4836,7 +4893,7 @@ export function createMultiBillFlex(
           size: "sm",
           align: "end",
           gravity: "center",
-          flex: 4
+          flex: 5
         }
       ]
     };
@@ -6005,8 +6062,16 @@ export function createWithdrawRequesterFlex(
     "สถานะ": b["สถานะ"] || b.status || "ตั้งเบิก",
     status: b.status || b["สถานะ"] || "ตั้งเบิก"
   }));
+  const isOnlySub = bills.every(b => isSubBillRecord(b));
+  const isOnlyMain = bills.every(b => !isSubBillRecord(b));
+  const defaultTitle = isOnlySub
+    ? "🧾 ตั้งเบิกบิลย่อย"
+    : isOnlyMain
+      ? "📋 ตั้งเบิกบิลหลัก"
+      : "📄 รายการตั้งเบิก";
+
   return createMultiBillFlex(bills, {
-    title: "📄 แจ้งเตือนรายการตั้งเบิกเงิน",
+    title: defaultTitle,
     mode: "requester"
   }, peopleMap, bankInfoMap, contractMap, projectBudgetMap, carsMap, pettyCashMap);
 }
@@ -6026,8 +6091,18 @@ export function createWithdrawOwnerFlex(
     "สถานะ": b["สถานะ"] || b.status || "รออนุมัติ",
     status: b.status || b["สถานะ"] || "รออนุมัติ"
   }));
+  const isOnlySub = bills.every(b => isSubBillRecord(b));
+  const isOnlyMain = bills.every(b => !isSubBillRecord(b));
+  const defaultTitle = customTitle || (
+    isOnlySub
+      ? "🧾 ขออนุมัติบิลย่อย"
+      : isOnlyMain
+        ? "📋 ขออนุมัติบิลหลัก"
+        : "📋 ขออนุมัติเบิกเงิน"
+  );
+
   return createMultiBillFlex(bills, {
-    title: customTitle || "📋 คำขออนุมัติเบิกเงิน (ส่งจากผู้เบิก)",
+    title: defaultTitle,
     mode: "owner"
   }, peopleMap, bankInfoMap, contractMap, projectBudgetMap, carsMap, pettyCashMap);
 }
@@ -6047,8 +6122,18 @@ export function createWithdrawApproverFlex(
     "สถานะ": !b["สถานะ"] || b["สถานะ"] === "ตั้งเบิก" || b["สถานะ"] === "รออนุมัติ" ? "อนุมัติ" : b["สถานะ"],
     status: !b.status || b.status === "ตั้งเบิก" || b.status === "รออนุมัติ" ? "อนุมัติ" : b.status
   }));
+  const isOnlySub = bills.every(b => isSubBillRecord(b));
+  const isOnlyMain = bills.every(b => !isSubBillRecord(b));
+  const defaultTitle = customTitle || (
+    isOnlySub
+      ? "✅ บิลย่อยอนุมัติแล้ว (รอปิดงาน)"
+      : isOnlyMain
+        ? "✅ บิลหลักอนุมัติแล้ว (รอปิดงาน)"
+        : "✅ อนุมัติแล้ว (รอปิดงาน)"
+  );
+
   return createMultiBillFlex(bills, {
-    title: customTitle || "✅ รายการอนุมัติสำเร็จ (รอปิดงาน)",
+    title: defaultTitle,
     mode: "approver"
   }, peopleMap, bankInfoMap, contractMap, projectBudgetMap, carsMap, pettyCashMap);
 }
@@ -6067,8 +6152,16 @@ export function createWithdrawCompletedRequesterFlex(
     "สถานะ": "เบิกแล้ว",
     status: "เบิกแล้ว"
   }));
+  const isOnlySub = bills.every(b => isSubBillRecord(b));
+  const isOnlyMain = bills.every(b => !isSubBillRecord(b));
+  const defaultTitle = isOnlySub
+    ? "🎉 ปิดงานแล้ว: บิลย่อย"
+    : isOnlyMain
+      ? "🎉 ปิดงานแล้ว: บิลหลัก"
+      : "🎉 ปิดงานเรียบร้อยแล้ว";
+
   return createMultiBillFlex(bills, {
-    title: "🎉 รายการเบิกเงินสำเร็จเรียบร้อย (ปิดงาน)",
+    title: defaultTitle,
     mode: "completed"
   }, peopleMap, bankInfoMap, contractMap, projectBudgetMap, carsMap, pettyCashMap);
 }
@@ -6101,7 +6194,8 @@ export function createDailyTransferSummaryFlex(
   bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>
 ): Record<string, any> {
   const rawBills = (Array.isArray(billsInput) ? billsInput : [billsInput]).filter(Boolean);
-  const title = options?.title || "💸 ยอดโอนวันนี้ (ปิดงานแล้ว)";
+  const rawTitle = options?.title || "💸 ยอดโอนวันนี้";
+  const title = rawTitle.replace(/\s*\([^)]*ปิดงานแล้ว[^)]*\)/g, "").trim();
 
   // Format today's date in Thai format (e.g. 12 ก.ย. 2569)
   let displayDate = options?.dateStr || "";
@@ -6265,10 +6359,13 @@ export function createDailyTransferSummaryFlex(
     categoryBillsCount: number
   ) {
     const isSub = category === "sub";
-    const categoryLabel = isSub ? "หมวดบิลย่อย (โอนคืนผู้เบิก)" : "หมวดบิลหลัก (ร้านค้า/ผู้รับเหมา)";
-    const categoryBadge = isSub ? "👤 บิลย่อย" : "🏛️ บิลหลัก";
     const headerBg = isSub ? "#1E293B" : "#0F172A";
     const headerBadgeColor = isSub ? "#F59E0B" : "#38BDF8";
+    const categoryBadge = isSub ? "👤 บิลย่อย" : "🏛️ บิลหลัก";
+    const shortCategoryName = isSub ? "บิลย่อย" : "บิลหลัก";
+    const categoryDesc = isSub ? "โอนคืนผู้เบิก" : "ร้านค้า/ผู้รับเหมา";
+    const pageBadge = totalPagesForCategory > 1 ? ` (${pageIndex + 1}/${totalPagesForCategory})` : "";
+    const formattedCatTotal = categoryTotal.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
     return {
       type: "bubble",
@@ -6277,24 +6374,44 @@ export function createDailyTransferSummaryFlex(
         type: "box",
         layout: "vertical",
         backgroundColor: headerBg,
-        paddingAll: "12px",
+        paddingAll: "10px",
         contents: [
+          // Row 1: Title + Category on Left, Category Total on Right
           {
-            type: "text",
-            text: title,
-            weight: "bold",
-            color: "#FFFFFF",
-            size: "sm",
-            wrap: true
+            type: "box",
+            layout: "horizontal",
+            alignItems: "center",
+            contents: [
+              {
+                type: "text",
+                text: `${title} • ${shortCategoryName}${pageBadge}`,
+                weight: "bold",
+                color: "#FFFFFF",
+                size: "sm",
+                flex: 7,
+                wrap: true
+              },
+              {
+                type: "text",
+                text: `฿${formattedCatTotal}`,
+                weight: "bold",
+                color: isSub ? "#FBBF24" : "#34D399",
+                size: "sm",
+                align: "end",
+                flex: 5
+              }
+            ]
           },
+          // Row 2: Category Description & Count on Left, Date on Right
           {
             type: "box",
             layout: "horizontal",
             margin: "xs",
+            alignItems: "center",
             contents: [
               {
                 type: "text",
-                text: `${categoryLabel}${totalPagesForCategory > 1 ? ` • หน้า ${pageIndex + 1}/${totalPagesForCategory}` : ""}`,
+                text: `${categoryDesc} • ${categoryBillsCount} บิล (${pageGroups.length} ผู้รับ)`,
                 color: headerBadgeColor,
                 size: "xxs",
                 weight: "bold",
@@ -6303,20 +6420,13 @@ export function createDailyTransferSummaryFlex(
               },
               {
                 type: "text",
-                text: `${categoryBillsCount} บิล`,
+                text: displayDate,
                 color: "#94A3B8",
                 size: "xxs",
                 align: "end",
-                flex: 2
+                flex: 4
               }
             ]
-          },
-          {
-            type: "text",
-            text: `วันที่ ${displayDate} • (${pageGroups.length} ผู้รับ)`,
-            color: "#64748B",
-            size: "xxs",
-            margin: "none"
           }
         ]
       },

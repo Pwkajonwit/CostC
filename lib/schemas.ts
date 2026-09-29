@@ -19,7 +19,7 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
     { name: "ร้านค้า", type: "Ref", refTable: TABLES.STORE, refKey: "id_store", refLabel: "ชื่อร้านค้า", required: true, showIf: { column: "ร้านค้า/ผู้รับเหมา", equals: "ร้านค้า" } },
     { name: "ผู้รับเหมา", type: "Ref", refTable: TABLES.CONTRACT_WORK, refKey: "id_Conwork", refLabel: "ชื่อเล่น", required: true, showIf: { column: "ร้านค้า/ผู้รับเหมา", equals: "ผู้รับเหมา" }, filterBy: { field: "ID Project", column: "ID Project", openContract: true }, refFill: { "รายละเอียดงาน": "รายละเอียดงาน", "ค่าแรงคงเหลือ": "{ค่าแรงคงเหลือ} จาก {ยอดเงินจ้าง}" } },
     { name: "รายละเอียดงาน", type: "Text", readonly: true, showIf: { column: "ร้านค้า/ผู้รับเหมา", equals: "ผู้รับเหมา" } },
-    { name: "สินค้า", type: "Enum", values: [], dynamicValues: "productCategoryOptions", description: "ดึงจากตั้งค่าหมวดหมู่สินค้า" },
+    { name: "สินค้า", type: "Enum", values: [], dynamicValues: "productCategoryOptions", required: true, description: "ดึงจากตั้งค่าหมวดหมู่สินค้า" },
     { name: "ประเภท", type: "Enum", values: [], inputMode: "buttons", required: true, dynamicValues: "billTypeOptions" },
     { name: "รูปถ่ายบิล", type: "Image" },
     { name: "ค่าของ", label: "ค่าใช้จ่าย", type: "Decimal", required: true, showIf: { column: "ประเภท", in: [...PURE_MATERIAL_CATEGORY_OPTIONS, "1.ค่าของ"] } },
@@ -162,21 +162,21 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
       placeholder: "เช่น วันที่ 16 หรือ 16",
       description: "กำหนดวันตัดรอบจ่ายเงินของร้าน เช่น วันที่ 16 (ซื้อ 1-16 จ่าย 16 เดือนนี้, ซื้อหลัง 16 จ่าย 16 เดือนถัดไป)"
     },
-    { name: "เลขบัญชี", type: "Text" },
+    { name: "เลขบัญชี", type: "Text", placeholder: "XXX-X-XXXXX-X" },
     { name: "ธนาคาร", type: "Ref", refTable: TABLES.BANK, refKey: "id_bank", refLabel: "ชื่อธนาคาร" },
-    { name: "เบอร์โทร", type: "Text" },
+    { name: "เบอร์โทร", type: "Text", placeholder: "XXX-XXXXXXX" },
     { name: "ที่อยู่", type: "LongText" },
-    { name: "เลขที่ผู้เสียภาษี", type: "Text" }
+    { name: "เลขที่ผู้เสียภาษี", type: "Text", placeholder: "X-XXXX-XXXXX-XX-X" }
   ],
   [TABLES.CONTRACTOR]: [
     { name: "id_Contractor", type: "Text", key: true, initialValue: "nextContractorId", required: true },
     { name: "ชื่อเล่น", type: "Text", required: true },
     { name: "ประเภท", type: "Enum", values: ["บุคคลธรรมดา", "นิติบุคคล"], inputMode: "buttons", initialValue: "บุคคลธรรมดา", required: true },
     { name: "ชื่อ-นามสกุล", type: "Text" },
-    { name: "เลขบัญชี", type: "Text" },
+    { name: "เลขบัญชี", type: "Text", placeholder: "XXX-X-XXXXX-X" },
     { name: "ธนาคาร", type: "Ref", refTable: TABLES.BANK, refKey: "id_bank", refLabel: "ชื่อธนาคาร" },
-    { name: "บัตรประจำตัวประชาชน", type: "Text" },
-    { name: "เบอร์โทรศัพท์", type: "Text" },
+    { name: "บัตรประจำตัวประชาชน", type: "Text", placeholder: "X-XXXX-XXXXX-XX-X" },
+    { name: "เบอร์โทรศัพท์", type: "Text", placeholder: "XXX-XXXXXXX" },
     { name: "ที่อยู่", type: "LongText" },
     { name: "จำกัดยอด/ปี", type: "Decimal", initialValue: "1200000" }
   ],
@@ -184,11 +184,11 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
     { name: "รหัสพนักงาน", type: "Text", key: true, initialValue: "nextPeopleId", required: true },
     { name: "ชื่อเล่น", type: "Text", required: true },
     { name: "ชื่อ-นามสกุล", type: "Text" },
-    { name: "เลขบัญชี", type: "Text" },
+    { name: "เลขบัญชี", type: "Text", placeholder: "XXX-X-XXXXX-X" },
     { name: "ธนาคาร", type: "Ref", refTable: TABLES.BANK, refKey: "id_bank", refLabel: "ชื่อธนาคาร" },
-    { name: "เบอร์โทร", type: "Text" },
+    { name: "เบอร์โทร", type: "Text", placeholder: "XXX-XXXXXXX" },
     { name: "ที่อยู่", type: "LongText" },
-    { name: "เลขที่บัตรประชาชน", type: "Text" },
+    { name: "เลขที่บัตรประชาชน", type: "Text", placeholder: "X-XXXX-XXXXX-XX-X" },
     { name: "LINE User ID", type: "Text" },
     { name: "สถานะ", type: "Enum", values: ["Active", "Inactive"], inputMode: "buttons", initialValue: "Active" },
     {
@@ -216,7 +216,7 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
     { name: "id_cus", type: "Text", key: true, initialValue: "nextCustomerId", required: true },
     { name: "ชื่อลูกค้า", type: "Text", required: true },
     { name: "ที่อยู่", type: "LongText" },
-    { name: "เลขที่ผู้เสียภาษี", type: "Text" }
+    { name: "เลขที่ผู้เสียภาษี", type: "Text", placeholder: "X-XXXX-XXXXX-XX-X" }
   ],
   [TABLES.COMPANY]: [
     { name: "id_Company", type: "Text", key: true, initialValue: "nextCompanyId", required: true },
@@ -224,8 +224,8 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
     { name: "ชื่อบริษัท", type: "Text", required: true },
     { name: "สำนักงาน", type: "Text" },
     { name: "ที่อยู่", type: "LongText" },
-    { name: "เลขที่สียภาษี ", type: "Text" },
-    { name: "เบอร์โทร", type: "Text" }
+    { name: "เลขที่สียภาษี ", type: "Text", placeholder: "X-XXXX-XXXXX-XX-X" },
+    { name: "เบอร์โทร", type: "Text", placeholder: "XXX-XXXXXXX" }
   ],
   [TABLES.LOAN]: [
     { name: "id", type: "Text", key: true, initialValue: "nextLoanId", required: true },
@@ -269,7 +269,7 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
     { name: "วันที่", label: "วันที่เบิก", type: "Date", initialValue: "today", required: true },
     { name: "กำหนดเคลียร์", label: "กำหนดเคลียร์บิล", type: "Date" },
     { name: "สถานะ", label: "สถานะ", type: "Enum", values: ["เปิดแล้ว", "จ่ายเงินแล้ว", "เคลียร์บิลแล้ว", "ยกเลิก"], initialValue: "เปิดแล้ว", inputMode: "dropdown" },
-    { name: "เลขบัญชี", label: "เลขบัญชีรับเงิน", type: "Text" },
+    { name: "เลขบัญชี", label: "เลขบัญชีรับเงิน", type: "Text", placeholder: "XXX-X-XXXXX-X" },
     {
       name: "ธนาคาร",
       label: "ธนาคาร",
@@ -318,14 +318,14 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
     },
     { name: "ชื่อเล่น", type: "Hidden" },
     { name: "ชื่อ-นามสกุล", type: "Text", readonly: true },
-    { name: "เลขบัญชี", type: "Text", readonly: true },
+    { name: "เลขบัญชี", type: "Text", readonly: true, placeholder: "XXX-X-XXXXX-X" },
     { name: "ธนาคาร", type: "Ref", refTable: TABLES.BANK, refKey: "id_bank", refLabel: "ชื่อธนาคาร", readonly: true },
     { name: "ยอดเงินจ้าง", type: "Decimal", required: true },
     { name: "รายละเอียดงาน", type: "EnumList", values: ["งานหลังคา", "งานผูกเหล็ก"], description: "เลือกได้หลายรายการ หรือพิมพ์เพิ่มเติมได้ คั่นด้วย comma" },
     { name: "สถานที่", type: "Text", readonly: true },
     { name: "วันที่", type: "Date", initialValue: "today" },
-    { name: "บัตรประจำตัวประชาชน", type: "Text", readonly: true },
-    { name: "เบอร์โทรศัพท์", type: "Text", readonly: true },
+    { name: "บัตรประจำตัวประชาชน", type: "Text", readonly: true, placeholder: "X-XXXX-XXXXX-XX-X" },
+    { name: "เบอร์โทรศัพท์", type: "Text", readonly: true, placeholder: "XXX-XXXXXXX" },
     { name: "ที่อยู่", type: "LongText", readonly: true },
     { name: "ยอดเงินจ่าย", type: "Decimal", readonly: true },
     { name: "ค่าแรงคงเหลือ", type: "Decimal", readonly: true }
