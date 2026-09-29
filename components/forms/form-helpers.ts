@@ -57,6 +57,151 @@ export function normalizeBillDateInput(value: string): string {
   return normalizeDateToIso(value);
 }
 
+export function isCitizenOrTaxIdField(fieldName: string): boolean {
+  const name = String(fieldName || "").trim().toLowerCase();
+  return (
+    name.includes("บัตรประชาชน") ||
+    name.includes("บัตรประจำตัวประชาชน") ||
+    name.includes("เสียภาษี") ||
+    name.includes("สียภาษี") ||
+    name.includes("ผู้เสียภาษี") ||
+    name === "tax_id" ||
+    name === "id_card" ||
+    name === "citizen_id"
+  );
+}
+
+export function isBankAccountField(fieldName: string): boolean {
+  const name = String(fieldName || "").trim().toLowerCase();
+  return (
+    name.includes("เลขบัญชี") ||
+    name.includes("เลขที่บัญชี") ||
+    name === "bank_account" ||
+    name === "account_no" ||
+    name === "accountno"
+  );
+}
+
+export function isPhoneField(fieldName: string, fieldType?: string): boolean {
+  if (fieldType === "Phone") return true;
+  const name = String(fieldName || "").trim().toLowerCase();
+  return (
+    name.includes("เบอร์โทร") ||
+    name.includes("เบอร์ติดต่อ") ||
+    name.includes("โทรศัพท์") ||
+    name.startsWith("เบอร์") ||
+    name === "phone" ||
+    name === "tel" ||
+    name === "mobile"
+  );
+}
+
+export function formatCitizenOrTaxId(raw: string): string {
+  if (!raw) return "";
+  const str = String(raw).trim();
+  // If it contains letters (e.g. Foreign Passport "CI-1234567"), keep as-is
+  if (/[a-zA-Z]/.test(str)) return str;
+
+  const match = str.match(/^([\d\s-]+)(.*)$/);
+  if (match && match[1]) {
+    const digits = match[1].replace(/\D/g, "");
+    const suffix = match[2];
+    if (!digits) return str;
+
+    let res = digits.slice(0, 1);
+    if (digits.length > 1) res += "-" + digits.slice(1, 5);
+    if (digits.length > 5) res += "-" + digits.slice(5, 10);
+    if (digits.length > 10) res += "-" + digits.slice(10, 12);
+    if (digits.length > 12) res += "-" + digits.slice(12, 13);
+    // If more than 13 digits (e.g. 13-digit Tax ID + branch or extra digits), keep them without truncating!
+    if (digits.length > 13) {
+      res += "-" + digits.slice(13);
+    }
+    return suffix ? `${res}${suffix.startsWith(" ") ? "" : " "}${suffix}` : res;
+  }
+  return str;
+}
+
+export function formatBankAccount(raw: string): string {
+  if (!raw) return "";
+  const str = String(raw).trim();
+  const match = str.match(/^([\d\s-]+)(.*)$/);
+  if (match && match[1]) {
+    const numPart = match[1].replace(/\D/g, "");
+    const suffix = match[2];
+    if (!numPart) return str;
+
+    let res = "";
+    if (numPart.length <= 3) {
+      res = numPart;
+    } else if (numPart.length <= 4) {
+      res = `${numPart.slice(0, 3)}-${numPart.slice(3)}`;
+    } else if (numPart.length <= 9) {
+      res = `${numPart.slice(0, 3)}-${numPart.slice(3, 4)}-${numPart.slice(4)}`;
+    } else if (numPart.length === 10) {
+      res = `${numPart.slice(0, 3)}-${numPart.slice(3, 4)}-${numPart.slice(4, 9)}-${numPart.slice(9, 10)}`;
+    } else {
+      // More than 10 digits (e.g. 11, 12 digits for BAAC or 15 digits for GSB)
+      res = `${numPart.slice(0, 3)}-${numPart.slice(3, 4)}-${numPart.slice(4, 9)}-${numPart.slice(9, 10)}-${numPart.slice(10)}`;
+    }
+    return suffix ? `${res}${suffix.startsWith(" ") ? "" : " "}${suffix}` : res;
+  }
+  return str;
+}
+
+function formatSinglePhoneNumber(raw: string): string {
+  if (!raw) return "";
+  const trimmed = raw.trim();
+  const extMatch = trimmed.match(/^([\d\s+()-]+)(.*)$/);
+  if (!extMatch) return trimmed;
+  const numPart = extMatch[1].replace(/[^\d+]/g, "");
+  const extPart = extMatch[2]?.trim();
+  const extFormatted = extPart ? ` ${extPart}` : "";
+  if (!numPart) return trimmed;
+
+  if (numPart.startsWith("+")) {
+    const digits = numPart.slice(1);
+    if (digits.startsWith("66") && digits.length >= 10) {
+      const mobileDigits = "0" + digits.slice(2);
+      const formatted = formatSinglePhoneNumber(mobileDigits);
+      return `+66 ${formatted.replace(/^0/, "")}${extFormatted}`;
+    }
+    return `${numPart}${extFormatted}`;
+  }
+
+  const digits = numPart;
+  if (digits.length <= 4) return `${digits}${extFormatted}`;
+
+  if (digits.startsWith("02")) {
+    if (digits.length <= 2) return `${digits}${extFormatted}`;
+    return `${digits.slice(0, 2)}-${digits.slice(2)}${extFormatted}`;
+  }
+
+  if (digits.length <= 3) return `${digits}${extFormatted}`;
+
+  // Provincial landline (9 digits: e.g. 053-123456)
+  const isProvincial = /^(03[2-9]|04[2-5]|05[2-6]|07[3-7])/.test(digits);
+  if (isProvincial && digits.length === 9) {
+    return `${digits.slice(0, 3)}-${digits.slice(3)}${extFormatted}`;
+  }
+
+  return `${digits.slice(0, 3)}-${digits.slice(3)}${extFormatted}`;
+}
+
+export function formatPhoneNumber(raw: string): string {
+  if (!raw) return "";
+  const str = String(raw).trim();
+  if (str.includes(",") || str.includes("/") || str.includes(";")) {
+    const parts = str.split(/([,/;/]+)/);
+    return parts.map(part => {
+      if (/^[,/;/]+$/.test(part)) return `${part.trim()} `;
+      return formatSinglePhoneNumber(part.trim());
+    }).join("").replace(/\s{2,}/g, " ").trim();
+  }
+  return formatSinglePhoneNumber(str);
+}
+
+
 export function optionLabel(option: RefOption | undefined, fieldName?: string): string {
   if (!option) return "";
   const val = String(option.value || "").trim();
@@ -243,9 +388,6 @@ export function getInitialStringValues(form: FormPayload): Record<string, string
       if (form.tableName === TABLES.DATA || form.tableName === "Data") {
         if (field.name === "ร้านค้า/ผู้รับเหมา") {
           return [field.name, "ร้านค้า"];
-        }
-        if (field.name === "ประเภท") {
-          return [field.name, "101 เตรียมงาน"];
         }
       }
       if (field.initialValue === "today" || (field.type === "Date" && (field.initialValue === "today" || field.name === "ว/ด/ป" || field.name === "วันที่" || field.name === "ดู/ทำ"))) {
@@ -578,6 +720,26 @@ export function parseCreditCutoffDay(value: unknown): number {
   return day >= 1 && day <= 31 ? day : 0;
 }
 
+export function findMatchingStoreOption(
+  options: Array<{ value?: unknown; label?: unknown; row?: Record<string, any> }> = [],
+  storeValue: unknown
+) {
+  if (!storeValue) return undefined;
+  const s = String(storeValue).trim().toLowerCase();
+  return options.find(opt => {
+    if (opt.value === storeValue) return true;
+    const vStr = String(opt.value ?? "").trim().toLowerCase();
+    if (vStr && vStr === s) return true;
+    const lStr = String(opt.label ?? "").trim().toLowerCase();
+    if (lStr && lStr === s) return true;
+    const rName = String(opt.row?.["ชื่อร้านค้า"] ?? "").trim().toLowerCase();
+    if (rName && rName === s) return true;
+    const fName = String(opt.row?.["ชื่อเต็ม"] ?? "").trim().toLowerCase();
+    if (fName && fName === s) return true;
+    return false;
+  });
+}
+
 export function calculateMonthlyCutoffDueDate(baseDateStr: string, cutoffDay: number): string {
   const parsed = parseDateStrict(baseDateStr);
   if (!parsed || isNaN(cutoffDay) || cutoffDay < 1 || cutoffDay > 31) return "";
@@ -747,7 +909,7 @@ export function normalizeDependentValues(values: Record<string, string>, changed
       values["ชื่อพนักงาน"] = "";
       values["statusค่าแรง"] = "";
       if (!values["สินค้า"] || !ALL_STORE_CATEGORIES.includes(values["สินค้า"])) {
-        values["สินค้า"] = "101 เตรียมงาน";
+        values["สินค้า"] = "";
       }
       const derived = deriveCategoryFromProduct(values["สินค้า"]);
       values["ประเภท"] = derived;
@@ -761,20 +923,26 @@ export function normalizeDependentValues(values: Record<string, string>, changed
       values["สินค้า"] = "301 พนักงาน";
       values["ประเภท"] = "301 พนักงาน";
       transferAmountToCategory(values, "301 พนักงาน");
+      values["วันจ่าย"] = "";
+      values["เครดิต"] = "";
     } else if (vType === "ผู้รับเหมา") {
       values["ร้านค้า"] = "";
       values["ชื่อพนักงาน"] = "";
       if (!values["สินค้า"] || !LABOR_CATEGORY_OPTIONS.includes(values["สินค้า"])) {
-        values["สินค้า"] = "201 เตรียมงาน";
+        values["สินค้า"] = "";
       }
-      values["ประเภท"] = values["สินค้า"] || "201 เตรียมงาน";
+      values["ประเภท"] = values["สินค้า"] || "";
       transferAmountToCategory(values, values["ประเภท"]);
+      values["วันจ่าย"] = "";
+      values["เครดิต"] = "";
     }
   }
 
-  if (changedField === "ร้านค้า") {
-    if (hasValue(values["ร้านค้า"])) {
-      const storeOption = (form.refOptions?.["ร้านค้า"] || []).find(opt => opt.value === values["ร้านค้า"]);
+  if (changedField === "ร้านค้า" || changedField === "ร้าน/บุคคล") {
+    const storeVal = values["ร้านค้า"] || values["ร้าน/บุคคล"] || "";
+    if (hasValue(storeVal)) {
+      const storeOptions = form.refOptions?.["ร้านค้า"] || form.refOptions?.["ร้าน/บุคคล"] || [];
+      const storeOption = findMatchingStoreOption(storeOptions, storeVal);
       const storeCutoffRaw = storeOption?.row?.["เครดิตจ่าย"] || storeOption?.row?.["credit_payment_day"];
       const storeCutoffDay = parseCreditCutoffDay(storeCutoffRaw);
       if (storeCutoffDay > 0) {
@@ -784,7 +952,15 @@ export function normalizeDependentValues(values: Record<string, string>, changed
           values["วันจ่าย"] = cutoffDueDate;
         }
         values["เครดิต"] = "";
+      } else {
+        // เมื่อเปลี่ยนเป็นร้านค้าที่ไม่มีเครดิต -> ล้างวันจ่ายและเครดิตที่เคยค้างอยู่ออกทันที
+        values["วันจ่าย"] = "";
+        values["เครดิต"] = "";
       }
+    } else {
+      // เมื่อล้างชื่อร้านค้าออก -> ล้างวันจ่ายและเครดิตทันที
+      values["วันจ่าย"] = "";
+      values["เครดิต"] = "";
     }
   }
 
@@ -963,7 +1139,7 @@ export function isFieldVisible(field: FieldSchema, values: Record<string, string
     return vendorType === "ร้านค้า";
   }
   if (field.name === "สินค้า") {
-    return true;
+    return vendorType !== "พนักงาน";
   }
   if (field.name === "ผู้รับเหมา" || field.name === "ค่าแรงคงเหลือ") {
     return vendorType === "ผู้รับเหมา";
@@ -1017,7 +1193,9 @@ export function isFieldVisible(field: FieldSchema, values: Record<string, string
   }
 
   // 3. Tax / Credit
-  const storeOption = (form?.refOptions?.["ร้านค้า"] || []).find(opt => opt.value === values["ร้านค้า"]);
+  const storeVal = values["ร้านค้า"] || values["ร้าน/บุคคล"] || "";
+  const storeOptions = form?.refOptions?.["ร้านค้า"] || form?.refOptions?.["ร้าน/บุคคล"] || [];
+  const storeOption = findMatchingStoreOption(storeOptions, storeVal);
   const storeCutoffRaw = storeOption?.row?.["เครดิตจ่าย"] || storeOption?.row?.["credit_payment_day"];
   const storeCutoffDay = parseCreditCutoffDay(storeCutoffRaw);
   const hasStoreCredit = storeCutoffDay > 0 || (hasValue(storeCutoffRaw) && storeCutoffRaw !== "-" && storeCutoffRaw !== "0");
@@ -1067,6 +1245,20 @@ export function sanitizeValuesForSubmit(values: Record<string, string>, form: Fo
   const next = { ...values };
   pruneHiddenConditionalValues(next, form);
   applyLocalFormulas(next, form.tableName);
+
+  // Standardize formatting for ID, Tax, Bank, Phone fields
+  for (const [key, val] of Object.entries(next)) {
+    if (val && typeof val === "string") {
+      if (isCitizenOrTaxIdField(key)) {
+        next[key] = formatCitizenOrTaxId(val);
+      } else if (isBankAccountField(key)) {
+        next[key] = formatBankAccount(val);
+      } else if (isPhoneField(key)) {
+        next[key] = formatPhoneNumber(val);
+      }
+    }
+  }
+
   if (form.tableName === TABLES.DATA || form.tableName === "Data" || form.tableName === "bills") {
     const vType = String(next["ร้านค้า/ผู้รับเหมา"] || "").trim();
     if (vType === "พนักงาน") {
@@ -1089,7 +1281,7 @@ export function sanitizeValuesForSubmit(values: Record<string, string>, form: Fo
       next["ชื่อพนักงาน"] = "";
       next["statusค่าแรง"] = "";
       if (!next["ประเภท"] || next["ประเภท"] === "1.ค่าของ") {
-        next["ประเภท"] = deriveCategoryFromProduct(next["สินค้า"]) || "101 เตรียมงาน";
+        next["ประเภท"] = deriveCategoryFromProduct(next["สินค้า"]);
       }
     }
   }
@@ -1115,6 +1307,10 @@ export function isFieldRequired(field: FieldSchema, values: Record<string, strin
   }
   if (field.name === "ประเภท") {
     return false;
+  }
+  if (field.name === "สินค้า") {
+    if (values["_is_multi_item"] === "true") return false;
+    return vendorType === "ร้านค้า" || vendorType === "ผู้รับเหมา";
   }
 
   return true;

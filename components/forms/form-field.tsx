@@ -40,8 +40,6 @@ import {
   customChoiceConfig,
   toDateInputValue,
   normalizeBillDateInput,
-  calculateDueDate,
-  calculateMonthlyCutoffDueDate,
   toNumber,
   isFieldRequired,
   getFieldClassName,
@@ -49,6 +47,12 @@ import {
   isValidImgUrl,
   optionLabel,
   optionSearchText,
+  isCitizenOrTaxIdField,
+  isBankAccountField,
+  isPhoneField,
+  formatCitizenOrTaxId,
+  formatBankAccount,
+  formatPhoneNumber,
 } from "./form-helpers";
 
 function ImageFileFieldInput({
@@ -938,8 +942,60 @@ function renderField(
   }
 
   const isDateField = field.type === "Date";
-  const type = isDateField ? "date" : field.type === "Decimal" || field.type === "Number" ? "number" : "text";
-  const inputMode = field.type === "Decimal" ? "decimal" : field.type === "Number" ? "numeric" : undefined;
+  const isCitizenOrTax = isCitizenOrTaxIdField(field.name);
+  const isBankAcc = isBankAccountField(field.name);
+  const isPhone = isPhoneField(field.name, field.type);
+
+  const type = isDateField
+    ? "date"
+    : field.type === "Decimal" || field.type === "Number"
+    ? "number"
+    : isPhone
+    ? "tel"
+    : "text";
+
+  const inputMode = isDateField
+    ? undefined
+    : field.type === "Decimal"
+    ? "decimal"
+    : field.type === "Number"
+    ? "numeric"
+    : undefined;
+
+  let placeholder = field.placeholder;
+
+  if (isCitizenOrTax) {
+    placeholder = field.placeholder || "X-XXXX-XXXXX-XX-X";
+  } else if (isBankAcc) {
+    placeholder = field.placeholder || "XXX-X-XXXXX-X";
+  } else if (isPhone) {
+    placeholder = field.placeholder || "XXX-XXXXXXX";
+  }
+
+  // Auto-format value for display if matching formatted field
+  let displayValue = value;
+  if (isCitizenOrTax) {
+    displayValue = formatCitizenOrTaxId(value);
+  } else if (isBankAcc) {
+    displayValue = formatBankAccount(value);
+  } else if (isPhone) {
+    displayValue = formatPhoneNumber(value);
+  }
+
+  const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const raw = event.target.value;
+    if (isDateField) {
+      onChange(normalizeBillDateInput(raw));
+    } else if (isCitizenOrTax) {
+      onChange(formatCitizenOrTaxId(raw));
+    } else if (isBankAcc) {
+      onChange(formatBankAccount(raw));
+    } else if (isPhone) {
+      onChange(formatPhoneNumber(raw));
+    } else {
+      onChange(raw);
+    }
+  };
 
   const isProjectTable = form.tableName === TABLES.PROJECT || form.tableName === "Project" || form.tableName === "1. Project รวม";
   const isProjectVatTotal = isProjectTable && field.name === "ยอดรวม vat";
@@ -952,71 +1008,16 @@ function renderField(
       <input
         type={type}
         name={field.name}
-        value={isDateField ? toDateInputValue(value) : value}
+        value={isDateField ? toDateInputValue(value) : displayValue}
         readOnly={readOnly}
         inputMode={inputMode}
-        placeholder={field.placeholder}
+        placeholder={placeholder}
         lang={isDateField ? "th-TH" : undefined}
-        onChange={event => onChange(isDateField ? normalizeBillDateInput(event.target.value) : event.target.value)}
-        className="w-full min-w-0 max-w-full block box-border h-10 sm:h-9 px-3 bg-white border border-slate-300 focus:border-slate-800 focus:outline-none rounded-lg text-xs sm:text-sm font-normal text-slate-800 placeholder:text-slate-400 transition-all appearance-none cursor-pointer"
+        onChange={handleInputChange}
+        className={`w-full min-w-0 max-w-full block box-border h-10 sm:h-9 px-3 bg-white border border-slate-300 focus:border-slate-800 focus:outline-none rounded-lg text-xs sm:text-sm font-normal text-slate-800 placeholder:text-slate-400 transition-all appearance-none cursor-pointer ${
+          isCitizenOrTax || isBankAcc ? "font-mono tracking-wide" : ""
+        }`}
       />
-      {field.name === "วันจ่าย" ? (
-        <div className="space-y-1.5 pt-1">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-2xs text-slate-500 font-medium">ปุ่มลัด:</span>
-            {[
-              { label: "+7 วัน", days: 7 },
-              { label: "+15 วัน", days: 15 },
-              { label: "+30 วัน", days: 30 },
-              { label: "วันที่ 15", dayOfMonth: 15 },
-              { label: "วันที่ 25", dayOfMonth: 25 },
-              { label: "สิ้นเดือน", dayOfMonth: 30 },
-            ].map(shortcut => {
-              const baseIso = currentValues["ว/ด/ป"] || currentValues["วันที่"] || getTodayDateIso();
-              let targetIso = "";
-              if (shortcut.days) {
-                targetIso = calculateDueDate(baseIso, shortcut.days);
-              } else if (shortcut.dayOfMonth) {
-                targetIso = calculateMonthlyCutoffDueDate(baseIso, shortcut.dayOfMonth);
-              }
-              const isSelected = value === targetIso;
-              return (
-                <button
-                  key={shortcut.label}
-                  type="button"
-                  onClick={() => onChange(targetIso)}
-                  className={`px-2 py-0.5 text-2xs rounded border transition cursor-pointer ${
-                    isSelected
-                      ? "bg-indigo-600 text-white border-indigo-700 font-semibold shadow-2xs"
-                      : "bg-indigo-50 text-indigo-800 border-indigo-200 hover:bg-indigo-100"
-                  }`}
-                >
-                  {shortcut.label}
-                </button>
-              );
-            })}
-          </div>
-          {value ? (() => {
-            const todayIso = getTodayDateIso();
-            const isFuture = value > todayIso;
-            const diffDays = Math.ceil((new Date(value).getTime() - new Date(todayIso).getTime()) / (1000 * 60 * 60 * 24));
-            if (isFuture) {
-              return (
-                <div className="text-[11px] text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-1 rounded-md flex items-center gap-1">
-                  <span>⏳</span>
-                  <span>รอวันจ่ายอีก <strong>{diffDays} วัน</strong> (จะขึ้นแท็บ <strong>&quot;รอวันจ่าย&quot;</strong> ในหน้าตั้งเบิก)</span>
-                </div>
-              );
-            }
-            return (
-              <div className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-md flex items-center gap-1">
-                <span>✅</span>
-                <span>ถึงกำหนดวันจ่ายแล้ว (จะขึ้นเป็น <strong>&quot;พร้อมเบิกทันที&quot;</strong>)</span>
-              </div>
-            );
-          })() : null}
-        </div>
-      ) : null}
       {field.name === "เครดิตจ่าย" ? (
         <div className="flex flex-wrap items-center gap-1.5 pt-1">
           <span className="text-2xs text-slate-500 font-medium">ปุ่มลัดวันตัดรอบ:</span>

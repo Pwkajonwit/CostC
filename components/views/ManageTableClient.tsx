@@ -10,6 +10,7 @@ import type { RowValue, SheetRow } from "@/lib/types";
 import { formatDateDisplay, toInputDateValue } from "@/lib/utils/dates";
 import { TABLES } from "@/lib/config";
 import { toNumber } from "@/lib/utils/numbers";
+import { formatCitizenOrTaxId, formatBankAccount, formatPhoneNumber } from "@/components/forms/form-helpers";
 
 type BusyState = "add" | "edit" | "delete" | "import" | null;
 const PAGE_SIZE_OPTIONS = [20, 50, 100, 200];
@@ -1638,11 +1639,12 @@ function renderDisplayCell(column: string, value: RowValue | undefined, displayL
     );
   }
 
-  if (column === "เบอร์โทร" || column === "เบอร์โทรศัพท์" || column === "phone") {
+  if (column === "เบอร์โทร" || column === "เบอร์โทรศัพท์" || column === "phone" || column === "เบอร์1" || column === "เบอร์2") {
     if (!rawValue || rawValue === "-" || rawValue.toLowerCase() === "non") {
       return <span className="text-slate-300 font-mono">-</span>;
     }
     const cleanPhone = rawValue.split(/[,/]/)[0].replace(/[^\d+]/g, "");
+    const formattedPhone = formatPhoneNumber(rawValue) || rawValue;
     return (
       <div className="inline-flex items-center gap-1 text-xs">
         {cleanPhone ? (
@@ -1653,22 +1655,41 @@ function renderDisplayCell(column: string, value: RowValue | undefined, displayL
             title={`โทร ${rawValue}`}
           >
             <Phone size={11} className="text-emerald-600 shrink-0" />
-            <span>{rawValue}</span>
+            <span>{formattedPhone}</span>
           </a>
         ) : (
-          <span>{rawValue}</span>
+          <span>{formattedPhone}</span>
         )}
       </div>
     );
   }
 
-  if (column === "เลขที่ผู้เสียภาษี" || column === "tax_id" || column === "เลขที่สียภาษี ") {
+  if (
+    column === "เลขที่ผู้เสียภาษี" ||
+    column === "tax_id" ||
+    column === "เลขที่สียภาษี " ||
+    column === "เลขที่เสียภาษี" ||
+    column === "บัตรประจำตัวประชาชน" ||
+    column === "เลขที่บัตรประชาชน" ||
+    column === "id_card"
+  ) {
     if (!rawValue || rawValue === "-" || rawValue.toLowerCase() === "non") {
       return <span className="text-slate-300 font-mono">-</span>;
     }
     return (
       <span className="font-mono text-2xs text-slate-700 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200/80 tracking-wide whitespace-nowrap">
-        {rawValue}
+        {formatCitizenOrTaxId(rawValue) || rawValue}
+      </span>
+    );
+  }
+
+  if (column === "เลขบัญชี" || column === "bank_account" || column === "เลขที่บัญชี") {
+    if (!rawValue || rawValue === "-" || rawValue.toLowerCase() === "non") {
+      return <span className="text-slate-300 font-mono">-</span>;
+    }
+    return (
+      <span className="font-mono text-2xs text-slate-700 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200/80 tracking-wide whitespace-nowrap">
+        {formatBankAccount(rawValue) || rawValue}
       </span>
     );
   }

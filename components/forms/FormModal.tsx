@@ -101,6 +101,7 @@ import {
   getEnumValues,
   calculateDueDate,
   parseCreditCutoffDay,
+  findMatchingStoreOption,
   calculateMonthlyCutoffDueDate,
   normalizeDependentValues,
   parseCreditDays,
@@ -1701,6 +1702,27 @@ export function FormModal({
         submitValues["ผู้สร้างบิล"] = loggedInUser;
       }
     }
+    if (isDataForm && isMultiItemMode) {
+      if (multiLineItems.length === 0) {
+        setError("กรุณาเพิ่มรายการสินค้าอย่างน้อย 1 รายการ");
+        formBodyRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
+      const missingCategory = multiLineItems.find(i => !i.category || !i.category.trim());
+      if (missingCategory) {
+        setError("กรุณาเลือกประเภทสินค้าให้ครบทุกรายการ");
+        formBodyRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
+      const invalidItem = multiLineItems.find(i => !i.amount || (Number(i.amount) || 0) <= 0);
+      if (invalidItem) {
+        setError("กรุณาระบุยอดเงินสำหรับทุกรายการสินค้าในบิล");
+        formBodyRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
+      submitValues["_is_multi_item"] = "true";
+    }
+
     const validationError = validateVisibleRequiredFields(submitValues, activeForm);
     if (validationError) {
       setError(validationError);
@@ -1718,12 +1740,6 @@ export function FormModal({
     }
 
     if (isDataForm && isMultiItemMode && multiLineItems.length > 0) {
-      const invalidItem = multiLineItems.find(i => !i.amount || (Number(i.amount) || 0) <= 0);
-      if (invalidItem) {
-        setError("กรุณาระบุยอดเงินสำหรับทุกรายการสินค้าในบิล");
-        formBodyRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-        return;
-      }
 
       const isContractorVendor = submitValues["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา";
       const matSum = multiLineItems.filter(i => isMaterialCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
@@ -2188,7 +2204,9 @@ export function FormModal({
                                   </button>
                                 )}
                                 {section.id === "tax" && (() => {
-                                  const storeOption = (activeForm?.refOptions?.["ร้านค้า"] || []).find(opt => opt.value === values["ร้านค้า"]);
+                                  const storeVal = values["ร้านค้า"] || values["ร้าน/บุคคล"] || "";
+                                  const storeOptions = activeForm?.refOptions?.["ร้านค้า"] || activeForm?.refOptions?.["ร้าน/บุคคล"] || [];
+                                  const storeOption = findMatchingStoreOption(storeOptions, storeVal);
                                   const storeCutoffRaw = storeOption?.row?.["เครดิตจ่าย"] || storeOption?.row?.["credit_payment_day"];
                                   const storeCutoffDay = parseCreditCutoffDay(storeCutoffRaw);
                                   const hasStoreCredit = storeCutoffDay > 0 || (hasValue(storeCutoffRaw) && storeCutoffRaw !== "-" && storeCutoffRaw !== "0");
