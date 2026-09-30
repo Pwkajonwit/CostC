@@ -19,18 +19,47 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized: Missing or invalid CRON_SECRET" }, { status: 401 });
     }
 
-    // 1. Check custom target query parameter ?target=...
+    // 1. Check custom target query parameter ?target=... & force flag
     const searchTarget = req.nextUrl.searchParams.get("target")?.trim();
+    const isForce = req.nextUrl.searchParams.get("force") === "true";
 
-    // 2. Fetch dynamic LINE config & Owner ID from Supabase
-    const [{ data: configRow }, { ownerId }] = await Promise.all([
+    // Bangkok timezone dates for today
+    const nowBangkok = new Date();
+    const todayYmd = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Bangkok",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).format(nowBangkok);
+
+    // 2. Fetch dynamic LINE config & Owner ID & last sent record from Supabase
+    const [{ data: configRow }, { ownerId }, { data: lastSentRow }] = await Promise.all([
       supabaseAdmin
         .from("system_options")
         .select("data")
         .eq("id", "line_config")
         .maybeSingle(),
-      getLineTargetIds()
+      getLineTargetIds(),
+      supabaseAdmin
+        .from("system_options")
+        .select("data")
+        .eq("id", "cron_last_sent")
+        .maybeSingle()
     ]);
+
+    const lastSentData = (lastSentRow?.data && typeof lastSentRow.data === "object") ? lastSentRow.data : {};
+
+    // 🔒 Idempotency Guard: Prevent duplicate evening summary notifications on the same day
+    if (!isForce && !searchTarget && lastSentData.daily_summary_date === todayYmd) {
+      const alreadySentTime = lastSentData.daily_summary_time || "ช่วงเย็น";
+      console.log(`[Cron daily-summary] Already sent today (${todayYmd}) at ${alreadySentTime}. Skipping to prevent duplicate.`);
+      return NextResponse.json({
+        success: true,
+        skipped: true,
+        message: `ระบบได้ทำการส่งแจ้งเตือนสรุปรายงานเย็นของวันนี้ (${todayYmd}) เรียบร้อยแล้วเมื่อเวลา ${alreadySentTime} (ระบบป้องกันการส่งซ้ำอัตโนมัติ)`,
+        alreadySentAt: lastSentData.daily_summary_at
+      });
+    }
 
     const config = configRow?.data || {};
     const configuredTime = config.CRON_TIME_EVENING || "17:00";
@@ -40,10 +69,10 @@ export async function GET(req: NextRequest) {
     if (searchTarget) {
       recipients.add(searchTarget);
     } else {
-      if (config.LINE_GROUP_ID_SUMMARY) recipients.add(config.LINE_GROUP_ID_SUMMARY);
-      if (config.LINE_GROUP_ID_FINANCE) recipients.add(config.LINE_GROUP_ID_FINANCE);
-      if (ownerId) recipients.add(ownerId);
-      if (config.LINE_USER_ID_OWN) recipients.add(config.LINE_USER_ID_OWN);
+      if (config.LINE_GROUP_ID_SUMMARY) recipients.add(String(config.LINE_GROUP_ID_SUMMARY).trim());
+      if (config.LINE_GROUP_ID_FINANCE) recipients.add(String(config.LINE_GROUP_ID_FINANCE).trim());
+      if (ownerId) recipients.add(String(ownerId).trim());
+      if (config.LINE_USER_ID_OWN) recipients.add(String(config.LINE_USER_ID_OWN).trim());
     }
 
     if (recipients.size === 0) {
@@ -64,14 +93,6 @@ export async function GET(req: NextRequest) {
     const tasks = tasksRes.data || [];
     const works = worksRes.data || [];
 
-    // Bangkok timezone dates for today
-    const nowBangkok = new Date();
-    const todayYmd = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Bangkok",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit"
-    }).format(nowBangkok);
     const todayDmy = nowBangkok.toLocaleDateString("th-TH", { timeZone: "Asia/Bangkok" });
 
     // Filter today's bills (created, approved, or paid today)
@@ -169,26 +190,51 @@ export async function GET(req: NextRequest) {
       lateTasks
     });
 
-    const results = [];
-    for (const sendTo of recipients) {
-      const res = await sendFlexMessageDetailed(
-        sendTo,
-        `📊 สรุปรายงานเย็น Multi-Tab Carousel (${todayStr})`,
-        flexCarousel
-      );
-      if (!res.success) {
-        let teamSummaryText = `📊 สรุปภาพรวมการเงิน & ผลงานทีม (${todayStr} - ${configuredTime} น.)\n\n`;
-        teamSummaryText += `🧾 รายการบิลวันนี้: ${totalBills} รายการ (รออนุมัติ: ${todayPendingCount}, อนุมัติแล้ว: ${todayApprovedCount}, ปิดงานแล้ว: ${todayPaidCount})\n`;
-        if (globalPendingCount > 0) {
-          teamSummaryText += `📌 รออนุมัติสะสมในระบบ: ${globalPendingCount} รายการ\n`;
-        }
-        teamSummaryText += `💰 ยอดเงินรวมวันนี้: ฿${totalAmount.toLocaleString("th-TH")}\n`;
-        teamSummaryText += `👷‍♂️ งานรับเหมา/PW: กำลังทำ ${activeWorksCount} รายการ, เสร็จแล้ว ${completedWorksCount} รายการ`;
+    // Send in parallel to all recipients for fast non-blocking delivery
+    const results = await Promise.all(
+      Array.from(recipients).map(async sendTo => {
+        const res = await sendFlexMessageDetailed(
+          sendTo,
+          `📊 สรุปรายงานเย็น Multi-Tab Carousel (${todayStr})`,
+          flexCarousel
+        );
+        if (!res.success) {
+          let teamSummaryText = `📊 สรุปภาพรวมการเงิน & ผลงานทีม (${todayStr} - ${configuredTime} น.)\n\n`;
+          teamSummaryText += `🧾 รายการบิลวันนี้: ${totalBills} รายการ (รออนุมัติ: ${todayPendingCount}, อนุมัติแล้ว: ${todayApprovedCount}, ปิดงานแล้ว: ${todayPaidCount})\n`;
+          if (globalPendingCount > 0) {
+            teamSummaryText += `📌 รออนุมัติสะสมในระบบ: ${globalPendingCount} รายการ\n`;
+          }
+          teamSummaryText += `💰 ยอดเงินรวมวันนี้: ฿${totalAmount.toLocaleString("th-TH")}\n`;
+          teamSummaryText += `👷‍♂️ งานรับเหมา/PW: กำลังทำ ${activeWorksCount} รายการ, เสร็จแล้ว ${completedWorksCount} รายการ`;
 
-        const textRes = await sendTextMessageDetailed(sendTo, teamSummaryText);
-        results.push({ target: sendTo, success: textRes.success, fallbackText: true });
-      } else {
-        results.push({ target: sendTo, success: true });
+          const textRes = await sendTextMessageDetailed(sendTo, teamSummaryText);
+          return { target: sendTo, success: textRes.success, fallbackText: true };
+        }
+        return { target: sendTo, success: true };
+      })
+    );
+
+    // 💾 Record that today's evening summary alert has been sent successfully (Prevents duplicates)
+    const hasSuccessfulSend = results.some(r => r.success);
+    if (hasSuccessfulSend && !searchTarget) {
+      const nowTimeStr = nowBangkok.toLocaleTimeString("th-TH", {
+        timeZone: "Asia/Bangkok",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+      try {
+        await supabaseAdmin.from("system_options").upsert({
+          id: "cron_last_sent",
+          data: {
+            ...lastSentData,
+            daily_summary_date: todayYmd,
+            daily_summary_at: nowBangkok.toISOString(),
+            daily_summary_time: nowTimeStr,
+          },
+          updated_at: new Date().toISOString()
+        });
+      } catch (err) {
+        console.warn("Failed recording cron_last_sent:", err);
       }
     }
 

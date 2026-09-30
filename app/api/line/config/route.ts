@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -47,7 +47,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, message: "บันทึกการตั้งค่า LINE System เรียบร้อยแล้ว" });
+    // Trigger Supabase pg_cron schedule sync to update cron time according to morning/evening inputs
+    try {
+      await supabaseAdmin.rpc("sync_cron_schedules");
+    } catch (rpcErr) {
+      console.warn("Notice: sync_cron_schedules RPC:", rpcErr);
+    }
+
+    return NextResponse.json({ success: true, message: "บันทึกการตั้งค่าและซิงค์เวลาแจ้งเตือน Supabase Cron เรียบร้อยแล้ว" });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error?.message || "Failed to update LINE config" }, { status: 500 });
   }

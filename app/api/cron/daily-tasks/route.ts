@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { sendTextMessageDetailed, sendFlexMessageDetailed, createMorningTasksCarouselFlex, getLineTargetIds } from "@/lib/line/line";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
@@ -17,18 +17,47 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized: Missing or invalid CRON_SECRET" }, { status: 401 });
     }
 
-    // 1. Check custom target query parameter ?target=...
+    // 1. Check custom target query parameter ?target=... & force flag
     const searchTarget = req.nextUrl.searchParams.get("target")?.trim();
+    const isForce = req.nextUrl.searchParams.get("force") === "true";
 
-    // 2. Fetch dynamic LINE config & Owner ID from Supabase
-    const [{ data: configRow }, { ownerId }] = await Promise.all([
+    // Bangkok timezone date
+    const nowBangkok = new Date();
+    const todayYmd = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Bangkok",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).format(nowBangkok);
+
+    // 2. Fetch dynamic LINE config & Owner ID & last sent record from Supabase
+    const [{ data: configRow }, { ownerId }, { data: lastSentRow }] = await Promise.all([
       supabaseAdmin
         .from("system_options")
         .select("data")
         .eq("id", "line_config")
         .maybeSingle(),
-      getLineTargetIds()
+      getLineTargetIds(),
+      supabaseAdmin
+        .from("system_options")
+        .select("data")
+        .eq("id", "cron_last_sent")
+        .maybeSingle()
     ]);
+
+    const lastSentData = (lastSentRow?.data && typeof lastSentRow.data === "object") ? lastSentRow.data : {};
+
+    // 🔒 Idempotency Guard: Prevent duplicate morning notifications on the same day
+    if (!isForce && !searchTarget && lastSentData.daily_tasks_date === todayYmd) {
+      const alreadySentTime = lastSentData.daily_tasks_time || "ช่วงเช้า";
+      console.log(`[Cron daily-tasks] Already sent today (${todayYmd}) at ${alreadySentTime}. Skipping to prevent duplicate.`);
+      return NextResponse.json({
+        success: true,
+        skipped: true,
+        message: `ระบบได้ทำการส่งแจ้งเตือนสรุปงานเช้าของวันนี้ (${todayYmd}) เรียบร้อยแล้วเมื่อเวลา ${alreadySentTime} (ระบบป้องกันการส่งซ้ำอัตโนมัติ)`,
+        alreadySentAt: lastSentData.daily_tasks_at
+      });
+    }
 
     const config = configRow?.data || {};
     const configuredTime = config.CRON_TIME_MORNING || "07:30";
@@ -38,10 +67,10 @@ export async function GET(req: NextRequest) {
     if (searchTarget) {
       recipients.add(searchTarget);
     } else {
-      if (config.LINE_GROUP_ID_TASK) recipients.add(config.LINE_GROUP_ID_TASK);
-      if (config.LINE_GROUP_ID_PW) recipients.add(config.LINE_GROUP_ID_PW);
-      if (ownerId) recipients.add(ownerId);
-      if (config.LINE_USER_ID_OWN) recipients.add(config.LINE_USER_ID_OWN);
+      if (config.LINE_GROUP_ID_TASK) recipients.add(String(config.LINE_GROUP_ID_TASK).trim());
+      if (config.LINE_GROUP_ID_PW) recipients.add(String(config.LINE_GROUP_ID_PW).trim());
+      if (ownerId) recipients.add(String(ownerId).trim());
+      if (config.LINE_USER_ID_OWN) recipients.add(String(config.LINE_USER_ID_OWN).trim());
     }
 
     if (recipients.size === 0) {
@@ -62,7 +91,8 @@ export async function GET(req: NextRequest) {
     const works = worksRes.data || [];
     const bills = billsRes.data || [];
 
-    const todayStr = new Date().toLocaleDateString("th-TH", {
+    const todayStr = nowBangkok.toLocaleDateString("th-TH", {
+      timeZone: "Asia/Bangkok",
       year: "numeric",
       month: "short",
       day: "numeric",
@@ -96,22 +126,47 @@ export async function GET(req: NextRequest) {
       pendingBills
     });
 
-    const results = [];
-    for (const sendTo of recipients) {
-      const res = await sendFlexMessageDetailed(
-        sendTo,
-        `☀️ รายงานสรุปงานเช้า Multi-Tab Carousel (${todayStr})`,
-        flexCarousel
-      );
-      if (!res.success) {
-        let textMsg = `☀️ รายงานสรุปงานเช้า (${todayStr} - ${configuredTime} น.)\n\n📋 งานค้างทั้งหมด ${activeTasks.length} รายการ:\n\n`;
-        activeTasks.slice(0, 8).forEach((w, i) => {
-          textMsg += `${i + 1}. [CW${w.id}] ${w.details}\n`;
+    // Send in parallel to all recipients for fast non-blocking delivery
+    const results = await Promise.all(
+      Array.from(recipients).map(async sendTo => {
+        const res = await sendFlexMessageDetailed(
+          sendTo,
+          `☀️ รายงานสรุปงานเช้า Multi-Tab Carousel (${todayStr})`,
+          flexCarousel
+        );
+        if (!res.success) {
+          let textMsg = `☀️ รายงานสรุปงานเช้า (${todayStr} - ${configuredTime} น.)\n\n📋 งานค้างทั้งหมด ${activeTasks.length} รายการ:\n\n`;
+          activeTasks.slice(0, 8).forEach((w, i) => {
+            textMsg += `${i + 1}. [CW${w.id}] ${w.details}\n`;
+          });
+          const textRes = await sendTextMessageDetailed(sendTo, textMsg);
+          return { target: sendTo, success: textRes.success, fallbackText: true };
+        }
+        return { target: sendTo, success: true };
+      })
+    );
+
+    // 💾 Record that today's morning alert has been sent successfully (Prevents duplicates)
+    const hasSuccessfulSend = results.some(r => r.success);
+    if (hasSuccessfulSend && !searchTarget) {
+      const nowTimeStr = nowBangkok.toLocaleTimeString("th-TH", {
+        timeZone: "Asia/Bangkok",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+      try {
+        await supabaseAdmin.from("system_options").upsert({
+          id: "cron_last_sent",
+          data: {
+            ...lastSentData,
+            daily_tasks_date: todayYmd,
+            daily_tasks_at: nowBangkok.toISOString(),
+            daily_tasks_time: nowTimeStr,
+          },
+          updated_at: new Date().toISOString()
         });
-        const textRes = await sendTextMessageDetailed(sendTo, textMsg);
-        results.push({ target: sendTo, success: textRes.success, fallbackText: true });
-      } else {
-        results.push({ target: sendTo, success: true });
+      } catch (err) {
+        console.warn("Failed recording cron_last_sent:", err);
       }
     }
 
