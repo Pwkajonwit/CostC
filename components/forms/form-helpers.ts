@@ -396,7 +396,11 @@ export function getInitialStringValues(form: FormPayload): Record<string, string
       return [field.name, String(form.initialValues[field.name] ?? "")];
     })
   );
-  if (form.tableName === TABLES.DATA || form.tableName === "Data") {
+  const tName: string = form.tableName;
+  const isDataTbl = tName === "Data" || tName === (TABLES.DATA as string);
+  const isPettyCashTbl = tName === "petty_cash" || tName === "เปิดเงินสดย่อย" || tName === (TABLES.PETTY_CASH as string);
+
+  if (isDataTbl || isPettyCashTbl) {
     const loggedInEmployeeId = getCookie("auth_employee_id");
     const loggedInName = getCookie("auth_name");
     if (loggedInEmployeeId || loggedInName) {
@@ -433,8 +437,15 @@ export function getInitialStringValues(form: FormPayload): Record<string, string
       }
 
       const loggedInUser = loggedInName || loggedInEmployeeId;
-      if (loggedInUser) {
+      if (loggedInUser && isDataTbl) {
         values["ผู้สร้างบิล"] = loggedInUser;
+      }
+
+      if (isPettyCashTbl) {
+        const requesterField = form.schema.find(f => f.name === "ผู้เบิก");
+        if (requesterField && values["ผู้เบิก"]) {
+          applyRefFill(values, requesterField, form, values["ผู้เบิก"]);
+        }
       }
     }
   }
@@ -1104,26 +1115,60 @@ export function normalizeDependentValues(values: Record<string, string>, changed
 
 export function applyRefFill(values: Record<string, string>, field: FieldSchema, form: FormPayload, value: string) {
   if (field.type !== "Ref" || !field.refFill) return;
-  const selectedOption = (form.refOptions[field.name] || []).find(option => String(option.value) === value);
+  const valStr = String(value || "").trim().toLowerCase();
+  const selectedOption = (form.refOptions[field.name] || []).find(option => {
+    const optVal = String(option.value || "").trim().toLowerCase();
+    const optLabel = String(option.label || "").trim().toLowerCase();
+    if (optVal === valStr || optLabel === valStr) return true;
+    if (option.row) {
+      const empId = String(option.row["รหัสพนักงาน"] || option.row.id || "").trim().toLowerCase();
+      const nickname = String(option.row["ชื่อเล่น"] || "").trim().toLowerCase();
+      const fullName = String(option.row["ชื่อ-นามสกุล"] || "").trim().toLowerCase();
+      if (empId === valStr || nickname === valStr || fullName === valStr) return true;
+    }
+    return false;
+  });
+
   Object.entries(field.refFill).forEach(([targetField, sourceColumn]) => {
-    let filledVal = selectedOption ? String(selectedOption.row?.[sourceColumn] ?? "") : "";
-    if (sourceColumn.includes("{")) {
-      filledVal = selectedOption ? sourceColumn.replace(/\{([^}]+)\}/g, (_, key) => {
+    let filledVal = "";
+    if (selectedOption?.row) {
+      if (sourceColumn === "เลขบัญชี" || targetField === "เลขบัญชี") {
+        filledVal = String(selectedOption.row["เลขบัญชี"] ?? selectedOption.row.bank_account ?? "");
+      } else if (sourceColumn === "ธนาคาร" || targetField === "ธนาคาร") {
+        filledVal = String(selectedOption.row["ธนาคาร"] ?? selectedOption.row.bank_name ?? selectedOption.row.bank ?? "");
+      } else {
+        filledVal = String(selectedOption.row[sourceColumn] ?? "");
+      }
+    }
+
+    if (sourceColumn.includes("{") && selectedOption?.row) {
+      filledVal = sourceColumn.replace(/\{([^}]+)\}/g, (_, key) => {
         const val = selectedOption.row?.[key];
         if (typeof val === "number") return new Intl.NumberFormat("th-TH").format(val);
         if (typeof val === "string" && !isNaN(Number(val)) && val.trim() !== "") return new Intl.NumberFormat("th-TH").format(Number(val));
         return String(val ?? "");
-      }) : "";
+      });
     }
+
     if (targetField === "ธนาคาร" && filledVal && (form.refOptions["ธนาคาร"] || []).length > 0) {
-      const bankOpt = form.refOptions["ธนาคาร"].find(b =>
-        String(b.value) === filledVal ||
-        String(b.label) === filledVal ||
-        String(b.row?.id_bank) === filledVal ||
-        String(b.row?.id) === filledVal
-      );
+      const lower = filledVal.trim().toLowerCase();
+      const bankOpt = form.refOptions["ธนาคาร"].find(b => {
+        const bv = String(b.value || "").trim().toLowerCase();
+        const bl = String(b.label || "").trim().toLowerCase();
+        const bId = String(b.row?.id_bank || b.row?.id || "").trim().toLowerCase();
+        const bName = String(b.row?.["ชื่อธนาคาร"] || "").trim().toLowerCase();
+        return (
+          bv === lower ||
+          bl === lower ||
+          bId === lower ||
+          bName === lower ||
+          (bName && lower.includes(bName)) ||
+          (bl && lower.includes(bl)) ||
+          (bName && bName.includes(lower))
+        );
+      });
       if (bankOpt) {
-        filledVal = String(bankOpt.row?.["ชื่อธนาคาร"] || bankOpt.label || bankOpt.value);
+        filledVal = String(bankOpt.value || bankOpt.row?.["ชื่อธนาคาร"] || bankOpt.label);
       }
     }
     values[targetField] = filledVal;

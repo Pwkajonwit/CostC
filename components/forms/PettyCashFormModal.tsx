@@ -16,8 +16,10 @@ import type { FieldSchema, SheetRow } from "@/lib/types";
 import type { FormModalProps, FormPayload, OpenFormDetail } from "./form-types";
 import { prefetchFormSchema, clearFormSchemaCache } from "./form-types";
 import { MemoizedFormField } from "./form-field";
+import { compressImageFiles } from "@/lib/utils/image-compressor";
 import {
   applyLocalFormulas,
+  applyRefFill,
   getFieldClassName,
   getInitialStringValues,
   getRowStringValues,
@@ -42,6 +44,7 @@ export function PettyCashFormModal({
   const [activeForm, setActiveForm] = useState<FormPayload | null>(form || null);
   const [loadingSchema, setLoadingSchema] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
+  const [attachedFilesByField, setAttachedFilesByField] = useState<Record<string, File[]>>({});
   const [editSheetRow, setEditSheetRow] = useState<string | number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -74,6 +77,13 @@ export function PettyCashFormModal({
       ? getRowStringValues(targetForm, detail.row)
       : getInitialStringValues(targetForm);
 
+    targetForm.schema.filter(f => f.type === "Ref" && f.refFill).forEach(field => {
+      const refVal = nextValues[field.name];
+      if (refVal) {
+        applyRefFill(nextValues, field, targetForm, refVal);
+      }
+    });
+
     applyLocalFormulas(nextValues, targetForm.tableName);
     setError("");
     setSuccessMessage("");
@@ -85,6 +95,7 @@ export function PettyCashFormModal({
 
     setEditSheetRow(!isExplicitNew && detail?.row ? (targetRowKey ?? 1) : null);
     setValues(nextValues);
+    setAttachedFilesByField({});
     setResetKey(k => k + 1);
   }
 
@@ -110,14 +121,17 @@ export function PettyCashFormModal({
       populateFormValues(activeForm, detail);
     } else {
       setLoadingSchema(true);
-      prefetchFormSchema(resolvedTableName, true).then(loaded => {
-        setLoadingSchema(false);
-        if (loaded) {
-          setActiveForm(loaded);
+    }
+
+    prefetchFormSchema(resolvedTableName, true).then(loaded => {
+      setLoadingSchema(false);
+      if (loaded) {
+        setActiveForm(loaded);
+        if (!detail?.row || detail?.isNew) {
           populateFormValues(loaded, detail);
         }
-      });
-    }
+      }
+    });
   }
 
   function handleClose() {
@@ -152,6 +166,9 @@ export function PettyCashFormModal({
   function updateValue(field: FieldSchema, nextValue: string) {
     setValues(prev => {
       const next = { ...prev, [field.name]: nextValue };
+      if (activeForm) {
+        applyRefFill(next, field, activeForm, nextValue);
+      }
       applyLocalFormulas(next, resolvedTableName);
       return next;
     });
@@ -166,9 +183,15 @@ export function PettyCashFormModal({
       if (!showPCProject && (field.name === "ID Project" || field.name === "ชื่อ Project")) {
         return false;
       }
+      // ตอนสร้างเริ่มต้น (!isEditing) แสดงเฉพาะฟิลด์ที่จำเป็น (ซ่อนยอดเคลียร์แล้ว, ยอดคงเหลือ, สถานะ)
+      if (!isEditing) {
+        if (field.name === "ยอดเคลียร์แล้ว" || field.name === "ยอดคงเหลือ" || field.name === "สถานะ") {
+          return false;
+        }
+      }
       return isFieldVisible(field, values, activeForm);
     });
-  }, [activeForm, values, showPCProject]);
+  }, [activeForm, values, showPCProject, isEditing]);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -181,6 +204,15 @@ export function PettyCashFormModal({
     }
 
     const submitValues = sanitizeValuesForSubmit(values, activeForm);
+    if (!submitValues["สถานะ"]) {
+      submitValues["สถานะ"] = "เปิดแล้ว";
+    }
+    if (!submitValues["ยอดเคลียร์แล้ว"]) {
+      submitValues["ยอดเคลียร์แล้ว"] = "0";
+    }
+    if (!submitValues["ยอดคงเหลือ"] && submitValues["จำนวนเงิน"]) {
+      submitValues["ยอดคงเหลือ"] = submitValues["จำนวนเงิน"];
+    }
     if (editSheetRow !== null && editSheetRow !== undefined) {
       submitValues.id = String(editSheetRow);
       submitValues.sheetRow = String(editSheetRow);
@@ -191,15 +223,41 @@ export function PettyCashFormModal({
     setSuccessMessage("");
 
     try {
-      const response = await fetch(submitPath, {
-        method: isEditing ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tableName: resolvedTableName,
-          values: submitValues,
-          sheetRow: editSheetRow ?? undefined,
-        }),
-      });
+      const hasFiles = Object.values(attachedFilesByField).some(files => files.length > 0);
+      let response: Response;
+
+      if (hasFiles) {
+        const formData = new FormData();
+        formData.set("tableName", resolvedTableName);
+        if (editSheetRow !== null && editSheetRow !== undefined) {
+          formData.set("id", String(editSheetRow));
+          formData.set("sheetRow", String(editSheetRow));
+        }
+        Object.entries(submitValues).forEach(([k, v]) => {
+          if (v !== undefined && v !== null) formData.set(k, String(v));
+        });
+        for (const [fieldName, files] of Object.entries(attachedFilesByField)) {
+          const compressed = await compressImageFiles(files, 1600, 0.8);
+          compressed.forEach(file => {
+            if (file && file.size > 0) formData.append(fieldName, file);
+          });
+        }
+        response = await fetch(submitPath, {
+          method: isEditing ? "PATCH" : "POST",
+          body: formData,
+        });
+      } else {
+        response = await fetch(submitPath, {
+          method: isEditing ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tableName: resolvedTableName,
+            row: submitValues,
+            values: submitValues,
+            sheetRow: editSheetRow ?? undefined,
+          }),
+        });
+      }
 
       const result = await response.json();
       if (!response.ok) {
@@ -342,6 +400,8 @@ export function PettyCashFormModal({
                                 isEditing={isEditing}
                                 onValueChange={val => updateValue(field, val)}
                                 resetKey={resetKey}
+                                attachedFiles={attachedFilesByField[field.name] || []}
+                                onAttachedFilesChange={files => setAttachedFilesByField(prev => ({ ...prev, [field.name]: files }))}
                               />
                             </div>
                           ))}
