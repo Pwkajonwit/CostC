@@ -193,7 +193,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, count: inserted?.length || processedRows.length });
     }
 
-    const row = body.row && typeof body.row === "object" ? body.row as SheetRow : {};
+    const row = ((body.row || body.values) && typeof (body.row || body.values) === "object" ? (body.row || body.values) : {}) as SheetRow;
     const actor = actorFromRequest(request);
     if ((tableName === TABLES.DATA || tableName === "Data" || tableName === "bills")) {
       if (!row["ผู้สร้างบิล"] && !row["created_by"]) {
@@ -215,12 +215,29 @@ export async function POST(request: NextRequest) {
       row["LINE User ID"] = lineVal;
       row["LINE"] = lineVal;
     }
+    const isPettyCash = tableName === TABLES.PETTY_CASH || tableName === "เปิดเงินสดย่อย" || tableName === "petty_cash";
+    if (isPettyCash) {
+      if (!row["id_petty_cash"] || String(row["id_petty_cash"]).trim() === "") {
+        const pcRows = await getRows(TABLES.PETTY_CASH, 15_000).catch(() => []);
+        const maxNum = pcRows.reduce((max, r) => {
+          const val = String(r["id_petty_cash"] || r.id || "");
+          const match = val.match(/(\d+)$/);
+          return Math.max(max, match ? Number(match[1]) : 0);
+        }, 100);
+        row["id_petty_cash"] = `PC${maxNum + 1}`;
+      }
+      if (!row.id) {
+        row.id = String(row["id_petty_cash"]).trim();
+      }
+      if (!row["สถานะ"] || String(row["สถานะ"]).trim() === "") {
+        row["สถานะ"] = "เปิดแล้ว";
+      }
+    }
     sanitizeBySchema(row, tableName);
     validateRequiredBySchema(row, tableName);
     if (tableName === TABLES.DATA) {
       await validateBillRelations(row);
     }
-    const isPettyCash = tableName === TABLES.PETTY_CASH || tableName === "เปิดเงินสดย่อย" || tableName === "petty_cash";
     const output = tableName === TABLES.CONTRACT_WORK
       ? await applyContractFormulas(row)
       : tableName === TABLES.PROJECT

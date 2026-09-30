@@ -260,6 +260,7 @@ export async function listRefOptions(tableName: string, options: {
   const labelColumn = options.labelColumn || keyColumn;
   const isProjectTable = tableName === TABLES.PROJECT || tableName === "Project" || tableName === "projects";
   const isStoreTable = tableName === TABLES.STORE || tableName === "stores" || tableName === "ร้านค้า";
+  const isPeopleTable = tableName === TABLES.PEOPLE || tableName === "รายชื่อ" || tableName === "people" || tableName === "master_members" || tableName === "พนักงาน" || tableName === "ชื่อพนักงาน";
   const projectExtraCols = isProjectTable ? ["งบไม่เกินค่าแรง", "งบไม่เกิน", "ยอดงาน", "คุมงบประเภทงาน", "งบไม่เกินค่าของ"] : [];
   const storeExtraCols = isStoreTable ? ["เครดิตจ่าย", "credit_payment_day", "ชื่อเต็ม", "เลขบัญชี", "ธนาคาร"] : [];
   const bankExtraCols = (tableName === TABLES.BANK || tableName === "BANK" || tableName === "ธนาคาร" || tableName === "banks") ? ["id_bank", "ชื่อธนาคาร", "name"] : [];
@@ -273,7 +274,7 @@ export async function listRefOptions(tableName: string, options: {
       label: (tableName === TABLES.BANK || tableName === "BANK" || tableName === "ธนาคาร" || tableName === "banks")
         ? String(row["ชื่อธนาคาร"] || row.name || row[labelColumn] || row[keyColumn])
         : row[labelColumn] ? String(row[labelColumn]) : String(row[keyColumn]),
-      row: isProjectTable || isStoreTable ? row : pick(row, rowColumns)
+      row: isProjectTable || isStoreTable || isPeopleTable ? row : pick(row, rowColumns)
     }));
 }
 
