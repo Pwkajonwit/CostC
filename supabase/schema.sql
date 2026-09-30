@@ -876,6 +876,100 @@ $$;
 GRANT EXECUTE ON FUNCTION public.get_atomic_next_bill_sequence(INT) TO postgres, anon, authenticated, service_role;
 
 -- =========================================================================
+-- 10. SUPABASE PG_CRON SCHEDULES (DYNAMIC NOTIFICATIONS)
+-- =========================================================================
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+CREATE EXTENSION IF NOT EXISTS pg_net;
+
+CREATE OR REPLACE FUNCTION public.sync_cron_schedules()
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_config jsonb;
+  v_morning text;
+  v_evening text;
+  v_m_parts text[];
+  v_e_parts text[];
+  v_m_hour int;
+  v_m_min int;
+  v_e_hour int;
+  v_e_min int;
+  v_m_utc_hour int;
+  v_e_utc_hour int;
+  v_m_cron text;
+  v_e_cron text;
+BEGIN
+  SELECT data INTO v_config FROM public.system_options WHERE id = 'line_config';
+  
+  v_morning := COALESCE(v_config->>'CRON_TIME_MORNING', '07:30');
+  v_evening := COALESCE(v_config->>'CRON_TIME_EVENING', '17:00');
+
+  v_m_parts := string_to_array(trim(v_morning), ':');
+  v_m_hour := COALESCE(NULLIF(v_m_parts[1], '')::int, 7);
+  v_m_min := COALESCE(NULLIF(v_m_parts[2], '')::int, 30);
+  v_m_utc_hour := (v_m_hour - 7 + 24) % 24;
+  v_m_cron := v_m_min::text || ' ' || v_m_utc_hour::text || ' * * *';
+
+  v_e_parts := string_to_array(trim(v_evening), ':');
+  v_e_hour := COALESCE(NULLIF(v_e_parts[1], '')::int, 17);
+  v_e_min := COALESCE(NULLIF(v_e_parts[2], '')::int, 0);
+  v_e_utc_hour := (v_e_hour - 7 + 24) % 24;
+  v_e_cron := v_e_min::text || ' ' || v_e_utc_hour::text || ' * * *';
+
+  IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'daily-morning-tasks') THEN
+    PERFORM cron.unschedule('daily-morning-tasks');
+  END IF;
+  IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'daily-evening-summary') THEN
+    PERFORM cron.unschedule('daily-evening-summary');
+  END IF;
+
+  PERFORM cron.schedule(
+    'daily-morning-tasks',
+    v_m_cron,
+    'SELECT net.http_get(url:=''https://cost-c.vercel.app/api/cron/daily-tasks'');'
+  );
+
+  PERFORM cron.schedule(
+    'daily-evening-summary',
+    v_e_cron,
+    'SELECT net.http_get(url:=''https://cost-c.vercel.app/api/cron/daily-summary'');'
+  );
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'morning_th', v_morning,
+    'evening_th', v_evening,
+    'morning_cron_utc', v_m_cron,
+    'evening_cron_utc', v_e_cron
+  );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.sync_cron_schedules() TO postgres, anon, authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.trigger_sync_line_cron()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  PERFORM public.sync_cron_schedules();
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_sync_line_cron ON public.system_options;
+CREATE TRIGGER trg_sync_line_cron
+AFTER INSERT OR UPDATE ON public.system_options
+FOR EACH ROW
+WHEN (NEW.id = 'line_config')
+EXECUTE FUNCTION public.trigger_sync_line_cron();
+
+PERFORM public.sync_cron_schedules();
+
+-- =========================================================================
 -- COMPLETION MESSAGE
 -- =========================================================================
 DO $$
@@ -884,6 +978,8 @@ BEGIN
   RAISE NOTICE '✅ Master SuperBase Migration Completed Successfully!';
   RAISE NOTICE '👉 All 18 Tables, Indexes, RLS, Storage Buckets, and';
   RAISE NOTICE '👉 Admin account "0800000000" / "admin" are Ready!';
+  RAISE NOTICE '👉 Supabase pg_cron daily schedules configured!';
   RAISE NOTICE '=======================================================';
 END $$;
+
 

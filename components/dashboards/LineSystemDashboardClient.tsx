@@ -297,8 +297,8 @@ export function LineSystemDashboardClient() {
     setTimeout(() => setCopiedKeyword(null), 2000);
   }
 
-  async function handleSaveConfig(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleSaveConfig(e?: React.FormEvent) {
+    if (e) e.preventDefault();
     setSavingConfig(true);
     setSaveResult(null);
     try {
@@ -1130,7 +1130,7 @@ export function LineSystemDashboardClient() {
           <div className="bg-white p-3.5 rounded-md border border-slate-200 shadow-2xs space-y-3">
             <div>
               <h2 className="text-xs font-medium text-slate-900 m-0">⏰ กำหนดเวลาแจ้งเตือนสรุปผลงานประจำวัน (Daily Schedules)</h2>
-              <p className="text-xs text-slate-500 m-0">ระบบ Serverless Cron จะยิงการ์ด Flex สรุปงานเช้าและเย็นตามเวลาที่กำหนด</p>
+              <p className="text-xs text-slate-500 m-0">ระบบ Supabase Cron (pg_cron) จะยิงการ์ด Flex สรุปงานเช้าและเย็นตามเวลาที่กำหนดโดยอัตโนมัติ</p>
             </div>
 
             {/* Owner Recipient Info Badge */}
@@ -1254,6 +1254,36 @@ export function LineSystemDashboardClient() {
                 </div>
               </div>
             </div>
+
+            {/* Save Schedule Changes */}
+            <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-slate-200">
+              <div className="text-xs text-slate-500 flex items-center gap-1.5">
+                <Clock size={14} className="text-amber-600 shrink-0" />
+                <span>เมื่อปรับเปลี่ยนเวลาแจ้งเตือนเช้า/เย็นด้านบน ให้กดปุ่มนี้เพื่อซิงค์เวลาเข้า Supabase Cron (pg_cron)</span>
+              </div>
+              <button
+                type="button"
+                disabled={savingConfig}
+                onClick={() => handleSaveConfig()}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-medium rounded-md transition flex items-center justify-center gap-1.5 text-xs cursor-pointer shadow-xs disabled:opacity-50 shrink-0"
+              >
+                {savingConfig ? <RefreshCw size={13} className="animate-spin" /> : <Save size={13} />}
+                <span>{savingConfig ? "กำลังบันทึกเวลา..." : "บันทึกเวลาแจ้งเตือนเข้า Supabase"}</span>
+              </button>
+            </div>
+
+            {saveResult && (
+              <div
+                className={`p-2.5 rounded text-xs flex items-center gap-2 border ${
+                  saveResult.success
+                    ? "bg-emerald-50 text-emerald-800 border-emerald-300"
+                    : "bg-rose-50 text-rose-800 border-rose-300"
+                }`}
+              >
+                {saveResult.success ? <CheckCircle2 size={14} className="text-emerald-600 shrink-0" /> : <AlertTriangle size={14} className="text-rose-600 shrink-0" />}
+                <span>{saveResult.message}</span>
+              </div>
+            )}
           </div>
         </div>
       )}
