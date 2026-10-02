@@ -10,6 +10,7 @@ import {
   STAFF_CATEGORY_OPTIONS,
   SUB_ITEMS_123,
   SUB_ITEMS_223,
+  SUB_ITEMS_603,
   isMaterialCost,
   isLaborCost,
   isStaffCost,
@@ -702,6 +703,10 @@ export function getFieldOptions(field: FieldSchema, form: FormPayload, values: R
   }
 
   if (field.name === "รายการ") {
+    const pType = String(values["ประเภท"] || values["สินค้า"] || "");
+    if (pType.startsWith("603") || pType.includes("เช่าเครื่องจักร")) {
+      return SUB_ITEMS_603.map(v => ({ value: v, label: v }));
+    }
     const isLabor = values["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา" || isLaborCost(values["ประเภท"]) || values["สินค้า"]?.startsWith("223");
     const subList = isLabor ? SUB_ITEMS_223 : SUB_ITEMS_123;
     return subList.map(v => ({ value: v, label: v }));
@@ -1035,11 +1040,31 @@ export function normalizeDependentValues(values: Record<string, string>, changed
       if (conType) {
         if (conType.includes("นิติบุคคล") || conType.includes("บริษัท")) {
           values["statusค่าแรง"] = "บริษัท";
+          const vatOptions = form.schema.find(f => f.name === "vat")?.values || [];
+          const vat7Val = vatOptions.find(v => String(v).includes("7")) || "7";
+          values["vat"] = vat7Val;
+          values["วันได้บิล"] = getTodayDateIso();
         } else if (conType.includes("บุคคล")) {
           values["statusค่าแรง"] = "บุคคลธรรมดา";
+          values["vat"] = "";
+          values["วันได้บิล"] = "";
         }
+        applyBillDeductAmount(values);
       }
     }
+  }
+
+  if (changedField === "statusค่าแรง") {
+    if (values["statusค่าแรง"] === "บริษัท") {
+      const vatOptions = form.schema.find(f => f.name === "vat")?.values || [];
+      const vat7Val = vatOptions.find(v => String(v).includes("7")) || "7";
+      values["vat"] = vat7Val;
+      values["วันได้บิล"] = getTodayDateIso();
+    } else {
+      values["vat"] = "";
+      values["วันได้บิล"] = "";
+    }
+    applyBillDeductAmount(values);
   }
 
   if (changedField === "vat") {
@@ -1184,6 +1209,7 @@ export function isFieldVisible(field: FieldSchema, values: Record<string, string
     return vendorType === "ร้านค้า";
   }
   if (field.name === "สินค้า") {
+    if (values["_is_multi_item"] === "true") return false;
     return vendorType !== "พนักงาน";
   }
   if (field.name === "ผู้รับเหมา" || field.name === "ค่าแรงคงเหลือ") {
@@ -1231,7 +1257,7 @@ export function isFieldVisible(field: FieldSchema, values: Record<string, string
     return vendorType === "ร้านค้า" && isOtherExpense(cat);
   }
   if (field.name === "รายการ") {
-    return isOtherExpense(cat);
+    return isOtherExpense(cat) || cat.startsWith("603") || cat.includes("เช่าเครื่องจักร");
   }
   if (field.name === "ค่าของ") {
     return vendorType === "ร้านค้า" && (!cat || isMaterialCost(cat));
@@ -1260,7 +1286,7 @@ export function isFieldVisible(field: FieldSchema, values: Record<string, string
     return Boolean(hasStoreCredit || values["วันจ่าย"] || parseCreditDays(values["เครดิต"]) > 0);
   }
   if (field.name === "หัก") {
-    return vendorType === "ผู้รับเหมา" || isLaborCost(cat) || isOtherExpense(cat);
+    return vendorType === "ผู้รับเหมา" || isLaborCost(cat);
   }
 
   if (!field.showIf) return true;
@@ -1355,6 +1381,7 @@ export function isFieldRequired(field: FieldSchema, values: Record<string, strin
   }
   if (field.name === "สินค้า") {
     if (values["_is_multi_item"] === "true") return false;
+    if (vendorType === "ผู้รับเหมา" && (hasValue(values["ประเภท"]) || hasValue(values["รายละเอียดงาน"]))) return false;
     return vendorType === "ร้านค้า" || vendorType === "ผู้รับเหมา";
   }
 
@@ -1362,6 +1389,14 @@ export function isFieldRequired(field: FieldSchema, values: Record<string, strin
 }
 
 export function getFieldLabel(field: FieldSchema, values?: Record<string, string>): string {
+  if (field.name === "ค่าแรง") {
+    const vType = values?.["ร้านค้า/ผู้รับเหมา"];
+    const statusLabor = values?.["statusค่าแรง"];
+    if (vType === "ผู้รับเหมา" && statusLabor === "บริษัท") {
+      return "ค่าแรง (7%)";
+    }
+    return field.label || "ค่าแรง";
+  }
   if (field.label) return field.label;
   if (field.name === "น้ำมัน" || field.name === "ซ่อมรถ" || field.name === "เครื่องจักร" || field.name === "เครื่องมือ" || field.name === "ค่าของ" || field.name === "อื่นๆ") {
     return "ค่าใช้จ่าย";
@@ -1389,7 +1424,7 @@ export function validateVisibleRequiredFields(values: Record<string, string>, fo
     return !hasValue(values[field.name]);
   });
 
-  return missingField ? `กรุณากรอก ${getFieldLabel(missingField)}` : "";
+  return missingField ? `กรุณากรอก ${getFieldLabel(missingField, values)}` : "";
 }
 
 export function getFieldClassName(field: FieldSchema, values?: Record<string, string>): string {

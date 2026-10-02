@@ -23,6 +23,7 @@ import {
   STAFF_300_CODES,
   SUB_ITEMS_123,
   SUB_ITEMS_223,
+  SUB_ITEMS_603,
   getExpenseFieldForCategory,
   getCostCodeBadgeStyle
 } from "@/lib/cost-codes";
@@ -52,7 +53,7 @@ export function CategoryTableView() {
         materialName: mat.name,
         laborCode: lab.code,
         laborName: lab.name,
-        subItems: mat.code === "123" ? SUB_ITEMS_123 : (lab.code === "223" ? SUB_ITEMS_223 : undefined)
+        subItems: mat.code === "123" ? SUB_ITEMS_123 : (lab.code === "223" ? SUB_ITEMS_223 : (lab.code === "603" ? SUB_ITEMS_603 : undefined))
       });
     }
 
@@ -131,7 +132,7 @@ export function CategoryTableView() {
         code: l.code,
         name: l.name,
         type: "ค่าแรง",
-        subItems: l.code === "223" ? SUB_ITEMS_223 : undefined
+        subItems: l.code === "223" ? SUB_ITEMS_223 : (l.code === "603" ? SUB_ITEMS_603 : undefined)
       })),
       ...STAFF_300_CODES.map(s => ({
         code: s.code,

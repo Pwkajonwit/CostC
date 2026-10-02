@@ -48,6 +48,7 @@ import {
   STAFF_CATEGORY_OPTIONS,
   SUB_ITEMS_123,
   SUB_ITEMS_223,
+  SUB_ITEMS_603,
   isMaterialCost,
   isLaborCost,
   isStaffCost,
@@ -286,7 +287,7 @@ function MultiLineItemsBuilder({
         "ซ่อมรถ": isRepairCost(type) ? amt : "",
         "เครื่องจักร": isMachineCost(type) ? amt : "",
         "เครื่องมือ": isToolCost(type) ? amt : "",
-        "อื่นๆ": isOtherExpense(type) ? amt : "",
+        "อื่นๆ": (!isContractor && isOtherExpense(type) && !type.startsWith("223")) ? amt : "",
       }, matchedProject, existingBills);
     }
 
@@ -364,17 +365,44 @@ function MultiLineItemsBuilder({
               }}
               creatable
             />
+          ) : (item.categoryType?.startsWith("603") || item.category?.startsWith("603") || item.category?.includes("เช่าเครื่องจักร") || item.categoryType?.includes("เช่าเครื่องจักร")) ? (
+            <SearchableRefSelect
+              name={`item_machine_rental_${item.id}`}
+              value={item.subItem || item.detail || ""}
+              options={SUB_ITEMS_603.map(v => ({ label: v, value: v }))}
+              readOnly={false}
+              placeholder="เลือกรถ/เครื่องจักร (PC30, รถ 6 ล้อ, รถ 10 ล้อ...)"
+              onChange={(val) => {
+                onUpdate(item.id, "subItem", val);
+                onUpdate(item.id, "detail", val);
+              }}
+              creatable
+            />
+          ) : (item.categoryType?.startsWith("223") || item.category?.startsWith("223") || item.category?.includes("ค่าบริการ") || item.categoryType?.includes("ค่าบริการ")) ? (
+            <SearchableRefSelect
+              name={`item_service_223_${item.id}`}
+              value={item.subItem || item.detail || ""}
+              options={SUB_ITEMS_223.map(v => ({ label: v, value: v }))}
+              readOnly={false}
+              placeholder="เลือกหมวดรายการค่าบริการ (1 ออกแบบ, 2 เซ็นรับรอง...)"
+              onChange={(val) => {
+                onUpdate(item.id, "subItem", val);
+                onUpdate(item.id, "detail", val);
+              }}
+              creatable
+            />
           ) : isOtherExpense(item.categoryType) ? (
             <SearchableRefSelect
               name={`item_other_${item.id}`}
               value={item.subItem || item.detail || ""}
-              options={otherItemOptions}
+              options={SUB_ITEMS_123.map(v => ({ label: v, value: v }))}
               readOnly={false}
               placeholder="เลือกหมวดรายการค่าใช้จ่าย..."
               onChange={(val) => {
                 onUpdate(item.id, "subItem", val);
                 onUpdate(item.id, "detail", val);
               }}
+              creatable
             />
           ) : hasSpecificCap && itemBudget ? (
             <div className="w-full space-y-1">
@@ -906,7 +934,7 @@ export function FormModal({
     const repairSum = items.filter(i => isRepairCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
     const machineSum = items.filter(i => isMachineCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
     const toolSum = items.filter(i => isToolCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
-    const otherSum = items.filter(i => isOtherExpense(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+    const otherSum = items.filter(i => !isContractorVendor && isOtherExpense(i.categoryType) && !i.categoryType.startsWith("223")).reduce((s, i) => s + (Number(i.amount) || 0), 0);
     const totalSum = items.reduce((s, i) => s + (Number(i.amount) || 0), 0);
 
     const hasFuelOrRepair = items.some(
@@ -954,7 +982,7 @@ export function FormModal({
       if (isContractorVendor) {
         const details = items
           .map(i => {
-            const d = (i.detail || "").trim();
+            const d = (i.detail || i.subItem || "").trim();
             const cat = (i.category || "").trim();
             if (cat && d) return `${cat}: ${d}`;
             return cat || d;
@@ -967,6 +995,7 @@ export function FormModal({
           next["สินค้า/ทำงาน"] = next["รายละเอียดงาน"] || details.join(" | ");
         }
         next["ประเภท"] = items[0]?.categoryType || items[0]?.category || current["ประเภท"] || "201 เตรียมงาน";
+        next["สินค้า"] = items[0]?.category || next["ประเภท"] || "201 เตรียมงาน";
       } else {
         if (items[0]?.category) next["สินค้า"] = items[0].category;
         next["ประเภท"] = items[0]?.categoryType || current["ประเภท"] || "101 เตรียมงาน";
@@ -1721,6 +1750,9 @@ export function FormModal({
         return;
       }
       submitValues["_is_multi_item"] = "true";
+      if (!submitValues["สินค้า"]) {
+        submitValues["สินค้า"] = multiLineItems[0]?.category || submitValues["ประเภท"] || "201 เตรียมงาน";
+      }
     }
 
     const validationError = validateVisibleRequiredFields(submitValues, activeForm);
@@ -1748,7 +1780,7 @@ export function FormModal({
       const repairSum = multiLineItems.filter(i => isRepairCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
       const machineSum = multiLineItems.filter(i => isMachineCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
       const toolSum = multiLineItems.filter(i => isToolCost(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
-      const otherSum = multiLineItems.filter(i => isOtherExpense(i.categoryType)).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+      const otherSum = multiLineItems.filter(i => !isContractorVendor && isOtherExpense(i.categoryType) && !i.categoryType.startsWith("223")).reduce((s, i) => s + (Number(i.amount) || 0), 0);
       const totalSum = multiLineItems.reduce((s, i) => s + (Number(i.amount) || 0), 0);
 
       submitValues["ค่าของ"] = matSum > 0 ? String(matSum) : "";

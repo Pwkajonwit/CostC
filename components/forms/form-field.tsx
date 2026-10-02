@@ -1662,6 +1662,7 @@ const MemoizedFormField = memo(function MemoizedFormField({
     isFieldRequired(prev.field, prev.currentValues, prev.activeForm?.tableName) ===
       isFieldRequired(next.field, next.currentValues, next.activeForm?.tableName) &&
     prev.currentValues["ร้านค้า/ผู้รับเหมา"] === next.currentValues["ร้านค้า/ผู้รับเหมา"] &&
+    prev.currentValues["statusค่าแรง"] === next.currentValues["statusค่าแรง"] &&
     prev.currentValues[prev.field.showIf?.column || ""] === next.currentValues[next.field.showIf?.column || ""] &&
     prev.currentValues[prev.field.filterBy?.column || ""] === next.currentValues[next.field.filterBy?.column || ""]
   );

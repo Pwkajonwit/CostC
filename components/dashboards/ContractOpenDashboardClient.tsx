@@ -10,6 +10,7 @@ const FormModal = dynamic(
   () => import("@/components/forms/FormModal").then((mod) => mod.FormModal),
   { ssr: false }
 );
+import { compareContractRows } from "@/lib/formulas";
 import { FORM_SCHEMAS } from "@/lib/schemas";
 import { TABLES } from "@/lib/config";
 import { money, toNumber } from "@/lib/utils/numbers";
@@ -63,11 +64,7 @@ export function ContractOpenDashboardClient({
         Object.values(row).some(val => String(val || "").toLowerCase().includes(q))
       );
     }
-    return [...list].sort((a, b) => {
-      const seqA = Number(a._sheetRow || a["id_Conwork"] || a.id || 0);
-      const seqB = Number(b._sheetRow || b["id_Conwork"] || b.id || 0);
-      return sortDesc ? seqB - seqA : seqA - seqB;
-    });
+    return [...list].sort((a, b) => compareContractRows(a, b, sortDesc));
   }, [initialRows, searchTerm, sortDesc, filterRowsByYear]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
@@ -363,12 +360,27 @@ export function ContractOpenDashboardClient({
               <table className="w-full text-left text-xs text-slate-700 border-collapse font-sans">
                 <thead className="bg-slate-100 text-slate-800 border-b border-slate-200 text-xs">
                   <tr>
-                    <th className="py-2.5 px-3 border-r border-slate-200 text-center">รหัสจ้าง</th>
+                    <th
+                      onClick={() => setSortDesc(cur => !cur)}
+                      className="py-2.5 px-3 border-r border-slate-200 text-center cursor-pointer select-none hover:bg-slate-200/80 transition-colors"
+                      title="คลิกเพื่อสลับการเรียงลำดับ (ล่าสุดก่อน / เก่าสุดก่อน)"
+                    >
+                      <div className="inline-flex items-center justify-center gap-1">
+                        <span>รหัสจ้าง</span>
+                        {sortDesc ? <ArrowDownWideNarrow size={12} className="text-slate-600" /> : <ArrowUpWideNarrow size={12} className="text-slate-600" />}
+                      </div>
+                    </th>
                     <th className="py-2.5 px-3 border-r border-slate-200">ผู้รับเหมา</th>
                     <th className="py-2.5 px-3 border-r border-slate-200 text-center">รหัสโครงการ</th>
                     <th className="py-2.5 px-3 border-r border-slate-200">ชื่อโครงการ</th>
                     <th className="py-2.5 px-3 border-r border-slate-200">รายละเอียดงาน</th>
-                    <th className="py-2.5 px-3 border-r border-slate-200 text-center whitespace-nowrap">วันที่</th>
+                    <th
+                      onClick={() => setSortDesc(cur => !cur)}
+                      className="py-2.5 px-3 border-r border-slate-200 text-center whitespace-nowrap cursor-pointer select-none hover:bg-slate-200/80 transition-colors"
+                      title="คลิกเพื่อสลับการเรียงลำดับ"
+                    >
+                      <span>วันที่</span>
+                    </th>
                     <th className="py-2.5 px-3 border-r border-slate-200 text-center whitespace-nowrap">เบอร์โทรศัพท์</th>
                     <th className="py-2.5 px-3 border-r border-slate-200 text-right">ยอดเงินจ้าง</th>
                     <th className="py-2.5 px-3 border-r border-slate-200 text-right">ยอดเงินจ่าย</th>

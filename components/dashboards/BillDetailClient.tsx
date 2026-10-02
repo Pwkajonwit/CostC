@@ -141,7 +141,21 @@ export function BillDetailClient({
   const projectName = text(currentBill["ชื่อ Project"]) || "ไม่ระบุโครงการ";
   const imageValue = currentBill["รูปถ่ายบิล"];
 
-  const lineItems = useMemo<Array<{ category?: string; categoryType?: string; amount?: string | number; name?: string; type?: string; price?: string | number; total?: string | number; storeGroup?: string }>>(() => {
+  const lineItems = useMemo<Array<{
+    category?: string;
+    categoryType?: string;
+    amount?: string | number;
+    name?: string;
+    type?: string;
+    price?: string | number;
+    total?: string | number;
+    storeGroup?: string;
+    subItem?: string;
+    detail?: string;
+    toolName?: string;
+    vehiclePlate?: string;
+    [key: string]: any;
+  }>>(() => {
     const raw = currentBill.items || (currentBill.data as any)?.items || (currentBill as any)["รายการสินค้า"] || (currentBill as any).line_items;
     if (Array.isArray(raw) && raw.length > 0) return raw;
     if (typeof raw === "string" && raw.trim().startsWith("[")) {
@@ -152,6 +166,37 @@ export function BillDetailClient({
     }
     return [];
   }, [currentBill]);
+
+  const getItemSubDetail = (item: any): string => {
+    return String(
+      item?.subItem ||
+      item?.detail ||
+      item?.toolName ||
+      item?.vehiclePlate ||
+      item?.["รายการ"] ||
+      item?.["รายละเอียด"] ||
+      item?.["sub_category"] ||
+      ""
+    ).trim();
+  };
+
+  const multiItemsSummary = useMemo(() => {
+    if (lineItems.length === 0) return null;
+    const cats = Array.from(new Set(lineItems.map(i => String(i.categoryType || i.type || i.category || "").trim()).filter(Boolean)));
+    const subs = Array.from(new Set(lineItems.map(getItemSubDetail).filter(Boolean)));
+    const fullSummary = lineItems.map((i, idx) => {
+      const c = String(i.category || i.categoryType || `รายการ ${idx + 1}`).trim();
+      const s = getItemSubDetail(i);
+      return s ? `${c} (${s})` : c;
+    }).filter(Boolean).join(" • ");
+
+    return {
+      categories: cats.join(", "),
+      subItems: subs.join(", "),
+      fullSummary,
+      hasMultipleCats: cats.length > 1,
+    };
+  }, [lineItems]);
 
   const lineItemsTotal = useMemo(() => {
     return lineItems.reduce((s, i) => s + toNumber(i.amount ?? i.price ?? i.total), 0);
@@ -493,20 +538,41 @@ export function BillDetailClient({
 
               <div className="grid grid-cols-1 sm:grid-cols-3 px-3.5 py-2 gap-1">
                 <span className="text-slate-700 font-semibold">หมวดหมู่ค่าใช้จ่าย:</span>
-                <span className="sm:col-span-2 text-slate-950 font-bold">{category}</span>
+                <div className="sm:col-span-2 text-slate-950 font-bold flex items-center gap-1.5 flex-wrap">
+                  <span>{category}</span>
+                  {multiItemsSummary?.hasMultipleCats && (
+                    <span className="text-xs font-normal text-slate-600 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                      (รวม: {multiItemsSummary.categories})
+                    </span>
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 px-3.5 py-2 gap-1">
                 <span className="text-slate-700 font-semibold">สินค้า / ทำงาน:</span>
-                <span className="sm:col-span-2 text-slate-950 font-medium">{productOrWork}</span>
+                <span className="sm:col-span-2 text-slate-950 font-medium">
+                  {lineItems.length > 1 && multiItemsSummary?.fullSummary
+                    ? multiItemsSummary.fullSummary
+                    : productOrWork}
+                </span>
               </div>
 
-              {itemName && (
-                <div className="grid grid-cols-1 sm:grid-cols-3 px-3.5 py-2 gap-1">
-                  <span className="text-slate-700 font-semibold">รายการย่อย (อื่นๆ):</span>
-                  <span className="sm:col-span-2 text-slate-950 font-medium">{itemName}</span>
-                </div>
-              )}
+              {(() => {
+                const subToShow = multiItemsSummary?.subItems || (itemName !== productOrWork ? itemName : "");
+                if (!subToShow) return null;
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 px-3.5 py-2 gap-1">
+                    <span className="text-slate-700 font-semibold">
+                      {lineItems.length > 0 ? "รายการย่อย / ข้อมูลงาน:" : "รายการย่อย (อื่นๆ):"}
+                    </span>
+                    <span className="sm:col-span-2 text-slate-950 font-medium">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-50 text-emerald-900 border border-emerald-200">
+                        {subToShow}
+                      </span>
+                    </span>
+                  </div>
+                );
+              })()}
 
               {toolName && (
                 <div className="grid grid-cols-1 sm:grid-cols-3 px-3.5 py-2 gap-1">
@@ -626,26 +692,46 @@ export function BillDetailClient({
                           <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
                             <tr>
                               <th className="px-3.5 py-2 text-left w-10">#</th>
-                              <th className="px-3.5 py-2 text-left">สินค้า / หมวดงาน</th>
-                              <th className="px-3.5 py-2 text-left w-28">ประเภท</th>
-                              <th className="px-3.5 py-2 text-right w-32">จำนวนเงิน</th>
+                              <th className="px-3.5 py-2 text-left min-w-[160px]">สินค้า / หมวดงาน</th>
+                              <th className="px-3.5 py-2 text-left min-w-[140px]">ข้อมูลย่อย / รายการ</th>
+                              <th className="px-3.5 py-2 text-left min-w-[170px] whitespace-nowrap">ประเภท</th>
+                              <th className="px-3.5 py-2 text-right w-32 whitespace-nowrap">จำนวนเงิน</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-200">
-                            {group.items.map((item, idx) => (
-                              <tr key={idx} className="hover:bg-slate-50 transition">
-                                <td className="px-3.5 py-2 text-slate-400 font-mono">{idx + 1}</td>
-                                <td className="px-3.5 py-2 text-slate-900 font-semibold">{item.category || item.name || "-"}</td>
-                                <td className="px-3.5 py-2 text-slate-600">
-                                  <span className={`px-2 py-0.5 rounded border text-[11px] font-medium ${getCostCodeBadgeStyle(item.categoryType || item.type || "101 เตรียมงาน")}`}>
-                                    {item.categoryType || item.type || "101 เตรียมงาน"}
-                                  </span>
-                                </td>
-                                <td className="px-3.5 py-2 text-right font-mono font-bold text-slate-950">
-                                  {money(toNumber(item.amount ?? item.price ?? item.total))} ฿
-                                </td>
-                              </tr>
-                            ))}
+                            {group.items.map((item, idx) => {
+                              const subDetail = getItemSubDetail(item);
+                              return (
+                                <tr key={idx} className="hover:bg-slate-50 transition">
+                                  <td className="px-3.5 py-2 text-slate-400 font-mono">{idx + 1}</td>
+                                  <td className="px-3.5 py-2 text-slate-900 font-semibold">
+                                    <div>{item.category || item.name || "-"}</div>
+                                    {subDetail && (
+                                      <div className="sm:hidden text-[11px] text-emerald-800 font-medium mt-0.5">
+                                        {subDetail}
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td className="px-3.5 py-2 text-slate-800">
+                                    {subDetail ? (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-50 text-emerald-900 border border-emerald-200 whitespace-nowrap">
+                                        {subDetail}
+                                      </span>
+                                    ) : (
+                                      <span className="text-slate-400">-</span>
+                                    )}
+                                  </td>
+                                  <td className="px-3.5 py-2 text-slate-600 whitespace-nowrap">
+                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded border text-[11px] font-medium whitespace-nowrap ${getCostCodeBadgeStyle(item.categoryType || item.type || "101 เตรียมงาน")}`}>
+                                      {item.categoryType || item.type || "101 เตรียมงาน"}
+                                    </span>
+                                  </td>
+                                  <td className="px-3.5 py-2 text-right font-mono font-bold text-slate-950 whitespace-nowrap">
+                                    {money(toNumber(item.amount ?? item.price ?? item.total))} ฿
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
@@ -675,29 +761,49 @@ export function BillDetailClient({
                     <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
                       <tr>
                         <th className="px-3.5 py-2 text-left w-10">#</th>
-                        <th className="px-3.5 py-2 text-left">สินค้า / หมวดงาน</th>
-                        <th className="px-3.5 py-2 text-left w-28">ประเภท</th>
-                        <th className="px-3.5 py-2 text-right w-32">จำนวนเงิน</th>
+                        <th className="px-3.5 py-2 text-left min-w-[160px]">สินค้า / หมวดงาน</th>
+                        <th className="px-3.5 py-2 text-left min-w-[140px]">ข้อมูลย่อย / รายการ</th>
+                        <th className="px-3.5 py-2 text-left min-w-[170px] whitespace-nowrap">ประเภท</th>
+                        <th className="px-3.5 py-2 text-right w-32 whitespace-nowrap">จำนวนเงิน</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
-                      {lineItems.map((item, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50 transition">
-                          <td className="px-3.5 py-2 text-slate-400 font-mono">{idx + 1}</td>
-                          <td className="px-3.5 py-2 text-slate-900 font-semibold">{item.category || item.name || "-"}</td>
-                          <td className="px-3.5 py-2 text-slate-600">
-                            <span className={`px-2 py-0.5 rounded border text-[11px] font-medium ${getCostCodeBadgeStyle(item.categoryType || item.type || "101 เตรียมงาน")}`}>
-                              {item.categoryType || item.type || "101 เตรียมงาน"}
-                            </span>
-                          </td>
-                          <td className="px-3.5 py-2 text-right font-mono font-bold text-slate-950">
-                            {money(toNumber(item.amount ?? item.price ?? item.total))} ฿
-                          </td>
-                        </tr>
-                      ))}
+                      {lineItems.map((item, idx) => {
+                        const subDetail = getItemSubDetail(item);
+                        return (
+                          <tr key={idx} className="hover:bg-slate-50 transition">
+                            <td className="px-3.5 py-2 text-slate-400 font-mono">{idx + 1}</td>
+                            <td className="px-3.5 py-2 text-slate-900 font-semibold">
+                              <div>{item.category || item.name || "-"}</div>
+                              {subDetail && (
+                                <div className="sm:hidden text-[11px] text-emerald-800 font-medium mt-0.5">
+                                  {subDetail}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-3.5 py-2 text-slate-800">
+                              {subDetail ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-50 text-emerald-900 border border-emerald-200 whitespace-nowrap">
+                                  {subDetail}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400">-</span>
+                              )}
+                            </td>
+                            <td className="px-3.5 py-2 text-slate-600 whitespace-nowrap">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded border text-[11px] font-medium whitespace-nowrap ${getCostCodeBadgeStyle(item.categoryType || item.type || "101 เตรียมงาน")}`}>
+                                {item.categoryType || item.type || "101 เตรียมงาน"}
+                              </span>
+                            </td>
+                            <td className="px-3.5 py-2 text-right font-mono font-bold text-slate-950 whitespace-nowrap">
+                              {money(toNumber(item.amount ?? item.price ?? item.total))} ฿
+                            </td>
+                          </tr>
+                        );
+                      })}
                       <tr className="bg-slate-100 font-black border-t-2 border-slate-300">
-                        <td colSpan={3} className="px-3.5 py-2 text-slate-950 text-xs">รวมยอดสินค้า ({lineItems.length} รายการ)</td>
-                        <td className="px-3.5 py-2 text-right text-slate-950 text-xs font-black">
+                        <td colSpan={4} className="px-3.5 py-2 text-slate-950 text-xs">รวมยอดสินค้า ({lineItems.length} รายการ)</td>
+                        <td className="px-3.5 py-2 text-right text-slate-950 text-xs font-black whitespace-nowrap">
                           {money(lineItems.reduce((s, i) => s + toNumber(i.amount ?? i.price ?? i.total), 0))} ฿
                         </td>
                       </tr>
@@ -723,9 +829,10 @@ export function BillDetailClient({
                   <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
                     <tr>
                       <th className="px-3.5 py-2 text-left w-10">#</th>
-                      <th className="px-3.5 py-2 text-left">สินค้า / หมวดงาน</th>
-                      <th className="px-3.5 py-2 text-left w-28">ประเภท</th>
-                      <th className="px-3.5 py-2 text-right w-32">จำนวนเงิน</th>
+                      <th className="px-3.5 py-2 text-left min-w-[160px]">สินค้า / หมวดงาน</th>
+                      <th className="px-3.5 py-2 text-left min-w-[140px]">ข้อมูลย่อย / รายการ</th>
+                      <th className="px-3.5 py-2 text-left min-w-[170px] whitespace-nowrap">ประเภท</th>
+                      <th className="px-3.5 py-2 text-right w-32 whitespace-nowrap">จำนวนเงิน</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200">
@@ -733,20 +840,28 @@ export function BillDetailClient({
                       <td className="px-3.5 py-2 text-slate-400 font-mono">1</td>
                       <td className="px-3.5 py-2 text-slate-900 font-semibold">
                         <div>{productOrWork !== "-" ? productOrWork : (category || "รายการค่าใช้จ่าย")}</div>
-                        {itemName && <div className="text-[11px] text-slate-500 font-normal mt-0.5">{itemName}</div>}
                       </td>
-                      <td className="px-3.5 py-2 text-slate-600">
-                        <span className={`px-2 py-0.5 rounded border text-[11px] font-medium ${getCostCodeBadgeStyle(category)}`}>
+                      <td className="px-3.5 py-2">
+                        {itemName || toolName || carPlate ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-50 text-emerald-900 border border-emerald-200 whitespace-nowrap">
+                            {itemName || toolName || carPlate}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-3.5 py-2 text-slate-600 whitespace-nowrap">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded border text-[11px] font-medium whitespace-nowrap ${getCostCodeBadgeStyle(category)}`}>
                           {category}
                         </span>
                       </td>
-                      <td className="px-3.5 py-2 text-right font-mono font-bold text-slate-950">
+                      <td className="px-3.5 py-2 text-right font-mono font-bold text-slate-950 whitespace-nowrap">
                         {money(total)} ฿
                       </td>
                     </tr>
                     <tr className="bg-slate-100 font-black border-t-2 border-slate-300">
-                      <td colSpan={3} className="px-3.5 py-2 text-slate-950 text-xs">ยอดเงินรวมทั้งสิ้น</td>
-                      <td className="px-3.5 py-2 text-right text-slate-950 text-sm font-black">{money(total)} ฿</td>
+                      <td colSpan={4} className="px-3.5 py-2 text-slate-950 text-xs">ยอดเงินรวมทั้งสิ้น</td>
+                      <td className="px-3.5 py-2 text-right text-slate-950 text-sm font-black whitespace-nowrap">{money(total)} ฿</td>
                     </tr>
                   </tbody>
                 </table>

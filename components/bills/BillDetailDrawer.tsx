@@ -158,7 +158,21 @@ export function BillDetailDrawer({
     }
   }
 
-  const lineItems = useMemo<Array<{ category?: string; categoryType?: string; amount?: string | number; price?: string | number; total?: string | number; name?: string; type?: string; storeGroup?: string }>>(() => {
+  const lineItems = useMemo<Array<{
+    category?: string;
+    categoryType?: string;
+    amount?: string | number;
+    price?: string | number;
+    total?: string | number;
+    name?: string;
+    type?: string;
+    storeGroup?: string;
+    subItem?: string;
+    detail?: string;
+    toolName?: string;
+    vehiclePlate?: string;
+    [key: string]: any;
+  }>>(() => {
     if (!bill) return [];
     const raw = bill.items || (bill.data as any)?.items || (bill as any)["รายการสินค้า"] || (bill as any).line_items;
     if (Array.isArray(raw) && raw.length > 0) return raw;
@@ -170,6 +184,19 @@ export function BillDetailDrawer({
     }
     return [];
   }, [bill]);
+
+  const getItemSubDetail = (item: any): string => {
+    return String(
+      item?.subItem ||
+      item?.detail ||
+      item?.toolName ||
+      item?.vehiclePlate ||
+      item?.["รายการ"] ||
+      item?.["รายละเอียด"] ||
+      item?.["sub_category"] ||
+      ""
+    ).trim();
+  };
 
   const lineItemsTotal = useMemo(() => {
     return lineItems.reduce((s, i) => s + toNumber(i.amount ?? i.price ?? i.total), 0);
@@ -363,8 +390,17 @@ export function BillDetailDrawer({
                 </div>
 
                 <div>
-                  <span className="text-xs text-slate-400 block">รายการ:</span>
-                  <span className="text-slate-800 block mt-0.5">{String(bill["รายการ"] || "-")}</span>
+                  <span className="text-xs text-slate-400 block">รายการ / ข้อมูลย่อย:</span>
+                  {(() => {
+                    const subs = lineItems.length > 0
+                      ? Array.from(new Set(lineItems.map(getItemSubDetail).filter(Boolean))).join(", ")
+                      : String(bill["รายการ"] || "-");
+                    return (
+                      <span className="text-slate-800 font-medium block mt-0.5">
+                        {subs || "-"}
+                      </span>
+                    );
+                  })()}
                 </div>
 
                 <div>
@@ -457,30 +493,43 @@ export function BillDetailDrawer({
                                 <tr>
                                   <th className="px-3 py-1.5 text-left w-8">#</th>
                                   <th className="px-3 py-1.5 text-left">สินค้า / หมวดงาน</th>
+                                  <th className="px-3 py-1.5 text-left">ข้อมูลย่อย</th>
                                   <th className="px-3 py-1.5 text-left w-24">ประเภท</th>
                                   <th className="px-3 py-1.5 text-right w-28">จำนวนเงิน</th>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-100">
-                                {group.items.map((item, idx) => (
-                                  <tr key={idx} className="hover:bg-slate-50/50">
-                                    <td className="px-3 py-2 text-slate-400 font-mono">{idx + 1}</td>
-                                    <td className="px-3 py-2 font-medium text-slate-900">{item.category || item.name || "-"}</td>
-                                    <td className="px-3 py-2 text-slate-600">
-                                      {(() => {
-                                        const cat = String(item.categoryType || item.type || item.category || "101 เตรียมงาน").trim();
-                                        return (
-                                          <span className={`px-1.5 py-0.5 rounded border text-[10px] ${getCostCodeBadgeStyle(cat)}`}>
-                                            {cat}
+                                {group.items.map((item, idx) => {
+                                  const subDetail = getItemSubDetail(item);
+                                  return (
+                                    <tr key={idx} className="hover:bg-slate-50/50">
+                                      <td className="px-3 py-2 text-slate-400 font-mono">{idx + 1}</td>
+                                      <td className="px-3 py-2 font-medium text-slate-900">{item.category || item.name || "-"}</td>
+                                      <td className="px-3 py-2 text-slate-800">
+                                        {subDetail ? (
+                                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-900 border border-emerald-200">
+                                            {subDetail}
                                           </span>
-                                        );
-                                      })()}
-                                    </td>
-                                    <td className="px-3 py-2 text-right font-mono font-semibold text-slate-900">
-                                      {money(toNumber(item.amount))}
-                                    </td>
-                                  </tr>
-                                ))}
+                                        ) : (
+                                          <span className="text-slate-400">-</span>
+                                        )}
+                                      </td>
+                                      <td className="px-3 py-2 text-slate-600">
+                                        {(() => {
+                                          const cat = String(item.categoryType || item.type || item.category || "101 เตรียมงาน").trim();
+                                          return (
+                                            <span className={`px-1.5 py-0.5 rounded border text-[10px] ${getCostCodeBadgeStyle(cat)}`}>
+                                              {cat}
+                                            </span>
+                                          );
+                                        })()}
+                                      </td>
+                                      <td className="px-3 py-2 text-right font-mono font-semibold text-slate-900">
+                                        {money(toNumber(item.amount))}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
                               </tbody>
                             </table>
                           </div>
@@ -505,30 +554,43 @@ export function BillDetailDrawer({
                           <tr>
                             <th className="px-3 py-1.5 text-left w-8">#</th>
                             <th className="px-3 py-1.5 text-left">สินค้า / หมวดงาน</th>
+                            <th className="px-3 py-1.5 text-left">ข้อมูลย่อย</th>
                             <th className="px-3 py-1.5 text-left w-24">ประเภท</th>
                             <th className="px-3 py-1.5 text-right w-28">จำนวนเงิน</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {lineItems.map((item, idx) => (
-                            <tr key={idx} className="hover:bg-slate-50/50">
-                              <td className="px-3 py-2 text-slate-400 font-mono">{idx + 1}</td>
-                              <td className="px-3 py-2 font-medium text-slate-900">{item.category || item.name || "-"}</td>
-                              <td className="px-3 py-2 text-slate-600">
-                                {(() => {
-                                  const cat = String(item.categoryType || item.type || item.category || "101 เตรียมงาน").trim();
-                                  return (
-                                    <span className={`px-1.5 py-0.5 rounded border text-[10px] ${getCostCodeBadgeStyle(cat)}`}>
-                                      {cat}
+                          {lineItems.map((item, idx) => {
+                            const subDetail = getItemSubDetail(item);
+                            return (
+                              <tr key={idx} className="hover:bg-slate-50/50">
+                                <td className="px-3 py-2 text-slate-400 font-mono">{idx + 1}</td>
+                                <td className="px-3 py-2 font-medium text-slate-900">{item.category || item.name || "-"}</td>
+                                <td className="px-3 py-2 text-slate-800">
+                                  {subDetail ? (
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-900 border border-emerald-200">
+                                      {subDetail}
                                     </span>
-                                  );
-                                })()}
-                              </td>
-                              <td className="px-3 py-2 text-right font-mono font-semibold text-slate-900">
-                                {money(toNumber(item.amount))}
-                              </td>
-                            </tr>
-                          ))}
+                                  ) : (
+                                    <span className="text-slate-400">-</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 text-slate-600">
+                                  {(() => {
+                                    const cat = String(item.categoryType || item.type || item.category || "101 เตรียมงาน").trim();
+                                    return (
+                                      <span className={`px-1.5 py-0.5 rounded border text-[10px] ${getCostCodeBadgeStyle(cat)}`}>
+                                        {cat}
+                                      </span>
+                                    );
+                                  })()}
+                                </td>
+                                <td className="px-3 py-2 text-right font-mono font-semibold text-slate-900">
+                                  {money(toNumber(item.amount))}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
