@@ -106,6 +106,7 @@ const LABOR_SUB_BUDGET_MAP: Record<string, string> = {
   "221": "งบไม่เกินค่าแรง_221",
   "222": "งบไม่เกินค่าแรง_222",
   "223": "งบไม่เกินค่าแรง_223",
+  "603": "งบไม่เกินค่าแรง_603",
   "301": "งบไม่เกินพนักงาน",
 };
 
@@ -157,7 +158,7 @@ function getCategoryBudgetField(cat: string): string {
   if (isToolCost(cat)) return "งบไม่เกินเครื่องมือ";
   if (isStaffCost(cat)) return "งบไม่เกินพนักงาน";
   if (isLaborCost(cat)) {
-    const codeMatch = cat.match(/^(20[1-9]|21[0-9]|22[0-3])/);
+    const codeMatch = cat.match(/^(20[1-9]|21[0-9]|22[0-3]|603)/);
     if (codeMatch && LABOR_SUB_BUDGET_MAP[codeMatch[1]]) {
       return LABOR_SUB_BUDGET_MAP[codeMatch[1]];
     }
@@ -253,7 +254,7 @@ export function checkCategoryBudgetCap(
   // 1. หมวดค่าแรง / ผู้รับเหมา (201 - 223)
   const isLabor = isLaborCost(categoryVal) || vendorType === "ผู้รับเหมา";
   if (isLabor) {
-    const codeMatch = categoryVal.match(/^(20[1-9]|21[0-9]|22[0-3])/);
+    const codeMatch = categoryVal.match(/^(20[1-9]|21[0-9]|22[0-3]|603)/);
     const subCode = codeMatch ? codeMatch[1] : "";
     const specificField = subCode ? LABOR_SUB_BUDGET_MAP[subCode] : "";
 
@@ -487,9 +488,9 @@ export function checkCategoryBudgetCap(
         isMatch = Boolean(isToolCost(bCat) || toNumber(b["เครื่องมือ"]) > 0 || (bProd && isToolProduct(bProd)) || (b["ชื่อเครื่องมือ"] && String(b["ชื่อเครื่องมือ"]).trim() !== ""));
         if (isMatch) matchedAmt = toNumber(b["เครื่องมือ"]) > 0 ? toNumber(b["เครื่องมือ"]) : toNumber(b["ยอดเงิน"] || 0);
       } else if (targetBudgetField === "งบไม่เกินอื่นๆ" || targetBudgetField === "งบไม่เกินดำเนินการ") {
-        isMatch = Boolean(
-          isOtherExpense(bCat) || toNumber(b["อื่นๆ"]) > 0 ||
-          (bProd && (bProd === "200 ดำเนินการ(อื่นๆ)" || bProd.includes("ดำเนินการ") || bProd.startsWith("200") || bProd.startsWith("123") || bProd.startsWith("223")))
+        isMatch = !bIsContractor && !bCat.startsWith("223") && Boolean(
+          (isOtherExpense(bCat) && !bCat.startsWith("223")) || toNumber(b["อื่นๆ"]) > 0 ||
+          (bProd && (bProd === "200 ดำเนินการ(อื่นๆ)" || bProd.includes("ดำเนินการ") || bProd.startsWith("200") || bProd.startsWith("123")))
         );
         if (isMatch) matchedAmt = toNumber(b["อื่นๆ"]) > 0 ? toNumber(b["อื่นๆ"]) : toNumber(b["ยอดเงิน"] || 0);
       } else {

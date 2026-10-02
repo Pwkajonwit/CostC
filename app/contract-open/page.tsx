@@ -1,6 +1,6 @@
 import { ContractOpenDashboardClient } from "@/components/dashboards/ContractOpenDashboardClient";
 import { TABLES } from "@/lib/config";
-import { hydrateContractRows } from "@/lib/formulas";
+import { hydrateContractRows, compareContractRows } from "@/lib/formulas";
 import { getRows } from "@/lib/db";
 import { getViewColumns } from "@/lib/views";
 import { getFormPayload } from "@/lib/form";
@@ -35,6 +35,8 @@ export default async function ContractOpenPage() {
     dataRows: yearFilteredDataRows,
     targetYear: isNaN(targetYearNum as number) ? undefined : targetYearNum,
   });
+
+  hydratedRows.sort((a, b) => compareContractRows(a, b, true));
 
   const fallback = hydratedRows[0] ? Object.keys(hydratedRows[0]).filter((column) => !column.startsWith("_")) : [];
   const columns = getViewColumns("เปิดจ้าง", fallback);

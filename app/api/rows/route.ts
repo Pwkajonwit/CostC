@@ -13,6 +13,7 @@ import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 import { getDbTableName, getNextBillSequence, syncContractWorkPaidAmount } from "@/lib/supabase/supabase-db";
 import { extractMemberPermissions, type UserPermissions } from "@/lib/user-permissions";
 import { autoClearPettyCashOnSubBillApproval, isSubBill } from "@/lib/petty-cash/petty-cash-clear";
+import { isLaborCost, isMaterialCost, isStaffCost, isOtherExpense } from "@/lib/cost-codes";
 import type { SheetRow } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -232,6 +233,26 @@ export async function POST(request: NextRequest) {
       if (!row["สถานะ"] || String(row["สถานะ"]).trim() === "") {
         row["สถานะ"] = "เปิดแล้ว";
       }
+    }
+    const isContractWork = tableName === TABLES.CONTRACT_WORK || tableName === "Contract_work" || tableName === "contract_works" || tableName === "ContractWork";
+    if (isContractWork) {
+      let rawConwork = String(row["id_Conwork"] || row.id || "").trim();
+      const cwRows = await getRows(TABLES.CONTRACT_WORK, 15_000).catch(() => []);
+      const existingIds = new Set(cwRows.map(r => String(r.id_Conwork || r.id || "").trim().toUpperCase()));
+
+      // If not provided, or invalid, or ALREADY EXISTS (someone else saved while the form was open):
+      if (!rawConwork || !/^CW\s*\d+$/i.test(rawConwork) || rawConwork.toUpperCase().startsWith("CT") || existingIds.has(rawConwork.toUpperCase())) {
+        const maxNum = cwRows.reduce((max, r) => {
+          const val = String(r.id_Conwork || r.id || "").trim();
+          const match = val.match(/^CW\s*(\d+)$/i);
+          return Math.max(max, match ? Number(match[1]) : 0);
+        }, 0);
+        rawConwork = `CW${maxNum + 1}`;
+        row["id_Conwork"] = rawConwork;
+      } else {
+        row["id_Conwork"] = rawConwork.toUpperCase().replace(/\s+/g, "");
+      }
+      row.id = row["id_Conwork"];
     }
     sanitizeBySchema(row, tableName);
     validateRequiredBySchema(row, tableName);
@@ -532,6 +553,15 @@ export async function PATCH(request: NextRequest) {
           : tableName === TABLES.DATA
             ? await applyBillFormulas(values)
             : values;
+
+    if (isContractWork) {
+      if (output["id_Conwork"] && (!/^CW\s*\d+$/i.test(String(output["id_Conwork"]).trim()) || String(output["id_Conwork"]).toUpperCase().startsWith("CT"))) {
+        delete output["id_Conwork"];
+      }
+      if (output.id && String(output.id).toUpperCase().startsWith("CT")) {
+        delete output.id;
+      }
+    }
 
     const isBillTable = tableName === TABLES.DATA || tableName === "Data" || tableName === "bills";
     let isApprovedSubBill = false;
@@ -841,7 +871,8 @@ function validateRequiredBySchema(row: SheetRow, tableName: string) {
         category.startsWith("3.") ||
         category.includes("พนักงาน") ||
         category.startsWith("8.") ||
-        category.includes("อื่นๆ")
+        category === "อื่นๆ" ||
+        category.startsWith("123")
       ) {
         return false;
       }
@@ -854,11 +885,31 @@ function validateRequiredBySchema(row: SheetRow, tableName: string) {
 
 function isFieldVisible(field: ReturnType<typeof getFormSchema>[number], row: SheetRow) {
   const vendorType = String(row["ร้านค้า/ผู้รับเหมา"] ?? row.vendor_type ?? "").trim();
+  const category = String(row["ประเภท"] ?? row.category ?? "").trim();
+
   if (field.name === "statusค่าแรง") {
     return vendorType === "ผู้รับเหมา";
   }
   if (field.name === "ผู้รับเหมา" || field.name === "ค่าแรงคงเหลือ") {
     return vendorType === "ผู้รับเหมา";
+  }
+  if (field.name === "ร้านค้า") {
+    return vendorType === "ร้านค้า";
+  }
+  if (field.name === "ค่าแรง") {
+    return vendorType === "ผู้รับเหมา" || isLaborCost(category);
+  }
+  if (field.name === "อื่นๆ") {
+    return vendorType === "ร้านค้า" && isOtherExpense(category);
+  }
+  if (field.name === "ค่าของ") {
+    return vendorType === "ร้านค้า" && (!category || isMaterialCost(category));
+  }
+  if (field.name === "พนักงาน" || field.name === "ชื่อพนักงาน") {
+    return vendorType === "พนักงาน" || isStaffCost(category);
+  }
+  if (field.name === "หัก") {
+    return vendorType === "ผู้รับเหมา" || isLaborCost(category);
   }
   if (field.name === "วันได้บิล") {
     const hasVat = isVatActive(row["vat"]);

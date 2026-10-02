@@ -87,14 +87,30 @@ export const LABOR_200_CODES = [
   { code: "220", name: "ภูมิทัศน์" },
   { code: "221", name: "แก้ไขเก็บงาน" },
   { code: "222", name: "ตั้งนั่งร้าน" },
-  { code: "223", name: "ค่าบริการ(อื่นๆ)" }
+  { code: "223", name: "ค่าบริการ(อื่นๆ)" },
+  { code: "603", name: "เช่าเครื่องจักร" }
 ] as const;
 
 // Sub-items สำหรับ 223 ค่าบริการ(อื่นๆ)
 export const SUB_ITEMS_223 = [
   "1 ออกแบบ",
   "2 เซ็นรับรอง",
-  "3 เงินพิเศษ"
+  "3 เงินพิเศษ",
+  "4 ควบคุมงาน",
+  "5 ตรวจแบบรายการ",
+  "6 เขียนแบบก่อสร้าง"
+];
+
+// Sub-items สำหรับ 603 เช่าเครื่องจักร
+export const SUB_ITEMS_603 = [
+  "PC30",
+  "รถ 6 ล้อ",
+  "รถ 10 ล้อ",
+  "รถเฮี๊ยบ",
+  "รถเกรด",
+  "รถบด",
+  "รถกระเช้า",
+  "รถเครน"
 ];
 
 // 4. หมวด 300: พนักงาน
@@ -187,8 +203,8 @@ export function isMaterialCost(cat: string = ""): boolean {
 export function isLaborCost(cat: string = ""): boolean {
   const c = String(cat).trim();
   if (c === "2.ค่าแรง" || c === "ค่าแรง") return true;
-  // 201 - 223
-  if (/^2(?:0[1-9]|1[0-9]|2[0-3])\b/.test(c)) return true;
+  // 201 - 223 และ 603 เช่าเครื่องจักร
+  if (/^2(?:0[1-9]|1[0-9]|2[0-3])\b/.test(c) || /^603\b/.test(c) || c.includes("เช่าเครื่องจักร")) return true;
   return false;
 }
 
@@ -345,6 +361,9 @@ export function getCostCodeBudgetField(codeOrName: string): string {
   if (clean.startsWith("121") || clean.includes("แก้ไขเก็บงาน")) return "งบไม่เกินแก้ไขเก็บงาน";
   if (clean.startsWith("122") || clean.includes("ตั้งนั่งร้าน") || clean.includes("นั่งร้าน")) return "งบไม่เกินตั้งนั่งร้าน";
   if (clean.startsWith("123") || clean.includes("ดำเนินการ") || clean.includes("อื่นๆ")) return "งบไม่เกินดำเนินการ";
+
+  // 603 เช่าเครื่องจักร (ผู้รับเหมา)
+  if (clean.startsWith("603") || clean.includes("เช่าเครื่องจักร")) return "งบไม่เกินค่าแรง_603";
 
   // 200 ค่าแรง
   if (clean.startsWith("2") || clean.includes("ค่าแรง")) return "งบไม่เกินค่าแรง";

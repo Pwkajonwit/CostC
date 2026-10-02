@@ -1,5 +1,5 @@
 import { TABLE_KEYS, TABLES } from "@/lib/config";
-import { hydrateContractRows } from "@/lib/formulas";
+import { hydrateContractRows, compareContractRows } from "@/lib/formulas";
 import { getRows, getSystemOptions, listRefOptions } from "@/lib/db";
 import { getFormSchema, getRefRowColumns } from "@/lib/schemas";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
@@ -68,6 +68,7 @@ async function listHydratedContractOptions(column: FieldSchema, preloadedRows?: 
 
   return contractRows
     .filter(row => row[keyColumn] !== "" && row[keyColumn] !== undefined && row[keyColumn] !== null)
+    .sort((a, b) => compareContractRows(a, b, true))
     .slice(0, 1000)
     .map(row => {
       const idVal = String(row[keyColumn]);
@@ -304,7 +305,7 @@ export async function getInitialValues(tableName: string): Promise<SheetRow> {
     if (column.initialValue === "nextContractorId") values[column.name] = await nextPrefixedId(TABLES.CONTRACTOR, "id_Contractor", "CT", 100);
     if (column.initialValue === "nextPeopleId") values[column.name] = await nextPeopleId();
     if (column.initialValue === "nextCarId") values[column.name] = await nextPrefixedId(TABLES.CAR, "id_car", "CAR", 100);
-    if (column.initialValue === "nextCustomerId") values[column.name] = await nextPrefixedId(TABLES.CUSTOMER, "id_cus", "C", 100);
+    if (column.initialValue === "nextCustomerId") values[column.name] = await nextPrefixedId(TABLES.CUSTOMER, "id_cus", "ON", 100);
     if (column.initialValue === "nextCompanyId") values[column.name] = await nextPrefixedId(TABLES.COMPANY, "id_Company", "CO", 100);
     if (column.initialValue === "nextLoanId") values[column.name] = await nextPrefixedId(TABLES.LOAN, "id", "L", 100);
     if (column.initialValue === "nextPettyCashId") values[column.name] = await nextPrefixedId(TABLES.PETTY_CASH, "id_petty_cash", "PC", 100);
@@ -354,8 +355,9 @@ async function nextWorkId() {
 async function nextContractWorkId() {
   const rows = await getRows(TABLES.CONTRACT_WORK, 15_000);
   const next = rows.reduce((max, row) => {
-    const value = String(row.id_Conwork || "");
-    const match = value.match(/(\d+)$/);
+    const value = String(row.id_Conwork || row.id || "").trim();
+    // Only match IDs explicitly starting with CW (e.g. CW1, CW168)
+    const match = value.match(/^CW\s*(\d+)$/i);
     return Math.max(max, match ? Number(match[1]) : 0);
   }, 0) + 1;
   return `CW${next}`;
@@ -375,9 +377,10 @@ async function nextBankId() {
 
 async function nextPrefixedId(tableName: string, columnName: string, prefix: string, minimum = 0) {
   const rows = await getRows(tableName, 15_000);
+  const prefixRegex = new RegExp(`^${prefix}\\s*(\\d+)$`, "i");
   const next = rows.reduce((max, row) => {
-    const value = String(row[columnName] || "");
-    const match = value.match(/(\d+)$/);
+    const value = String(row[columnName] || row.id || "").trim();
+    const match = value.match(prefixRegex);
     return Math.max(max, match ? Number(match[1]) : 0);
   }, minimum) + 1;
   return `${prefix}${next}`;

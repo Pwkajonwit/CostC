@@ -283,6 +283,86 @@ export default async function ContractDetailPage({ params }: ContractDetailPageP
           />
         </div>
       </div>
+
+      {/* Other Contracts of this Contractor */}
+      {contractorQuota?.contractsSummary && contractorQuota.contractsSummary.length > 0 && (
+        <div className="border border-slate-200 rounded-md bg-white overflow-hidden shadow-2xs">
+          <div className="px-3.5 py-2.5 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-xs font-semibold text-slate-800">
+                สัญญาจ้างทั้งหมดของผู้รับเหมารายนี้ ({contractorQuota.contractorName})
+              </h2>
+              <p className="text-[11px] text-slate-500">
+                ประวัติสัญญาจ้างทั้งสิ้น {contractorQuota.contractCount} สัญญาในปี {contractorQuota.targetYear}
+              </p>
+            </div>
+            <span className="text-[11px] text-slate-500">
+              ยอดเงินจ้างรวม: <strong className="text-slate-800 font-semibold">{money(contractorQuota.contractsSummary.reduce((s, c) => s + (c.hireAmount || 0), 0))} ฿</strong>
+            </span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-slate-100/75 text-slate-600 font-medium border-b border-slate-200">
+                <tr>
+                  <th className="px-3 py-2">รหัสสัญญา</th>
+                  <th className="px-3 py-2">วันที่</th>
+                  <th className="px-3 py-2">โครงการ</th>
+                  <th className="px-3 py-2 text-right">ยอดเงินจ้าง</th>
+                  <th className="px-3 py-2 text-right">เบิกจ่ายแล้ว</th>
+                  <th className="px-3 py-2 text-right">คงเหลือ</th>
+                  <th className="px-3 py-2 text-center">สถานะ</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {contractorQuota.contractsSummary.map(c => {
+                  const isCurrent = c.id.toUpperCase() === decodedContractId.toUpperCase();
+                  const isFullyPaid = c.hireAmount > 0 && c.remainingAmount <= 0;
+                  return (
+                    <tr
+                      key={c.id}
+                      className={`hover:bg-slate-50 transition-colors ${isCurrent ? "bg-amber-50/70 font-medium" : ""}`}
+                    >
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        <Link
+                          href={`/contract-open/${c.id}`}
+                          className="text-sky-600 hover:text-sky-800 hover:underline font-semibold inline-flex items-center gap-1.5"
+                        >
+                          {c.id}
+                          {isCurrent && (
+                            <span className="px-1.5 py-0.2 rounded text-[10px] bg-amber-200 text-amber-900 font-normal">
+                              กำลังดู
+                            </span>
+                          )}
+                        </Link>
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-slate-600">{c.date || "-"}</td>
+                      <td className="px-3 py-2 text-slate-700 max-w-[220px] truncate" title={c.projectName}>
+                        {c.projectId ? `${c.projectId} - ` : ""}{c.projectName || "-"}
+                      </td>
+                      <td className="px-3 py-2 text-right font-medium text-slate-800">{money(c.hireAmount)}</td>
+                      <td className="px-3 py-2 text-right text-emerald-700">{money(c.paidAmount)}</td>
+                      <td className={`px-3 py-2 text-right font-medium ${c.remainingAmount <= 0 ? "text-slate-400" : "text-amber-700"}`}>
+                        {money(c.remainingAmount)}
+                      </td>
+                      <td className="px-3 py-2 text-center whitespace-nowrap">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                          isFullyPaid
+                            ? "bg-emerald-100 text-emerald-800"
+                            : c.paidAmount > 0
+                            ? "bg-sky-100 text-sky-800"
+                            : "bg-slate-100 text-slate-600"
+                        }`}>
+                          {isFullyPaid ? "จ่ายครบแล้ว" : c.paidAmount > 0 ? "เบิกแล้วบางส่วน" : "ยังไม่เบิก"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

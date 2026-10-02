@@ -319,16 +319,24 @@ export function calculateContractorQuotaDetail(
     for (const b of billRows) {
       if (!isCommittedBill(b)) continue;
       if (!isPaidBillStrict(b)) continue;
-      const bConwork = String(b.conwork_id || "").trim();
-      const bContractor = String(b["ผู้รับเหมา"] || "").trim();
-      const bVendor = String(b["ร้าน/บุคคล"] || "").trim();
-      const bProj = String(b["ID Project"] || "").trim();
-      const cProj = String(c["ID Project"] || "").trim();
+      const bConwork = String(b._rawContractor || b.data?._rawContractor || b.conwork_id || b.data?.id_Conwork || "").trim();
+      const bContractor = String(b["ผู้รับเหมา"] || b.data?.["ผู้รับเหมา"] || b.contractor_id || "").trim();
+      const bVendor = String(b["ร้าน/บุคคล"] || b.vendor_or_person || "").trim();
+      const bProj = String(b["ID Project"] || b.project_id || "").trim();
+      const cProj = String(c["ID Project"] || c.project_id || "").trim();
 
-      const matchesThisContract =
-        (conworkId && bConwork === conworkId) ||
-        (conworkId && bConwork.startsWith(conworkId)) ||
-        (bProj && cProj && bProj === cProj && (bContractor === cNick || bVendor === cNick || bContractor === cFull || bVendor === cFull));
+      // If bill explicitly specifies a contract ID (e.g. CW116, CW160), match strictly on that contract
+      const explicitCw = [bConwork, bContractor, bVendor].map(r => r.match(/cw\d+|ct\d+/i)?.[0]?.toUpperCase()).find(Boolean);
+      let matchesThisContract = false;
+      if (explicitCw) {
+        matchesThisContract = Boolean(conworkId && conworkId.toUpperCase() === explicitCw);
+      } else if (bProj && cProj && bProj === cProj) {
+        matchesThisContract = Boolean(
+          (cNick && (bContractor === cNick || bVendor === cNick)) ||
+          (cFull && (bContractor === cFull || bVendor === cFull)) ||
+          (cId && (bContractor === cId || bVendor === cId))
+        );
+      }
 
       if (matchesThisContract) {
         contractPaid += toNumber(b["ยอดโอน"] || b.transfer_amount || b["ยอดเงิน"] || b.amount || b["ค่าแรง"] || b.labor_cost);

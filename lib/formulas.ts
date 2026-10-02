@@ -220,6 +220,57 @@ export async function hydrateContractRows(
 
   return rows.map(row => applyContractFormulasWithFastContext(row, { projectMap, contractorMap, dataRows: context.dataRows }));
 }
+
+export function parseContractCode(val: unknown): { prefix: string; num: number; suffix: string; raw: string } {
+  const str = String(val || "").trim();
+  if (!str) return { prefix: "", num: 0, suffix: "", raw: "" };
+
+  const match = str.match(/^([a-zA-Z_\-\s]*?)(\d+)(.*)$/);
+  if (match) {
+    const prefix = (match[1] || "").toUpperCase();
+    const num = parseInt(match[2], 10);
+    const suffix = match[3] || "";
+    return { prefix, num, suffix, raw: str };
+  }
+  return { prefix: str.toUpperCase(), num: 0, suffix: "", raw: str };
+}
+
+export function compareContractRows(a: SheetRow, b: SheetRow, sortDesc = true): number {
+  const codeA = a["id_Conwork"] || a.id || a.id_conwork || "";
+  const codeB = b["id_Conwork"] || b.id || b.id_conwork || "";
+
+  const pA = parseContractCode(codeA);
+  const pB = parseContractCode(codeB);
+
+  let diff = 0;
+
+  // 1. Primary: Compare numeric part if both have numeric parts and same prefix (e.g. CW001 vs CW168, CW9 vs CW168)
+  if (pA.num > 0 && pB.num > 0 && pA.prefix === pB.prefix) {
+    diff = pA.num - pB.num;
+  } else if (pA.raw && pB.raw) {
+    diff = pA.raw.localeCompare(pB.raw, undefined, { numeric: true, sensitivity: "base" });
+  }
+
+  // 2. Secondary fallback: Date comparison (if code is identical or missing)
+  if (diff === 0) {
+    const dateA = String(a["วันที่"] || a["ว/ด/ป"] || a.work_date || a.created_at || "");
+    const dateB = String(b["วันที่"] || b["ว/ด/ป"] || b.work_date || b.created_at || "");
+    if (dateA && dateB) {
+      diff = dateA.localeCompare(dateB);
+    }
+  }
+
+  // 3. Tertiary fallback: sheetRow
+  if (diff === 0) {
+    const rowA = Number(a._sheetRow || 0);
+    const rowB = Number(b._sheetRow || 0);
+    if (rowA && rowB) {
+      diff = rowA - rowB;
+    }
+  }
+
+  return sortDesc ? -diff : diff;
+}
 async function getContractFormulaContext(preloadedContext?: { projects?: SheetRow[]; contractors?: SheetRow[]; dataRows?: SheetRow[]; targetYear?: number }) {
   const [projects, contractors, dataRows] = await Promise.all([
     preloadedContext?.projects ? Promise.resolve(preloadedContext.projects) : getRows(TABLES.PROJECT, 60_000).catch(() => []),
@@ -296,12 +347,16 @@ function computePaidForContract(contractRow: SheetRow, dataRows: SheetRow[]): nu
 
     let isMatch = false;
 
-    // 1. Match on id_Conwork ID (e.g. "CW1001")
-    if (cConworkId && (bContractorRef === cConworkId || bVendorRef === cConworkId || bContractorRef.includes(cConworkId) || bVendorRef.includes(cConworkId))) {
-      isMatch = true;
-    }
-    // 2. Match by Project ID + Contractor ID / Name
-    else if (cProjectId && bProjectId === cProjectId) {
+    // Check if this bill explicitly references a specific contract ID (e.g. CW116, CW160)
+    const rawContractorVal = String(b._rawContractor || b.data?._rawContractor || b.conwork_id || b.data?.id_Conwork || "").trim();
+    const allRefs = [rawContractorVal, bContractorRef, bVendorRef];
+    const explicitCw = allRefs.map(r => r.match(/cw\d+|ct\d+/i)?.[0]?.toUpperCase()).find(Boolean);
+
+    if (explicitCw) {
+      // 1. Strict match on contract ID
+      isMatch = Boolean(cConworkId && cConworkId.toUpperCase() === explicitCw);
+    } else if (cProjectId && bProjectId === cProjectId) {
+      // 2. Fallback only if no explicit CW ID exists on bill
       if (cContractorId && (bContractorRef === cContractorId || bVendorRef === cContractorId)) {
         isMatch = true;
       } else if (cName && (bContractorRef === cName || bVendorRef === cName || bContractorRef.includes(cName) || bVendorRef.includes(cName))) {

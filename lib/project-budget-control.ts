@@ -78,7 +78,8 @@ export const ALLOCATED_BUDGET_ITEMS: BudgetItemDefinition[] = [
   { code: "220", field: "งบไม่เกินค่าแรง_220", label: "220. ภูมิทัศน์", group: "ค่าแรง (Labor Cost Code)", categoryType: "ค่าแรง", icon: "🌳", matchKeywords: ["220", "ภูมิทัศน์", "จัดสวน", "คนสวน"] },
   { code: "221", field: "งบไม่เกินค่าแรง_221", label: "221. แก้ไขเก็บงาน", group: "ค่าแรง (Labor Cost Code)", categoryType: "ค่าแรง", icon: "🔧", matchKeywords: ["221", "แก้ไขเก็บงาน", "เก็บงาน", "ซ่อมงาน"] },
   { code: "222", field: "งบไม่เกินค่าแรง_222", label: "222. ตั้งนั่งร้าน", group: "ค่าแรง (Labor Cost Code)", categoryType: "ค่าแรง", icon: "🪜", matchKeywords: ["222", "ตั้งนั่งร้าน", "รื้อนั่งร้าน"] },
-  { code: "223", field: "งบไม่เกินค่าแรง_223", label: "223. ค่าบริการ(อื่นๆ)", group: "ค่าแรง (Labor Cost Code)", categoryType: "ค่าแรง", icon: "📁", matchKeywords: ["223", "ค่าบริการ(อื่นๆ)", "ค่าบริการ", "ออกแบบ", "เซ็นรับรอง"] },
+  { code: "223", field: "งบไม่เกินค่าแรง_223", label: "223. ค่าบริการ(อื่นๆ)", group: "ค่าแรง (Labor Cost Code)", categoryType: "ค่าแรง", icon: "📁", matchKeywords: ["223", "ค่าบริการ(อื่นๆ)", "ค่าบริการ", "ออกแบบ", "เซ็นรับรอง", "เงินพิเศษ", "ควบคุมงาน", "ตรวจแบบรายการ", "เขียนแบบก่อสร้าง"] },
+  { code: "603", field: "งบไม่เกินค่าแรง_603", label: "603. เช่าเครื่องจักร", group: "ค่าแรง (Labor Cost Code)", categoryType: "ค่าแรง", icon: "🚜", matchKeywords: ["603", "เช่าเครื่องจักร", "PC30", "รถ 6 ล้อ", "รถ 10 ล้อ", "รถเฮี๊ยบ", "รถเกรด", "รถบด", "รถกระเช้า", "รถเครน", "เครน"] },
 
   // ==========================================
   // พนักงาน (Staff Cost Code) - อยู่ในหมวดค่าแรง
@@ -222,19 +223,19 @@ export function matchesBudgetItem(item: ParsedBillItem, def: BudgetItemDefinitio
     return true;
   }
 
-  // Classification checks to prevent material/labor collision (e.g. 103 เสาเข็ม vs 203 เสาเข็ม)
-  const isLabor = isLaborCost(item.categoryType) || catLower.includes("ค่าแรง") || catLower.startsWith("2");
+  // Classification checks to prevent material/labor collision (e.g. 103 เสาเข็ม vs 203 เสาเข็ม, 503 vs 603)
+  const isLabor = isLaborCost(item.categoryType) || catLower.includes("ค่าแรง") || catLower.startsWith("2") || catLower.startsWith("603") || catLower.includes("เช่าเครื่องจักร");
   const isStaff = isStaffCost(item.categoryType) || catLower.includes("พนักงาน") || catLower.startsWith("301") || catLower.startsWith("3.");
   const isLaborOrStaff = isLabor || isStaff;
   const isFuel = isFuelCost(item.categoryType) || catLower.includes("น้ำมัน");
   const isRepair = isRepairCost(item.categoryType) || catLower.includes("ซ่อมรถ");
-  const isMachine = isMachineCost(item.categoryType) || catLower.includes("เครื่องจักร");
+  const isMachine = !catLower.includes("เช่า") && !itemLower.includes("เช่า") && (isMachineCost(item.categoryType) || (catLower.includes("เครื่องจักร") && !catLower.startsWith("603")));
   const isTool = isToolCost(item.categoryType) || catLower.includes("เครื่องมือ");
 
   // If item is labor or staff, do not match material definitions
   if (isLaborOrStaff && def.categoryType !== "ค่าแรง") return false;
-  // If def is labor, do not match non-labor items unless code/prefix explicitly says 2xx or 3xx
-  if (def.categoryType === "ค่าแรง" && !isLaborOrStaff && !catLower.startsWith("2") && !itemLower.startsWith("2") && !catLower.startsWith("3") && !itemLower.startsWith("3")) return false;
+  // If def is labor, do not match non-labor items unless code/prefix explicitly says 2xx or 3xx or 603
+  if (def.categoryType === "ค่าแรง" && !isLaborOrStaff && !catLower.startsWith("2") && !itemLower.startsWith("2") && !catLower.startsWith("3") && !itemLower.startsWith("3") && !catLower.startsWith("603") && !itemLower.startsWith("603")) return false;
   // If item is distinctly staff, do not match contractor labor (201-223)
   if (isStaff && def.code !== "301") return false;
   // If def is 301 staff, do not match non-staff

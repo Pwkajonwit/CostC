@@ -9,7 +9,7 @@ import { isVatActive, parseDeductPercent, parseCreditDays, parseBillItems } from
 import { appendAuditLog, appendRow, getSystemOptions, invalidateTableCache } from "@/lib/db";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 import { getNextBillSequence, mapSupabaseRowToSheetRow } from "@/lib/supabase/supabase-db";
-import { deriveCategoryFromProduct } from "@/lib/cost-codes";
+import { deriveCategoryFromProduct, isLaborCost, isMaterialCost, isStaffCost, isOtherExpense } from "@/lib/cost-codes";
 import type { SheetRow } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -339,7 +339,8 @@ function validateRequiredBySchema(row: SheetRow, tableName: string) {
         category.startsWith("3.") ||
         category.includes("พนักงาน") ||
         category.startsWith("8.") ||
-        category.includes("อื่นๆ")
+        category === "อื่นๆ" ||
+        category.startsWith("123")
       ) {
         return false;
       }
@@ -352,11 +353,31 @@ function validateRequiredBySchema(row: SheetRow, tableName: string) {
 
 function isFieldVisible(field: ReturnType<typeof getFormSchema>[number], row: SheetRow) {
   const vendorType = String(row["ร้านค้า/ผู้รับเหมา"] ?? row.vendor_type ?? "").trim();
+  const category = String(row["ประเภท"] ?? row.category ?? "").trim();
+
   if (field.name === "statusค่าแรง") {
     return vendorType === "ผู้รับเหมา";
   }
   if (field.name === "ผู้รับเหมา" || field.name === "ค่าแรงคงเหลือ") {
     return vendorType === "ผู้รับเหมา";
+  }
+  if (field.name === "ร้านค้า") {
+    return vendorType === "ร้านค้า";
+  }
+  if (field.name === "ค่าแรง") {
+    return vendorType === "ผู้รับเหมา" || isLaborCost(category);
+  }
+  if (field.name === "อื่นๆ") {
+    return vendorType === "ร้านค้า" && isOtherExpense(category);
+  }
+  if (field.name === "ค่าของ") {
+    return vendorType === "ร้านค้า" && (!category || isMaterialCost(category));
+  }
+  if (field.name === "พนักงาน" || field.name === "ชื่อพนักงาน") {
+    return vendorType === "พนักงาน" || isStaffCost(category);
+  }
+  if (field.name === "หัก") {
+    return vendorType === "ผู้รับเหมา" || isLaborCost(category);
   }
   if (field.name === "วันได้บิล") {
     const hasVat = isVatActive(row["vat"]);

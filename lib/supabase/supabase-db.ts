@@ -562,13 +562,14 @@ export function mapSupabaseRowToSheetRow(dbTable: string, row: Record<string, an
   }
 
   // Assign canonical Supabase entity primary key ID
-  const canonicalId = row.id ??
+  const canonicalId = (dbTable === "contract_works" ? (row.id ?? res["id_Conwork"]) : undefined) ??
+    row.id ??
     res.id ??
     res["ลำดับ"] ??
     res["ID Project"] ??
+    res["id_Conwork"] ??
     res["id_store"] ??
     res["id_Contractor"] ??
-    res["id_Conwork"] ??
     res["รหัสพนักงาน"] ??
     res["id_bank"] ??
     res["id_car"] ??
@@ -910,7 +911,11 @@ export function mapSheetRowToSupabaseRow(tableName: string, row: Record<string, 
     };
   } else if (dbTable === "contract_works") {
     if (row["id_Conwork"] !== undefined || row["id"] !== undefined) {
-      dbRow.id = row["id_Conwork"] ?? row["id"];
+      const candidateId = String(row["id_Conwork"] ?? row["id"] ?? "").trim();
+      // Ensure we NEVER use a contractor ID (CT...) as the contract_works ID
+      if (!candidateId.toUpperCase().startsWith("CT") || candidateId === "") {
+        dbRow.id = candidateId;
+      }
     }
     if (row["id_Contractor"] !== undefined) dbRow.contractor_id = row["id_Contractor"];
     if (row["ID Project"] !== undefined) dbRow.project_id = row["ID Project"];
@@ -1321,24 +1326,30 @@ export async function updateRowInSupabase(tableName: string, keyColumn: string, 
 
   // Determine the true Supabase primary key ID:
   // For master entities, prioritize the entity code (e.g. CT362, PT105, ST101, etc.) over numeric sheetRow numbers
-  const entityCode = patch["รหัสพนักงาน"] ??
-    patch["id_Contractor"] ??
-    patch["id_store"] ??
-    patch["id_bank"] ??
-    patch["id_car"] ??
-    patch["id_cus"] ??
-    patch["id_Company"] ??
-    patch["id_Conwork"] ??
-    patch["ID Project"] ??
-    (keyColumn !== "id" && keyColumn !== "_sheetRow" ? patch[keyColumn] : undefined) ??
-    patch.id;
+  const entityCode = dbTable === "contract_works"
+    ? (patch["id_Conwork"] ?? patch.id)
+    : (patch["รหัสพนักงาน"] ??
+      patch["id_Conwork"] ??
+      patch["id_store"] ??
+      patch["id_bank"] ??
+      patch["id_car"] ??
+      patch["id_cus"] ??
+      patch["id_Company"] ??
+      patch["id_Contractor"] ??
+      patch["ID Project"] ??
+      (keyColumn !== "id" && keyColumn !== "_sheetRow" ? patch[keyColumn] : undefined) ??
+      patch.id);
 
   // For auto-increment tables (bills, tasks, loans), prevent updating primary key id
   if (dbTable === "bills" || dbTable === "tasks" || dbTable === "loans") {
     delete dbPatch.id;
   } else if (entityCode !== undefined && entityCode !== null && String(entityCode).trim() !== "") {
-    // For entity master tables (like master_members), allow updating the ID (e.g. employee code)
-    dbPatch.id = String(entityCode).trim();
+    // For contract_works, never allow setting primary key id to CT...
+    if (dbTable === "contract_works" && String(entityCode).trim().toUpperCase().startsWith("CT")) {
+      delete dbPatch.id;
+    } else {
+      dbPatch.id = String(entityCode).trim();
+    }
   }
 
   // The primary target is the existing record's original ID (keyValue)
@@ -2325,6 +2336,28 @@ export async function insertRowToSupabase(tableName: string, rowData: Record<str
           }
           continue;
         }
+        if (dbTable === "contract_works") {
+          // Concurrency collision protection: NEVER upsert/overwrite existing contract works!
+          // Re-fetch the latest CW and allocate next unique CW number
+          const { data: cwRows } = await supabaseAdmin.from("contract_works").select("id");
+          const maxNum = (cwRows || []).reduce((max, r) => {
+            const match = String(r.id || "").trim().match(/^CW\s*(\d+)$/i);
+            return Math.max(max, match ? Number(match[1]) : 0);
+          }, 0);
+          const freshCw = `CW${maxNum + 1}`;
+          dbRow.id = freshCw;
+          if (dbRow.data && typeof dbRow.data === "object") {
+            dbRow.data["id_Conwork"] = freshCw;
+            dbRow.data.id = freshCw;
+          }
+          res = await supabaseAdmin.from(dbTable).insert(dbRow).select();
+          if (!res.error) {
+            rowData["id_Conwork"] = freshCw;
+            rowData.id = freshCw;
+            break;
+          }
+          continue;
+        }
         res = await supabaseAdmin.from(dbTable).upsert(dbRow).select();
         if (!res.error) break;
       }
@@ -2931,9 +2964,12 @@ export async function syncContractWorkPaidAmount(conworkIdOrRef: string, project
       const bContractor = String(d["ผู้รับเหมา"] || b.vendor_or_person || "").trim();
       const bProjId = String(b.project_id || d["ID Project"] || "").trim();
 
+      const allRefs = [bRef, bContractor];
+      const explicitCw = allRefs.map(r => r.match(/cw\d+|ct\d+/i)?.[0]?.toUpperCase()).find(Boolean);
+
       let isMatch = false;
-      if (bRef && (bRef === targetContractId || bRef.includes(targetContractId))) {
-        isMatch = true;
+      if (explicitCw) {
+        isMatch = Boolean(targetContractId && targetContractId.toUpperCase() === explicitCw);
       } else if (targetProjectId && bProjId === targetProjectId) {
         if (contractorId && (bContractor === contractorId || bRef === contractorId)) {
           isMatch = true;

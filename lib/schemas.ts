@@ -6,7 +6,8 @@ import {
   ALL_CONTRACTOR_CATEGORIES,
   LABOR_CATEGORY_OPTIONS,
   SUB_ITEMS_123,
-  SUB_ITEMS_223
+  SUB_ITEMS_223,
+  SUB_ITEMS_603
 } from "@/lib/cost-codes";
 
 export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
@@ -31,14 +32,14 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
     { name: "เครื่องจักร", label: "ค่าใช้จ่าย", type: "Decimal", required: true, showIf: { column: "ประเภท", in: ["503 เครื่องจักร", "6.เครื่องจักร"] } },
     { name: "statusค่าแรง", type: "Enum", values: ["บุคคลธรรมดา", "บริษัท"], inputMode: "buttons", required: true, dynamicValues: "fieldOptions", showIf: { column: "ร้านค้า/ผู้รับเหมา", equals: "ผู้รับเหมา" } },
     { name: "ค่าแรงคงเหลือ", type: "Text", readonly: true, showIf: { column: "ร้านค้า/ผู้รับเหมา", equals: "ผู้รับเหมา" } },
-    { name: "อื่นๆ", label: "ค่าใช้จ่าย", type: "Decimal", required: true, showIf: { column: "ประเภท", in: ["123 ดำเนินการ(อื่นๆ)", "223 ค่าบริการ(อื่นๆ)", "8.อื่นๆ"] } },
-    { name: "รายการ", type: "Enum", values: [...SUB_ITEMS_123, ...SUB_ITEMS_223], dynamicValues: "fieldOptions", showIf: { column: "ประเภท", in: ["123 ดำเนินการ(อื่นๆ)", "223 ค่าบริการ(อื่นๆ)", "8.อื่นๆ"] } },
+    { name: "อื่นๆ", label: "ค่าใช้จ่าย", type: "Decimal", required: true, showIf: { column: "ประเภท", in: ["123 ดำเนินการ(อื่นๆ)", "8.อื่นๆ"] } },
+    { name: "รายการ", type: "Enum", values: [...SUB_ITEMS_123, ...SUB_ITEMS_223, ...SUB_ITEMS_603], dynamicValues: "fieldOptions", showIf: { column: "ประเภท", in: ["123 ดำเนินการ(อื่นๆ)", "223 ค่าบริการ(อื่นๆ)", "603 เช่าเครื่องจักร", "8.อื่นๆ"] } },
     { name: "vat", type: "Enum", values: ["1", "3", "5", "7", "ระบุเอง"], inputMode: "buttons", dynamicValues: "fieldOptions", showIf: { column: "ประเภท", in: [...ALL_STORE_CATEGORIES, "1.ค่าของ", "4.น้ำมัน", "5.ซ่อมรถ", "6.เครื่องจักร", "7.เครื่องมือ", "8.อื่นๆ"] } },
     { name: "เครดิต", type: "Enum", values: ["30", "45", "60", "ระบุเอง"], inputMode: "buttons", dynamicValues: "fieldOptions", showIf: { column: "ประเภท", in: [...ALL_STORE_CATEGORIES, "1.ค่าของ", "4.น้ำมัน", "5.ซ่อมรถ", "6.เครื่องจักร", "7.เครื่องมือ", "8.อื่นๆ"] } },
     { name: "วันได้บิล", type: "Date", showIf: { column: "vat", notBlank: true } },
     { name: "วันจ่าย", type: "Date" },
     { name: "ค่าแรง", type: "Decimal", required: true, showIf: { column: "ประเภท", in: [...LABOR_CATEGORY_OPTIONS, "2.ค่าแรง"] } },
-    { name: "หัก", type: "Enum", values: ["1", "3", "5", "ระบุเอง"], inputMode: "buttons", dynamicValues: "fieldOptions", description: "เลือกเปอร์เซ็นต์หัก หรือระบุเอง", showIf: { column: "ประเภท", in: [...ALL_CONTRACTOR_CATEGORIES, "123 ดำเนินการ(อื่นๆ)", "223 ค่าบริการ(อื่นๆ)", "2.ค่าแรง", "8.อื่นๆ"] } },
+    { name: "หัก", type: "Enum", values: ["1", "3", "5", "ระบุเอง"], inputMode: "buttons", dynamicValues: "fieldOptions", description: "เลือกเปอร์เซ็นต์หัก หรือระบุเอง", showIf: { column: "ประเภท", in: [...ALL_CONTRACTOR_CATEGORIES, "2.ค่าแรง"] } },
     { name: "จำนวนหัก", type: "Decimal", showIf: { column: "หัก", notBlank: true } },
     { name: "วันออก 3%", type: "Date", showIf: { column: "หัก", notBlank: true } },
     { name: "ชื่อพนักงาน", type: "Ref", refTable: TABLES.PEOPLE, refKey: "รหัสพนักงาน", refLabel: "ชื่อเล่น", required: true, showIf: { column: "ประเภท", in: ["301 พนักงาน", "หมวด 300 พนักงาน", "3.พนักงาน"] } },
@@ -145,7 +146,8 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
     { name: "งบไม่เกินค่าแรง_220", type: "Number" },
     { name: "งบไม่เกินค่าแรง_221", type: "Number" },
     { name: "งบไม่เกินค่าแรง_222", type: "Number" },
-    { name: "งบไม่เกินค่าแรง_223", type: "Number" }
+    { name: "งบไม่เกินค่าแรง_223", type: "Number" },
+    { name: "งบไม่เกินค่าแรง_603", type: "Number" }
   ],
   [TABLES.BANK]: [
     { name: "id_bank", type: "Text", key: true, initialValue: "nextBankId", required: true },
@@ -283,7 +285,7 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
     { name: "สลิป", label: "รูปสลิป / เอกสารแนบ", type: "Image" }
   ],
   [TABLES.CONTRACT_WORK]: [
-    { name: "id_Conwork", type: "Text", key: true, initialValue: "nextContractWorkId", required: true },
+    { name: "id_Conwork", label: "รหัสสัญญา (CW)", type: "Text", key: true, initialValue: "nextContractWorkId", required: true, readonly: true },
     {
       name: "ID Project",
       type: "Ref",

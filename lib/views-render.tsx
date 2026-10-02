@@ -7,7 +7,7 @@ import { isCommittedBill } from "@/lib/bills/bill-status";
 import { FormModal } from "@/components/forms/FormModal";
 import { ManageTableClient } from "@/components/views/ManageTableClient";
 import { TABLE_KEYS, TABLES } from "@/lib/config";
-import { hydrateContractRows } from "@/lib/formulas";
+import { hydrateContractRows, compareContractRows } from "@/lib/formulas";
 import { hydrateContractorsWithYearlySpend } from "@/lib/contractors/contractor-limits";
 import { money, toNumber } from "@/lib/utils/numbers";
 import { getHeaders, getRows } from "@/lib/db";
@@ -470,7 +470,10 @@ async function renderView(
         : view.id === "contractors"
           ? hydrateContractorsWithYearlySpend(rawRows, projectDataRows)
           : rawRows;
-    const rows = view.id === "contract-open" ? hydratedRows : filterRows(hydratedRows, search);
+    if (view.id === "contract-open") {
+      hydratedRows.sort((a, b) => compareContractRows(a, b, sort === "latest"));
+    }
+    const rows = view.id === "contract-open" ? (search ? filterRows(hydratedRows, search) : hydratedRows) : filterRows(hydratedRows, search);
     const fallback = rows[0] ? Object.keys(rows[0]).filter(column => !column.startsWith("_")) : [];
     const columns = getViewColumns(view.name, fallback);
     if (view.position === "menu" || view.position === "task") {
