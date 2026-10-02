@@ -329,6 +329,13 @@ function validateRequiredBySchema(row: SheetRow, tableName: string) {
   const missing = getFormSchema(tableName).find(field => {
     if (!field.required || field.type === "Hidden" || field.readonly) return false;
     const vType = String(row["ร้านค้า/ผู้รับเหมา"] ?? row.vendor_type ?? "").trim();
+    if (field.name === "สินค้า") {
+      const isMulti = String(row["_is_multi_item"] ?? "").trim() === "true" || Array.isArray(row.items) || (row.data && Array.isArray((row.data as any).items));
+      if (isMulti) return false;
+      if (vType === "ผู้รับเหมา" && (hasValue(row["ประเภท"]) || hasValue(row["รายละเอียดงาน"]))) {
+        return false;
+      }
+    }
     if (field.name === "statusค่าแรง") {
       if (vType !== "ผู้รับเหมา") return false;
     }
