@@ -8,11 +8,40 @@ import {
   Database,
   ExternalLink,
   HardDrive,
+  ImageIcon,
+  Layers,
   RefreshCw,
   Server,
   ShieldCheck,
   Zap,
 } from "lucide-react";
+
+type BucketDetail = {
+  name: string;
+  public: boolean;
+  fileCount: number;
+  totalBytes: number;
+  sizePretty: string;
+  description: string;
+};
+
+type StorageStats = {
+  totalFiles: number;
+  totalBytes: number;
+  totalPretty: string;
+  quotaBytes: number;
+  quotaPretty: string;
+  quotaPercent: number;
+  buckets: BucketDetail[];
+};
+
+type DatabaseStats = {
+  dbSizeBytes: number | null;
+  dbSizePretty: string | null;
+  quotaBytes: number;
+  quotaPretty: string;
+  quotaPercent: number | null;
+};
 
 type StatusData = {
   isConfigured: boolean;
@@ -23,6 +52,8 @@ type StatusData = {
   latencyMs: number;
   connectionMessage: string;
   billsBucketStatus: string;
+  storageStats?: StorageStats;
+  databaseStats?: DatabaseStats;
   tableStats: Array<{
     name: string;
     table: string;
@@ -146,11 +177,11 @@ export default function SettingsPage() {
       {/* ========================================================================= */}
       {/* 2. METRIC TICKER CARDS                                                    */}
       {/* ========================================================================= */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {/* Card 1: Connection */}
-        <div className="bg-white rounded-xl border border-slate-200/90 p-4 shadow-2xs space-y-2">
+        <div className="bg-white rounded-xl border border-slate-200/90 p-3.5 sm:p-4 shadow-2xs space-y-2">
           <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase">
-            <span>การเชื่อมต่อ Database</span>
+            <span>การเชื่อมต่อ DB</span>
             <div className="w-6 h-6 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center border border-emerald-200/80">
               <Activity size={13} />
             </div>
@@ -165,7 +196,7 @@ export default function SettingsPage() {
         </div>
 
         {/* Card 2: Latency */}
-        <div className="bg-white rounded-xl border border-slate-200/90 p-4 shadow-2xs space-y-2">
+        <div className="bg-white rounded-xl border border-slate-200/90 p-3.5 sm:p-4 shadow-2xs space-y-2">
           <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase">
             <span>ความเร็ว Latency</span>
             <div className="w-6 h-6 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center border border-amber-200/80">
@@ -175,19 +206,41 @@ export default function SettingsPage() {
           <div className="text-xl font-black font-mono text-slate-900">
             {data?.connectionOk ? `${data.latencyMs} ms` : "-"}
           </div>
-          <p className="text-[11px] text-slate-500 m-0 font-medium">{data?.connectionOk ? "ตอบสนองรวดเร็วผ่าน PostgreSQL" : "รอเชื่อมต่อ"}</p>
+          <p className="text-[11px] text-slate-500 m-0 font-medium truncate">{data?.connectionOk ? "ตอบสนองรวดเร็วผ่าน Cloud DB" : "รอเชื่อมต่อ"}</p>
         </div>
 
         {/* Card 3: Storage Bucket */}
-        <div className="bg-white rounded-xl border border-slate-200/90 p-4 shadow-2xs space-y-2">
+        <div className="bg-white rounded-xl border border-slate-200/90 p-3.5 sm:p-4 shadow-2xs space-y-2">
           <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase">
-            <span>Storage Bucket (รูปบิล)</span>
+            <span>พื้นที่เก็บรูปภาพ</span>
             <div className="w-6 h-6 rounded-lg bg-indigo-50 text-indigo-700 flex items-center justify-center border border-indigo-200/80">
-              <HardDrive size={13} />
+              <ImageIcon size={13} />
             </div>
           </div>
-          <div className="font-bold text-slate-900 text-sm truncate">{data?.billsBucketStatus || "กำลังตรวจสอบ..."}</div>
-          <p className="text-[11px] text-slate-500 m-0 font-medium">สำหรับจัดเก็บรูปใบเสร็จ บิล และไฟล์แนบ</p>
+          <div className="text-xl font-black font-mono text-indigo-900 truncate">
+            {data?.storageStats ? data.storageStats.totalPretty : data?.billsBucketStatus || "-"}
+          </div>
+          <p className="text-[11px] text-slate-500 m-0 font-medium truncate">
+            {data?.storageStats 
+              ? `${data.storageStats.totalFiles} ไฟล์ (${(data.storageStats.quotaPercent || 0).toFixed(1)}% ของ 1 GB)` 
+              : "จัดเก็บรูปใบเสร็จ & ไฟล์แนบ"}
+          </p>
+        </div>
+
+        {/* Card 4: Total Records */}
+        <div className="bg-white rounded-xl border border-slate-200/90 p-3.5 sm:p-4 shadow-2xs space-y-2">
+          <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase">
+            <span>ข้อมูลในระบบ</span>
+            <div className="w-6 h-6 rounded-lg bg-teal-50 text-teal-700 flex items-center justify-center border border-teal-200/80">
+              <Layers size={13} />
+            </div>
+          </div>
+          <div className="text-xl font-black font-mono text-teal-900 truncate">
+            {data?.tableStats ? `${data.tableStats.reduce((acc, t) => acc + (t.count || 0), 0).toLocaleString()} รายการ` : "-"}
+          </div>
+          <p className="text-[11px] text-slate-500 m-0 font-medium truncate">
+            ครอบคลุม {data?.tableStats?.length || 0} ตารางระบบ Supabase
+          </p>
         </div>
       </div>
 
@@ -237,7 +290,122 @@ export default function SettingsPage() {
       </div>
 
       {/* ========================================================================= */}
-      {/* 4. DATABASE TABLES STATISTICS                                             */}
+      {/* 4. STORAGE & MEDIA USAGE (พื้นที่จัดเก็บรูปภาพและไฟล์)                        */}
+      {/* ========================================================================= */}
+      <div className="bg-white rounded-xl border border-slate-200/90 p-4 sm:p-5 shadow-2xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-700 flex items-center justify-center border border-indigo-200/80 shadow-2xs">
+              <HardDrive size={15} />
+            </div>
+            <div>
+              <h2 className="text-xs sm:text-sm font-extrabold text-slate-800 tracking-tight uppercase flex items-center gap-2">
+                พื้นที่จัดเก็บรูปภาพและไฟล์ (Supabase Storage)
+              </h2>
+              <p className="text-[11px] text-slate-500 font-medium">
+                ตรวจสอบความจุรูปใบเสร็จบิลเบิกจ่าย และไฟล์สำรองข้อมูลบนคลาวด์
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <span className="text-[11px] font-mono font-bold text-indigo-900 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded-full">
+              ใช้ไป {data?.storageStats?.totalPretty || "0 B"} / {data?.storageStats?.quotaPretty || "1 GB"}
+            </span>
+          </div>
+        </div>
+
+        {/* Progress Bar */}
+        <div className="bg-slate-50/80 rounded-xl p-3.5 border border-slate-200/80 space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-bold text-slate-700 flex items-center gap-1.5">
+              <ImageIcon size={13} className="text-slate-500" />
+              ความจุพื้นที่จัดเก็บ (Free Tier Quota 1 GB)
+            </span>
+            <span className="font-mono font-bold text-indigo-700">
+              {(data?.storageStats?.quotaPercent || 0).toFixed(1)}%
+            </span>
+          </div>
+          <div className="w-full bg-slate-200/80 h-3 rounded-full overflow-hidden p-0.5">
+            <div
+              className="bg-gradient-to-r from-emerald-500 via-teal-500 to-indigo-600 h-full rounded-full transition-all duration-500"
+              style={{ width: `${Math.max(1, Math.min(100, data?.storageStats?.quotaPercent || 1))}%` }}
+            />
+          </div>
+          <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium pt-0.5">
+            <span>รวมทั้งหมด {data?.storageStats?.totalFiles ?? 0} ไฟล์</span>
+            <span>
+              เหลือพื้นที่ว่างอีก{" "}
+              {data?.storageStats
+                ? (Math.max(0, 1024 - (data.storageStats.totalBytes / (1024 * 1024)))).toFixed(1)
+                : "1024.0"}{" "}
+              MB
+            </span>
+          </div>
+        </div>
+
+        {/* Storage Buckets List */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {data?.storageStats?.buckets && data.storageStats.buckets.length > 0 ? (
+            data.storageStats.buckets.map((b) => (
+              <div
+                key={b.name}
+                className="p-3.5 bg-slate-50/70 rounded-xl border border-slate-200/80 shadow-2xs hover:border-indigo-300 transition flex flex-col justify-between gap-3"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-mono font-bold text-slate-900 text-xs bg-white px-2 py-0.5 rounded-md border border-slate-200">
+                        {b.name}
+                      </span>
+                      <span
+                        className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                          b.public
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                            : "bg-slate-100 text-slate-600 border-slate-200"
+                        }`}
+                      >
+                        {b.public ? "Public CDN" : "Private"}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 font-medium mt-1 truncate">
+                      {b.description}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-sm font-black font-mono text-slate-900">
+                      {b.sizePretty}
+                    </div>
+                    <div className="text-[10px] text-slate-500 font-medium">
+                      {b.fileCount.toLocaleString()} ไฟล์
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-slate-200/60 text-[11px]">
+                  <span className="text-slate-500">
+                    {b.name === "repairs"
+                      ? "รองรับการดูรูปใบเสร็จผ่าน LINE & แดชบอร์ด"
+                      : b.name === "backups"
+                      ? "สำรองฐานข้อมูลระบบ JSON"
+                      : "พื้นที่จัดเก็บไฟล์ทั่วไป"}
+                  </span>
+                  <span className="text-emerald-700 font-bold flex items-center gap-1">
+                    <CheckCircle2 size={12} /> พร้อมใช้งาน
+                  </span>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="col-span-full py-4 text-center text-slate-400 text-xs">
+              <RefreshCw size={14} className="animate-spin mx-auto mb-1 text-emerald-600" />
+              <span>กำลังตรวจสอบพื้นที่จัดเก็บ...</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* 5. DATABASE TABLES STATISTICS                                             */}
       {/* ========================================================================= */}
       <div className="bg-white rounded-xl border border-slate-200/90 p-4 sm:p-5 shadow-2xs space-y-3.5">
         <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
@@ -249,9 +417,16 @@ export default function SettingsPage() {
               สถิติข้อมูลในตารางระบบ (Table Stats)
             </span>
           </div>
-          <span className="text-[10px] font-mono font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
-            {data?.tableStats?.length || 0} Tables
-          </span>
+          <div className="flex items-center gap-2">
+            {data?.databaseStats?.dbSizePretty && (
+              <span className="text-[10px] font-mono font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                ขนาด DB: {data.databaseStats.dbSizePretty}
+              </span>
+            )}
+            <span className="text-[10px] font-mono font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+              {data?.tableStats?.length || 0} Tables
+            </span>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
