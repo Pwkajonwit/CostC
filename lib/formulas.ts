@@ -1,6 +1,6 @@
 import { TABLES } from "@/lib/config";
 import { isCommittedBill } from "@/lib/bills/bill-status";
-import { computeBillAmount, computeBillDeductMultiplier, computeBillTransferAmount, isVatActive, isDeductActive, parseDeductPercent, parseBillItems } from "@/lib/project-summary";
+import { computeBillAmount, computeBillDeductMultiplier, computeBillTransferAmount, isVatActive, isDeductActive, parseDeductPercent, parseBillItems, calculateBillFinancials } from "@/lib/project-summary";
 import { getExpenseFieldForCategory } from "@/lib/cost-codes";
 import { getRows } from "@/lib/db";
 import type { SheetRow } from "@/lib/types";
@@ -735,16 +735,7 @@ function vendorName(row: SheetRow, stores: SheetRow[], contract?: SheetRow) {
 }
 
 function deductAmount(row: SheetRow) {
-  if (!isDeductActive(row["หัก"])) return 0;
-  if (hasValue(row["จำนวนหัก"])) return toNumber(row["จำนวนหัก"]);
-  const hasVat = isVatActive(row.vat);
-  const baseAmt = toNumber(row["ยอดเงิน"]) || toNumber(row["ค่าแรง+พนักงาน+อื่น"]);
-  const deductRate = parseDeductPercent(row["หัก"]);
-  if (deductRate <= 0 || baseAmt <= 0) return 0;
-  if (hasVat) {
-    return (baseAmt / 1.07) * (deductRate / 100);
-  }
-  return (baseAmt * deductRate) / 100;
+  return calculateBillFinancials(row).withholdingTax;
 }
 
 function hasValue(value: unknown) {

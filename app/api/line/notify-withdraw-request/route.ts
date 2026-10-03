@@ -16,7 +16,8 @@ import {
   createDailyTransferSummaryFlex,
   getBillFlexGrossAmount,
   getPettyCashSummaryMap,
-  isSubBillRecord
+  isSubBillRecord,
+  normalizeBillType
 } from "@/lib/line/line";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 import { mapSupabaseRowToSheetRow } from "@/lib/supabase/supabase-db";
@@ -39,12 +40,7 @@ export async function POST(req: NextRequest) {
     // Enforce same bill type in withdrawal notification batch
     if (bills.length > 1) {
       const billTypes = new Set(
-        bills.map((b: any) => {
-          const raw = String(b["บิล"] || b.bill || b.bill_type || "").trim();
-          if (raw === "ย่อย" || raw.includes("ย่อย")) return "ย่อย";
-          if (raw === "หลัก" || raw.includes("หลัก")) return "หลัก";
-          return raw || "หลัก";
-        })
+        bills.map((b: any) => normalizeBillType(b))
       );
       if (billTypes.size > 1) {
         return NextResponse.json({

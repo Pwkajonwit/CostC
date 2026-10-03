@@ -404,37 +404,9 @@ export async function replyMultipleFlexMessages(
   }
 }
 
-/**
- * Helper to determine if a bill record is a sub-bill ("บิลย่อย")
- */
-export function isSubBillRecord(b: Record<string, any> | undefined | null): boolean {
-  if (!b || typeof b !== "object") return false;
-  const billVal = String(
-    b["บิล"] ??
-    b.bill ??
-    b.bill_type ??
-    b.billType ??
-    b["ประเภทบิล"] ??
-    b.data?.["บิล"] ??
-    b.data?.bill ??
-    b.data?.bill_type ??
-    b.data?.["ประเภทบิล"] ??
-    ""
-  ).trim();
+import { isSubBillRecord, normalizeBillType } from "@/lib/bills/bill-status";
+export { isSubBillRecord, normalizeBillType };
 
-  if (billVal) {
-    if (billVal.includes("ย่อย")) return true;
-    if (billVal.includes("หลัก")) return false;
-  }
-
-  // Fallback check on category / type if "บิล" is not explicitly set
-  const cat = String(b["ประเภท"] ?? b.category ?? b.categoryType ?? b.data?.["ประเภท"] ?? "").trim();
-  if (cat.includes("สดย่อย") || cat.includes("บิลย่อย")) {
-    return true;
-  }
-
-  return false;
-}
 
 export function extractBillLineItems(b: Record<string, any>): Array<{ category?: string; categoryType?: string; amount?: string | number; name?: string; type?: string; price?: string | number; total?: string | number; detail?: string; subItem?: string; vehiclePlate?: string; toolName?: string; storeGroup?: string }> {
   if (!b) return [];

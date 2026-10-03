@@ -918,6 +918,14 @@ function isFieldVisible(field: ReturnType<typeof getFormSchema>[number], row: Sh
   if (field.name === "หัก") {
     return vendorType === "ผู้รับเหมา" || isLaborCost(category);
   }
+  if (field.name === "vat") {
+    return (
+      vendorType === "ร้านค้า" ||
+      (vendorType === "ผู้รับเหมา" &&
+        String(row["statusค่าแรง"] ?? row["Statusค่าแรง"] ?? row.labor_status ?? "").includes("บริษัท")) ||
+      isVatActive(row["vat"])
+    );
+  }
   if (field.name === "วันได้บิล") {
     const hasVat = isVatActive(row["vat"]);
     const hasCredit = parseCreditDays(row["เครดิต"]) > 0;

@@ -419,19 +419,8 @@ export function hydrateProjectSummary(project: SheetRow, projectDataRows: SheetR
   };
 }
 
-export function isVatActive(vatValue: unknown): boolean {
-  if (vatValue === null || vatValue === undefined) return false;
-  const str = String(vatValue).trim().toLowerCase();
-  return str !== "" && str !== "0" && str !== "0.00" && str !== "0%" && str !== "ไม่มี" && str !== "ไม่มี vat" && str !== "false" && str !== "no";
-}
-
-export function parseDeductPercent(value: unknown): number {
-  if (value === null || value === undefined) return 0;
-  const str = String(value).trim().toLowerCase();
-  if (!str || str === "-" || str === "0" || str === "0%" || str === "false" || str.includes("ไม่มี")) return 0;
-  const match = str.match(/\d+(\.\d+)?/);
-  return match ? parseFloat(match[0]) : 0;
-}
+import { isVatActive, parseDeductPercent, isDeductActive, calculateBillFinancials } from "@/lib/finance/tax-calculator";
+export { isVatActive, parseDeductPercent, isDeductActive, calculateBillFinancials };
 
 export function parseCreditDays(value: unknown): number {
   if (value === null || value === undefined) return 0;
@@ -441,43 +430,13 @@ export function parseCreditDays(value: unknown): number {
   return match ? parseInt(match[0], 10) : 0;
 }
 
-export function isDeductActive(value: unknown): boolean {
-  if (value === null || value === undefined) return false;
-  const str = String(value).trim().toLowerCase();
-  if (!str || str === "-" || str === "0" || str === "0%" || str === "false" || str.includes("ไม่มี")) return false;
-  return parseDeductPercent(value) > 0 || str.includes("หัก");
-}
-
 export function isCreditActive(value: unknown): boolean {
   return parseCreditDays(value) > 0;
 }
 
 function computeTransferAmount(row: SheetRow) {
-  const amount = hasValue(row["ยอดเงิน"]) ? toNumber(row["ยอดเงิน"]) : computeBillAmount(row);
-  const hasVat = isVatActive(row.vat ?? row["vat"] ?? row["VAT"]);
-  const deductRate = parseDeductPercent(row["หัก"] ?? row["หัก ณ ที่จ่าย"] ?? row["หักณที่จ่าย"]);
-  const hasDeduct = isDeductActive(row["หัก"] ?? row["หัก ณ ที่จ่าย"] ?? row["หักณที่จ่าย"]);
-  const customDeduct = hasDeduct 
-    ? (hasValue(row["จำนวนหัก"]) ? toNumber(row["จำนวนหัก"]) : (hasValue(row["3เปอร์เซ็น"]) ? toNumber(row["3เปอร์เซ็น"]) : 0))
-    : 0;
-
-  if (!hasVat && !hasDeduct) return amount;
-
-  if (hasVat && hasDeduct) {
-    if (customDeduct > 0) return amount - customDeduct;
-    const deductAmt = (amount / 1.07) * (deductRate / 100);
-    return amount - deductAmt;
-  }
-
-  if (hasVat) return amount;
-
-  if (hasDeduct) {
-    if (customDeduct > 0) return amount - customDeduct;
-    const deductAmt = (amount * deductRate) / 100;
-    return amount - deductAmt;
-  }
-
-  return amount;
+  const fin = calculateBillFinancials(row);
+  return fin.netTransfer;
 }
 
 export function computeBillDeductMultiplier(row: SheetRow) {

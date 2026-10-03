@@ -170,7 +170,7 @@ export const PAGE_3_HTML_TEMPLATE = `
         <!-- Row 17: Active Payment Row (matching Item 5) -->
         <tr style="height: 22.5px;">
           <td style="border-right: 1.2px solid #000; border-bottom: 1px solid #000; height: 22.5px; text-align: center; font-family: monospace; font-size: 11.5px; font-weight: bold; vertical-align: middle; padding: 0 4px;"><<[ว/ด/ป]>></td>
-          <td style="border-right: 1.2px solid #000; border-bottom: 1px dashed #444; height: 22.5px; text-align: right; font-family: monospace; font-size: 11.5px; font-weight: bold; vertical-align: middle; padding: 0 4px;"><<[ค่าแรง+พนักงาน+อื่น]>></td>
+          <td style="border-right: 1.2px solid #000; border-bottom: 1px dashed #444; height: 22.5px; text-align: right; font-family: monospace; font-size: 11.5px; font-weight: bold; vertical-align: middle; padding: 0 4px;"><<[ฐานภาษี_50ทวิ]>></td>
           <td style="border-bottom: 1px dashed #444; height: 22.5px; text-align: right; font-family: monospace; font-size: 11.5px; font-weight: bold; vertical-align: middle; padding: 0 4px;"><<[3เปอร์]>></td>
         </tr>
 
@@ -186,7 +186,7 @@ export const PAGE_3_HTML_TEMPLATE = `
         <!-- Total Row -->
         <tr style="font-weight: bold; height: 30px;">
           <td colspan="2" style="border-right: 1.2px solid #000; border-bottom: 1.2px solid #000; text-align: center; padding: 4px; vertical-align: middle; font-size: 11.5px;">รวมเงินที่จ่ายและภาษีที่หักนำส่ง</td>
-          <td style="border-right: 1.2px solid #000; border-bottom: 1.2px solid #000; text-align: right; font-family: monospace; font-size: 12px; padding: 4px; vertical-align: middle;"><<[ค่าแรง+พนักงาน+อื่น]>></td>
+          <td style="border-right: 1.2px solid #000; border-bottom: 1.2px solid #000; text-align: right; font-family: monospace; font-size: 12px; padding: 4px; vertical-align: middle;"><<[ฐานภาษี_50ทวิ]>></td>
           <td style="border-bottom: 1.2px solid #000; text-align: right; font-family: monospace; font-size: 12px; padding: 4px; vertical-align: middle;"><<[3เปอร์]>></td>
         </tr>
 
@@ -241,6 +241,10 @@ export const PAGE_3_HTML_TEMPLATE = `
 
 export function buildTemplateReplacements(data: BillDocumentModel): Record<string, string> {
   const laborAndStaff = data.amounts.laborAndStaff.toLocaleString("th-TH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+  const taxBase = (data.amounts.taxBase || data.amounts.laborAndStaff).toLocaleString("th-TH", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   });
@@ -304,6 +308,7 @@ export function buildTemplateReplacements(data: BillDocumentModel): Record<strin
     "รายละเอียดงาน_หรือ_ค่าจ้าง": jobSpec,
     "หัก": data.amounts.taxPercent ? `${data.amounts.taxPercent}%` : "3%",
     "ค่าแรง+พนักงาน+อื่น": laborAndStaff,
+    "ฐานภาษี_50ทวิ": taxBase,
     "3เปอร์": withholdingTax,
     "รวม": netPayable,
     "textnumber": data.amounts.thaiBahtTextTax || data.amounts.thaiBahtTextTotal || "",

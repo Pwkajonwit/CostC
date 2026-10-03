@@ -8,7 +8,7 @@ import { getFormSchema } from "@/lib/schemas";
 import { isVatActive, parseDeductPercent, parseCreditDays, parseBillItems } from "@/lib/project-summary";
 import { appendAuditLog, appendRow, getSystemOptions, invalidateTableCache } from "@/lib/db";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
-import { getNextBillSequence, mapSupabaseRowToSheetRow } from "@/lib/supabase/supabase-db";
+import { getNextBillSequence, mapSupabaseRowToSheetRow, getBillsPagedFromSupabase } from "@/lib/supabase/supabase-db";
 import { deriveCategoryFromProduct, isLaborCost, isMaterialCost, isStaffCost, isOtherExpense } from "@/lib/cost-codes";
 import type { SheetRow } from "@/lib/types";
 
@@ -23,50 +23,37 @@ const STATUS_COLUMNS = ["สถานะ"];
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const page = Math.max(1, Number(searchParams.get("page") || 1));
-  const pageSize = Math.max(1, Math.min(10000, Number(searchParams.get("pageSize") || 20)));
+  const pageSize = Math.max(1, Math.min(2000, Number(searchParams.get("pageSize") || 50)));
   const search = searchParams.get("search")?.trim().toLowerCase() || "";
   const status = searchParams.get("status")?.trim() || "";
   const projectId = searchParams.get("projectId")?.trim() || "";
   const requester = searchParams.get("requester")?.trim() || "";
+  const billType = searchParams.get("billType")?.trim() || "";
+  const date = searchParams.get("date")?.trim() || "";
+  const yearParam = searchParams.get("year")?.trim() || request.cookies.get("costlab_selected_year")?.value?.trim() || "";
   const sort = searchParams.get("sort") === "oldest" ? "oldest" : "latest";
 
-  const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
-
   try {
-    let query = supabaseAdmin.from("bills").select("*", { count: "exact" });
-
-    if (status) query = query.eq("status", status);
-    if (projectId) query = query.eq("project_id", projectId);
-    if (requester) query = query.eq("requester", requester);
-    
-    const yearParam = searchParams.get("year")?.trim() || request.cookies.get("costlab_selected_year")?.value?.trim();
-    if (yearParam && yearParam !== "all") {
-      const yr = parseInt(yearParam, 10);
-      if (!isNaN(yr) && yr > 2000) {
-        query = query.gte("bill_date", `${yr}-01-01`).lte("bill_date", `${yr}-12-31`);
-      }
-    }
-
-    if (search) {
-      query = query.or(`project_name.ilike.%${search}%,vendor_or_person.ilike.%${search}%,description.ilike.%${search}%,bill_no.ilike.%${search}%,requester.ilike.%${search}%`);
-    }
-
-    query = query.order("id", { ascending: sort === "oldest" }).range(from, to);
-
-    const { data, count, error } = await query;
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    const mapped = (data || []).map((row, idx) => mapSupabaseRowToSheetRow("bills", row, from + idx));
-
-    return NextResponse.json({
+    const result = await getBillsPagedFromSupabase({
       page,
       pageSize,
-      totalCount: count || 0,
-      totalPages: Math.ceil((count || 0) / pageSize),
-      rows: mapped
+      search,
+      status,
+      projectId,
+      requester,
+      billType,
+      date,
+      year: yearParam === "all" ? undefined : yearParam,
+      sortDesc: sort !== "oldest"
+    });
+
+    return NextResponse.json({
+      page: result.page,
+      pageSize: result.pageSize,
+      totalCount: result.total,
+      totalPages: result.totalPages,
+      stats: result.stats,
+      rows: result.rows
     }, {
       headers: {
         "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",

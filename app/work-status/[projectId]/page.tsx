@@ -1,7 +1,7 @@
 import { ProjectDetailClient } from "@/components/dashboards/ProjectDetailClient";
 import { isCommittedBill } from "@/lib/bills/bill-status";
 import { TABLES } from "@/lib/config";
-import { getRows } from "@/lib/db";
+import { getRows, getSystemOptions } from "@/lib/db";
 import { hydrateProjectSummary, rowsForProject, valueOf } from "@/lib/project-summary";
 import { calculateProjectBudgetControl } from "@/lib/project-budget-control";
 import type { SheetRow } from "@/lib/types";
@@ -51,12 +51,13 @@ export default async function ProjectDetailPage({ params, searchParams }: Projec
   const initialTab = typeof query.tab === "string" ? query.tab : undefined;
   const decodedProjectId = decodeURIComponent(projectId);
 
-  const [projectRows, dataRows, customerRows, companyRows, peopleRows] = await Promise.all([
+  const [projectRows, dataRows, customerRows, companyRows, peopleRows, systemOptions] = await Promise.all([
     getRows(TABLES.PROJECT).catch(() => []),
     getRows(TABLES.DATA).catch(() => []),
     getRows(TABLES.CUSTOMER).catch(() => []),
     getRows(TABLES.COMPANY).catch(() => []),
     getRows(TABLES.PEOPLE).catch(() => []),
+    getSystemOptions().catch(() => ({} as Record<string, string[]>)),
   ]);
 
   const project = projectRows.find((row) => String(row["ID Project"] || "").trim() === decodedProjectId.trim());
@@ -92,6 +93,52 @@ export default async function ProjectDetailPage({ params, searchParams }: Projec
     : "";
   const companyDisplay = compName || rawCompId || "-";
 
+  // Build Master Dropdown Options
+  const customerOptions = customerRows
+    .map((c) => {
+      const id = String(c["id_cus"] || c["id"] || c["รหัสลูกค้า"] || "").trim();
+      const name = String(c["ชื่อลูกค้า"] || c["ชื่อบริษัท"] || c["ชื่อ-นามสกุล"] || c["name"] || "").trim();
+      return {
+        value: id,
+        label: name ? `${name} (${id})` : id,
+        name: name || id,
+      };
+    })
+    .filter((o) => o.value);
+
+  const companyOptions = companyRows
+    .map((c) => {
+      const id = String(c["id_Company"] || c["id"] || c["รหัสบริษัท"] || "").trim();
+      const name = String(c["ชื่อบริษัท"] || c["ชื่อย่อ"] || c["name"] || "").trim();
+      return {
+        value: id,
+        label: name ? `${name} (${id})` : id,
+        name: name || id,
+      };
+    })
+    .filter((o) => o.value);
+
+  // Responsible options from System Options (ผู้รับผิดชอบโครงการ สำหรับ 1.Project รวม)
+  const configuredOwners = (systemOptions["รับผิดชอบ"] && systemOptions["รับผิดชอบ"].length > 0)
+    ? systemOptions["รับผิดชอบ"]
+    : (systemOptions["ผู้รับผิดชอบ"] && systemOptions["ผู้รับผิดชอบ"].length > 0)
+    ? systemOptions["ผู้รับผิดชอบ"]
+    : ["PW1", "PW2", "PW3", "PW4", "PW"];
+
+  const responsibleOptions = configuredOwners
+    .map((item) => {
+      const val = String(item).trim();
+      return {
+        value: val,
+        label: val,
+        name: val,
+      };
+    })
+    .filter((o) => o.value);
+
+  const rawOwner = String(hydratedProject["รับผิดชอบ"] || "").trim();
+  const ownerDisplay = rawOwner || "-";
+
   return (
     <ProjectDetailClient
       projectId={decodedProjectId}
@@ -99,6 +146,10 @@ export default async function ProjectDetailPage({ params, searchParams }: Projec
       hydratedProject={hydratedProject}
       customerDisplay={customerDisplay}
       companyDisplay={companyDisplay}
+      ownerDisplay={ownerDisplay}
+      customerOptions={customerOptions}
+      companyOptions={companyOptions}
+      responsibleOptions={responsibleOptions}
       totals={totals}
       budgetControl={budgetControl}
       summaryRows={summaryRows}
@@ -134,7 +185,9 @@ function resolveRequesterName(rawRequester: unknown, peopleRows: SheetRow[]): st
   if (found) {
     const nickname = String(found["ชื่อเล่น"] || "").trim();
     const fullName = String(found["ชื่อ-นามสกุล"] || found["name"] || "").trim();
-    return nickname || fullName || str;
+    const id = String(found["รหัสพนักงาน"] || found["id"] || "").trim();
+    const display = nickname && fullName ? `${nickname} (${fullName})` : nickname || fullName || str;
+    return id ? `${display} [${id}]` : display;
   }
 
   return str;

@@ -3,6 +3,7 @@ import { TABLES } from "@/lib/config";
 import { getRows } from "@/lib/db";
 import { toNumber } from "@/lib/utils/numbers";
 import { parseDeductPercent, isDeductActive, isVatActive } from "@/lib/project-summary";
+import { calculateBillFinancials } from "@/lib/finance/tax-calculator";
 import { formatDateDisplay, getTodayDateIso } from "@/lib/utils/dates";
 import type { SheetRow } from "@/lib/types";
 
@@ -51,6 +52,7 @@ export interface BillDocumentModel {
     netPayable: number;          // ยอดคงเหลือสุทธิ (รวมยอดเงิน)
     thaiBahtTextTotal: string;   // ตัวหนังสือยอดเงินสุทธิ
     thaiBahtTextTax: string;     // ตัวหนังสือยอดภาษีหักนำส่ง
+    taxBase: number;             // ฐานภาษีก่อนหัก ณ ที่จ่าย (ก่อน VAT สำหรับ 50 ทวิ)
   };
 
   issuer?: string;               // ผู้จ่าย / ผู้จัดทำบิล
@@ -165,64 +167,14 @@ export async function getBillDocumentData(
       String(r["id_Contractor"] || "").trim() === contractorRef
   ) || {};
 
-  // Financial calculations
-  let laborAndStaff = toNumber(billRow["ค่าแรง+พนักงาน+อื่นๆ"]);
-  if (!laborAndStaff) {
-    laborAndStaff = toNumber(billRow["ค่าแรง"]) + toNumber(billRow["พนักงาน"]) + toNumber(billRow["อื่นๆ"]);
-  }
-  if (!laborAndStaff) {
-    laborAndStaff = toNumber(billRow["ค่าจ้าง"]) || toNumber(billRow["ยอดเงิน"]);
-  }
-
-  // Tax calculation: parse % correctly even if string is "3%", "หัก 3%", etc.
-  const rawWhtCol = toNumber(billRow["หัก 3%"]);
-  const rawCustom = toNumber(
-    billRow["3เปอร์เซ็น"] || billRow["3เปอร์"] || billRow["จำนวนหัก"] || billRow.deduct_amount
-  );
-  let customWht = 0;
-  if (rawCustom > 0) {
-    customWht = rawCustom;
-  } else if (rawWhtCol > 0) {
-    // If "หัก 3%" column contains net amount (greater than half of wage), compute withholding tax as wage - net
-    if (laborAndStaff > 0 && rawWhtCol > laborAndStaff * 0.5) {
-      customWht = Math.max(0, Math.round((laborAndStaff - rawWhtCol) * 100) / 100);
-    } else {
-      customWht = rawWhtCol;
-    }
-  }
-
-  const rawDeduct = billRow["หัก"] ?? billRow.deduct ?? billRow.withholding_tax;
-  const hasExplicitZeroWht =
-    (billRow.withholding_tax !== null && billRow.withholding_tax !== undefined && Number(billRow.withholding_tax) === 0) ||
-    String(billRow["หัก"] ?? "").includes("ไม่มี");
-
-  const isDeductActiveOnBill = !hasExplicitZeroWht && (customWht > 0 || isDeductActive(rawDeduct));
-  let taxPercent = isDeductActiveOnBill ? parseDeductPercent(rawDeduct) : 0;
-  if (isDeductActiveOnBill && !taxPercent && customWht > 0) {
-    taxPercent = laborAndStaff > 0 ? Math.round((customWht / laborAndStaff) * 100) : 3;
-  }
-
-  let withholdingTax = customWht;
-  if (isDeductActiveOnBill && !withholdingTax && taxPercent > 0) {
-    const hasVat = isVatActive(billRow.vat ?? billRow["vat"] ?? billRow.VAT);
-    if (hasVat) {
-      withholdingTax = Math.round(((laborAndStaff / 1.07) * (taxPercent / 100)) * 100) / 100;
-    } else {
-      withholdingTax = Math.round((laborAndStaff * (taxPercent / 100)) * 100) / 100;
-    }
-  } else if (!isDeductActiveOnBill) {
-    withholdingTax = 0;
-  }
-
-  const rawNetFromCol = toNumber(billRow["จ่าย"] || billRow["ยอดโอน"] || billRow["คงเหลือ"]);
-  const rawNetFromCsvWht = toNumber(billRow["หัก 3%"]) > laborAndStaff * 0.5 ? toNumber(billRow["หัก 3%"]) : 0;
-  const rawNet = rawNetFromCol || rawNetFromCsvWht || toNumber(billRow["ยอดเงิน"]);
-  const netPayable = rawNet || (laborAndStaff - withholdingTax);
-
-  const isCorporate =
-    String(billRow["Statusค่าแรง"] || billRow["statusค่าแรง"] || "").includes("บริษัท") ||
-    String(billRow["ร้านค้า/ผู้รับเหมา"] || "") === "ร้านค้า" ||
-    Boolean(contractor["เลขประจำตัวผู้เสียภาษี"]);
+  // Financial calculations via centralized tax calculator
+  const fin = calculateBillFinancials(billRow, contractor);
+  const laborAndStaff = fin.laborAndStaff;
+  const isCorporate = fin.isCorporate;
+  const taxPercent = fin.taxRate;
+  const withholdingTax = fin.withholdingTax;
+  const netPayable = fin.netTransfer;
+  const taxBase = fin.taxBase;
 
   const contractorFullName =
     String(contractor["ชื่อ-นามสกุล"] || "").trim() ||
@@ -316,6 +268,7 @@ export async function getBillDocumentData(
       netPayable,
       thaiBahtTextTotal: thaiBahtText(netPayable),
       thaiBahtTextTax: thaiBahtText(withholdingTax),
+      taxBase,
     },
 
     issuer,

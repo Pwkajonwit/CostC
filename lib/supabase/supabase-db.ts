@@ -216,7 +216,8 @@ export function mapSupabaseRowToSheetRow(dbTable: string, row: Record<string, an
     res["ชื่อ Project"] = row.project_name ?? row["ชื่อ Project"] ?? dataObj["ชื่อ Project"];
     res["ร้าน/บุคคล"] = row.vendor_or_person ?? row["ร้าน/บุคคล"] ?? dataObj["ร้าน/บุคคล"];
     res["สินค้า/ทำงาน"] = row.description ?? row["สินค้า/ทำงาน"] ?? dataObj["สินค้า/ทำงาน"];
-    res["บิล"] = row.bill_no ?? row["บิล"] ?? dataObj["บิล"];
+    res["บิล"] = row.bill_no ?? row.bill_type ?? row["บิล"] ?? dataObj["บิล"] ?? "หลัก";
+    res.bill_type = res["บิล"];
     res["ประเภท"] = row.category ?? row["ประเภท"] ?? dataObj["ประเภท"];
     res["ยอดเงิน"] = row.amount ?? row["ยอดเงิน"] ?? dataObj["ยอดเงิน"];
     
@@ -612,8 +613,12 @@ export function mapSheetRowToSupabaseRow(tableName: string, row: Record<string, 
     const rawDesc = row["สินค้า/ทำงาน"] ?? row.description;
     if (hasValue(rawDesc)) dbRow.description = String(rawDesc).trim();
 
-    const rawBillNo = row["บิล"] ?? row.bill_no;
-    if (hasValue(rawBillNo)) dbRow.bill_no = String(rawBillNo).trim();
+    const rawBillNo = row["บิล"] ?? row.bill_no ?? row.bill_type;
+    if (hasValue(rawBillNo)) {
+      const bStr = String(rawBillNo).trim();
+      dbRow.bill_no = bStr;
+      dbRow.bill_type = bStr;
+    }
 
     const rawCategory = row["ประเภท"] ?? row.category;
     if (hasValue(rawCategory)) dbRow.category = String(rawCategory).trim();
@@ -1683,15 +1688,39 @@ export async function getRowsFromSupabase(tableName: string, maxRows = 10_000): 
 
   try {
     const isAscending = dbTable !== "bills";
-    const rangeEnd = Math.max(0, maxRows - 1);
     
     // Concurrently fetch main rows and only the required auxiliary maps for the specific table
     const isMasterTable = dbTable === "stores" || dbTable === "contractors" || dbTable === "master_members";
     const isBillTable = dbTable === "bills";
     const isProjectTable = dbTable === "projects";
 
+    const fetchTableRows = async (): Promise<{ data: any[] | null; error: any }> => {
+      if (maxRows <= 1000) {
+        const rangeEnd = Math.max(0, maxRows - 1);
+        return await supabaseAdmin.from(dbTable).select("*").order("id", { ascending: isAscending }).range(0, rangeEnd);
+      }
+      // Safe batch chunking to avoid PostgREST silent row limits when maxRows > 1000
+      const allRows: any[] = [];
+      let offset = 0;
+      const batchSize = 1000;
+      while (offset < maxRows) {
+        const fetchLimit = Math.min(batchSize, maxRows - offset);
+        const { data: batch, error: batchErr } = await supabaseAdmin
+          .from(dbTable)
+          .select("*")
+          .order("id", { ascending: isAscending })
+          .range(offset, offset + fetchLimit - 1);
+        if (batchErr) return { data: allRows.length > 0 ? allRows : null, error: batchErr };
+        if (!batch || batch.length === 0) break;
+        allRows.push(...batch);
+        if (batch.length < fetchLimit) break;
+        offset += batch.length;
+      }
+      return { data: allRows, error: null };
+    };
+
     const [mainResult, entityBankMap, billFollowDatesMap, projectBudgetsMap] = await Promise.all([
-      supabaseAdmin.from(dbTable).select("*").order("id", { ascending: isAscending }).range(0, rangeEnd),
+      fetchTableRows(),
       isMasterTable ? getEntityBankMapFromSupabase() : Promise.resolve({} as Record<string, string>),
       isBillTable ? getBillFollowDatesFromSupabase() : Promise.resolve({} as Record<string, Record<string, string>>),
       isProjectTable ? getProjectBudgetAllocationsFromSupabase() : Promise.resolve({} as Record<string, Record<string, any>>)
@@ -2079,9 +2108,20 @@ export type BillsPagedParams = {
   search?: string;
   status?: string;
   projectId?: string;
+  requester?: string;
+  billType?: string;
+  date?: string;
   startDate?: string;
   endDate?: string;
+  year?: string | number;
   sortDesc?: boolean;
+};
+
+export type BillsPagedStats = {
+  totalAmount: number;
+  approvedAmount: number;
+  pendingAmount: number;
+  count: number;
 };
 
 export type BillsPagedResult = {
@@ -2090,63 +2130,134 @@ export type BillsPagedResult = {
   page: number;
   pageSize: number;
   totalPages: number;
+  stats: BillsPagedStats;
 };
 
 export async function getBillsPagedFromSupabase(params: BillsPagedParams = {}): Promise<BillsPagedResult> {
+  const emptyStats: BillsPagedStats = { totalAmount: 0, approvedAmount: 0, pendingAmount: 0, count: 0 };
   if (!isSupabaseConfigured()) {
-    return { rows: [], total: 0, page: 1, pageSize: 50, totalPages: 1 };
+    return { rows: [], total: 0, page: 1, pageSize: 50, totalPages: 1, stats: emptyStats };
   }
 
   const page = Math.max(1, Number(params.page) || 1);
-  const pageSize = Math.min(500, Math.max(1, Number(params.pageSize) || 50));
+  const pageSize = Math.min(2000, Math.max(1, Number(params.pageSize) || 50));
   const offset = (page - 1) * pageSize;
   const sortDesc = params.sortDesc !== false;
 
   try {
-    let query = supabaseAdmin
-      .from("bills")
-      .select("*", { count: "exact" });
+    let query = supabaseAdmin.from("bills").select("*", { count: "exact" });
+    let statsQuery = supabaseAdmin.from("bills").select("id, amount, status");
 
-    if (params.status && params.status.trim()) {
-      query = query.eq("status", params.status.trim());
-    }
+    const applyFilters = (q: any) => {
+      if (params.status && params.status.trim()) {
+        q = q.eq("status", params.status.trim());
+      }
 
-    if (params.projectId && params.projectId.trim()) {
-      query = query.eq("project_id", params.projectId.trim());
-    }
+      if (params.projectId && params.projectId.trim()) {
+        q = q.eq("project_id", params.projectId.trim());
+      }
 
-    if (params.startDate) {
-      query = query.gte("bill_date", params.startDate);
-    }
-    if (params.endDate) {
-      query = query.lte("bill_date", params.endDate);
-    }
+      if (params.requester && params.requester.trim()) {
+        const req = params.requester.trim();
+        q = q.or(`requester.ilike.%${req}%,created_by.ilike.%${req}%`);
+      }
 
-    if (params.search && params.search.trim()) {
-      const q = params.search.trim();
-      query = query.or(`product.ilike.%${q}%,work_details.ilike.%${q}%,requester.ilike.%${q}%,vendor_type.ilike.%${q}%,id.ilike.%${q}%,sub_category.ilike.%${q}%`);
-    }
+      if (params.billType && params.billType.trim()) {
+        const bt = params.billType.trim();
+        q = q.or(`bill_type.eq.${bt},bill_no.eq.${bt}`);
+      }
+
+      if (params.date && params.date.trim()) {
+        q = q.eq("bill_date", params.date.trim());
+      }
+
+      if (params.startDate) {
+        q = q.gte("bill_date", params.startDate);
+      }
+      if (params.endDate) {
+        q = q.lte("bill_date", params.endDate);
+      }
+
+      if (params.year && params.year !== "all") {
+        const yr = parseInt(String(params.year), 10);
+        if (!isNaN(yr) && yr > 2000) {
+          q = q.gte("bill_date", `${yr}-01-01`).lte("bill_date", `${yr}-12-31`);
+        }
+      }
+
+      if (params.search && params.search.trim()) {
+        const qStr = params.search.trim();
+        q = q.or(`project_name.ilike.%${qStr}%,vendor_or_person.ilike.%${qStr}%,description.ilike.%${qStr}%,bill_no.ilike.%${qStr}%,requester.ilike.%${qStr}%,sub_category.ilike.%${qStr}%,category.ilike.%${qStr}%`);
+      }
+
+      return q;
+    };
+
+    query = applyFilters(query);
+    statsQuery = applyFilters(statsQuery);
 
     query = query
-      .order("created_at", { ascending: !sortDesc })
+      .order("id", { ascending: !sortDesc })
       .range(offset, offset + pageSize - 1);
 
-    const { data, count, error } = await query;
+    const [mainResult, statsResult, billFollowDatesMap] = await Promise.all([
+      query,
+      statsQuery,
+      getBillFollowDatesFromSupabase()
+    ]);
+
+    const { data, count, error } = mainResult;
 
     if (error) {
       console.warn("getBillsPagedFromSupabase query error:", error.message);
-      return { rows: [], total: 0, page, pageSize, totalPages: 1 };
+      return { rows: [], total: 0, page, pageSize, totalPages: 1, stats: emptyStats };
     }
 
     const total = count || (data?.length || 0);
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
+    // Calculate aggregated stats on server side without transferring heavy objects
+    let totalAmount = 0;
+    let approvedAmount = 0;
+    for (const r of statsResult.data || []) {
+      const amt = Number(r.amount || 0);
+      totalAmount += amt;
+      const st = String(r.status || "").trim();
+      if (st === "อนุมัติ" || st === "เบิกแล้ว") {
+        approvedAmount += amt;
+      }
+    }
+    const stats: BillsPagedStats = {
+      totalAmount,
+      approvedAmount,
+      pendingAmount: totalAmount - approvedAmount,
+      count: total
+    };
+
+    const hasFollowMap = Object.keys(billFollowDatesMap).length > 0;
     const rows: SheetRow[] = (data || []).map((row, idx) => {
       const sheetRow = mapSupabaseRowToSheetRow("bills", row, offset + idx);
       if (!sheetRow["ผู้สร้างบิล"]) {
         sheetRow["ผู้สร้างบิล"] = sheetRow["ผู้เบิก"] || "";
         sheetRow["created_by"] = sheetRow["ผู้สร้างบิล"];
       }
+
+      if (hasFollowMap) {
+        const rawId = String(row.id || "");
+        const rawSeq = String(sheetRow["ลำดับ"] || sheetRow._sheetRow || "");
+        const followData = (rawId && billFollowDatesMap[rawId]) || (rawSeq && billFollowDatesMap[rawSeq]);
+        if (followData) {
+          const cleanFollow = { ...followData };
+          if (!cleanFollow["วันจ่าย"] && sheetRow["วันจ่าย"]) delete cleanFollow["วันจ่าย"];
+          if (!cleanFollow["paid_date"] && sheetRow["วันจ่าย"]) delete cleanFollow["paid_date"];
+          if (row.amount !== null && row.amount !== undefined && sheetRow["ยอดเงิน"]) delete cleanFollow["ยอดเงิน"];
+          if (row.transfer_amount !== null && row.transfer_amount !== undefined && sheetRow["ยอดโอน"]) delete cleanFollow["ยอดโอน"];
+          Object.assign(sheetRow, cleanFollow);
+          sheetRow["paid_date"] = sheetRow["วันจ่าย"] || row.paid_date || "";
+          sheetRow["due_date"] = sheetRow["วันจ่าย"] || row.paid_date || "";
+        }
+      }
+
       return sheetRow;
     });
 
@@ -2155,11 +2266,12 @@ export async function getBillsPagedFromSupabase(params: BillsPagedParams = {}): 
       total,
       page,
       pageSize,
-      totalPages
+      totalPages,
+      stats
     };
   } catch (err) {
     console.warn("Exception in getBillsPagedFromSupabase:", err);
-    return { rows: [], total: 0, page, pageSize, totalPages: 1 };
+    return { rows: [], total: 0, page, pageSize, totalPages: 1, stats: emptyStats };
   }
 }
 

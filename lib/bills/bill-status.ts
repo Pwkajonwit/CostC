@@ -175,3 +175,46 @@ export function formatBillConditions(row: SheetRow): string {
   return [vat, deduct, credit].filter(Boolean).join(" · ");
 }
 
+/**
+ * Universal helper to determine if a bill record is a sub-bill ("บิลย่อย")
+ * Evaluates user input fields ("บิล", bill_no, data.บิล) before default DB columns
+ */
+export function isSubBillRecord(b: Record<string, any> | undefined | null): boolean {
+  if (!b || typeof b !== "object") return false;
+
+  const candidateValues = [
+    b["บิล"],
+    b.bill_no,
+    b.data?.["บิล"],
+    b.data?.bill_no,
+    b["ประเภทบิล"],
+    b.data?.["ประเภทบิล"],
+    b.bill,
+    b.data?.bill,
+    b.bill_type,
+    b.billType,
+    b.data?.bill_type,
+  ];
+
+  for (const val of candidateValues) {
+    if (val !== undefined && val !== null) {
+      const str = String(val).trim();
+      if (str.includes("ย่อย")) return true;
+      if (str.includes("หลัก")) return false;
+    }
+  }
+
+  // Fallback check on category / type if "บิล" is not explicitly set
+  const cat = String(b["ประเภท"] ?? b.category ?? b.categoryType ?? b.data?.["ประเภท"] ?? "").trim();
+  if (cat.includes("สดย่อย") || cat.includes("บิลย่อย")) {
+    return true;
+  }
+
+  return false;
+}
+
+export function normalizeBillType(b: Record<string, any> | undefined | null): "หลัก" | "ย่อย" {
+  return isSubBillRecord(b) ? "ย่อย" : "หลัก";
+}
+
+
