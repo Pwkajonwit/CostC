@@ -33,7 +33,6 @@ import { money, toNumber } from "@/lib/utils/numbers";
 import { ALLOCATED_BUDGET_ITEMS } from "@/lib/project-budget-control";
 import {
   computeCashFlowBreakdown,
-  getBudgetHealthStatus,
   hydrateProjectRowsForList,
   isCreditActive,
   isDeductActive,
@@ -80,6 +79,16 @@ export function classifyExpenseItem(categoryStr: string, vendorType: string): "1
   }
   // 100 Material / Store default
   return "100";
+}
+
+function getProjectBudgetRowInfo(proj: SheetRow) {
+  const spent = toNumber(proj["รวม ALL"]);
+  const budgetCap = toNumber(proj["งบไม่เกิน"] || proj["ยอดงาน"]);
+  const remaining = budgetCap - spent;
+  const percent = budgetCap > 0 ? Math.min(999, Math.round((spent / budgetCap) * 100)) : 0;
+  const isOver = remaining < 0;
+  const isWarning = !isOver && percent >= 80;
+  return { spent, budgetCap, remaining, percent, isOver, isWarning };
 }
 
 export function MainDashboardClient({ initialDataRows, initialProjectRows, initialPettyCashRows = [] }: MainDashboardClientProps) {
@@ -270,13 +279,32 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows, initi
       });
   }, [filteredProjectRows, filteredDataRows]);
 
+  // Project status counts for filter tabs
+  const projectStatusCounts = useMemo(() => {
+    let warning = 0;
+    let over = 0;
+    for (const p of hydratedActiveProjects) {
+      const { isOver, isWarning } = getProjectBudgetRowInfo(p);
+      if (isOver) {
+        over++;
+      } else if (isWarning) {
+        warning++;
+      }
+    }
+    return {
+      all: hydratedActiveProjects.length,
+      warning,
+      over,
+    };
+  }, [hydratedActiveProjects]);
+
   // Project table filter
   const displayedProjects = useMemo(() => {
     if (projectFilterTab === "all") return hydratedActiveProjects;
     return hydratedActiveProjects.filter((p) => {
-      const health = p.budgetHealth?.status;
-      if (projectFilterTab === "warning") return health === "warning";
-      if (projectFilterTab === "over") return health === "danger" || health === "critical";
+      const { isOver, isWarning } = getProjectBudgetRowInfo(p);
+      if (projectFilterTab === "warning") return isWarning;
+      if (projectFilterTab === "over") return isOver;
       return true;
     });
   }, [hydratedActiveProjects, projectFilterTab]);
@@ -980,12 +1008,12 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows, initi
                       : "text-slate-600 hover:text-slate-900"
                   }`}
                 >
-                  ทั้งหมด ({hydratedActiveProjects.length})
+                  ทั้งหมด ({projectStatusCounts.all})
                 </button>
                 <button
                   type="button"
                   onClick={() => setProjectFilterTab("warning")}
-                  className={`px-2.5 py-1 rounded-md font-bold transition cursor-pointer flex items-center gap-1 ${
+                  className={`px-2.5 py-1 rounded-md font-bold transition cursor-pointer flex items-center gap-1.5 ${
                     projectFilterTab === "warning"
                       ? "bg-amber-100 text-amber-900 shadow-2xs"
                       : "text-amber-700 hover:text-amber-900"
@@ -993,11 +1021,16 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows, initi
                 >
                   <AlertTriangle size={12} />
                   <span>ใกล้เต็ม</span>
+                  {projectStatusCounts.warning > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-200/80 text-amber-950 font-black">
+                      {projectStatusCounts.warning}
+                    </span>
+                  )}
                 </button>
                 <button
                   type="button"
                   onClick={() => setProjectFilterTab("over")}
-                  className={`px-2.5 py-1 rounded-md font-bold transition cursor-pointer flex items-center gap-1 ${
+                  className={`px-2.5 py-1 rounded-md font-bold transition cursor-pointer flex items-center gap-1.5 ${
                     projectFilterTab === "over"
                       ? "bg-rose-100 text-rose-900 shadow-2xs"
                       : "text-rose-700 hover:text-rose-900"
@@ -1005,6 +1038,11 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows, initi
                 >
                   <AlertCircle size={12} />
                   <span>เกินงบ</span>
+                  {projectStatusCounts.over > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-200/80 text-rose-950 font-black">
+                      {projectStatusCounts.over}
+                    </span>
+                  )}
                 </button>
               </div>
             </div>
@@ -1028,12 +1066,7 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows, initi
                       const pId = String(proj["ID Project"] || proj.id || "").trim();
                       const pName = String(proj["ชื่อ Project"] || proj.name || "").trim();
                       const cusName = String(proj["ชื่อลูกค้า"] || proj.customer_name || "-").trim();
-                      const spent = toNumber(proj["รวม ALL"]);
-                      const budgetCap = toNumber(proj["งบไม่เกิน"] || proj["ยอดงาน"]);
-                      const remaining = budgetCap - spent;
-                      const percent = budgetCap > 0 ? Math.min(999, Math.round((spent / budgetCap) * 100)) : 0;
-                      const isOver = remaining < 0;
-                      const isWarning = !isOver && percent >= 80;
+                      const { spent, budgetCap, remaining, percent, isOver, isWarning } = getProjectBudgetRowInfo(proj);
 
                       return (
                         <tr key={pId} className="hover:bg-slate-50/90 transition group">
@@ -1041,17 +1074,21 @@ export function MainDashboardClient({ initialDataRows, initialProjectRows, initi
                           <td className="py-2.5 px-3 border-r border-slate-200">
                             <div className="flex items-center justify-between gap-2">
                               <div className="min-w-0">
-                                <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5 truncate">
+                                <Link
+                                  href={`/work-status/${encodeURIComponent(pId)}`}
+                                  className="font-bold text-slate-900 text-xs flex items-center gap-1.5 truncate hover:text-emerald-700 hover:underline transition"
+                                  title={`ดูรายละเอียดโครงการ #${pId} ${pName}`}
+                                >
                                   <span className="text-slate-400 font-mono text-[11px]">#{pId}</span>
                                   <span className="truncate">{pName}</span>
-                                </div>
+                                </Link>
                                 <div className="text-[11px] text-slate-500 truncate">
                                   ลูกค้า: {cusName}
                                 </div>
                               </div>
                               <Link
-                                href={`/bills?search=${encodeURIComponent(pId)}`}
-                                title="ดูบิลทั้งหมดในโครงการนี้"
+                                href={`/work-status/${encodeURIComponent(pId)}`}
+                                title={`เปิดดูรายละเอียดโครงการ #${pId}`}
                                 className="p-1 text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 rounded transition opacity-0 group-hover:opacity-100 shrink-0"
                               >
                                 <ExternalLink size={13} />

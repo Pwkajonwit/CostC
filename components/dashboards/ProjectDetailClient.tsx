@@ -48,6 +48,10 @@ type ProjectDetailClientProps = {
   hydratedProject: SheetRow;
   customerDisplay?: string;
   companyDisplay?: string;
+  ownerDisplay?: string;
+  customerOptions?: Array<{ value: string; label: string; name: string }>;
+  companyOptions?: Array<{ value: string; label: string; name: string }>;
+  responsibleOptions?: Array<{ value: string; label: string; name: string }>;
   totals: {
     workTotal: number;
     totalVat: number;
@@ -71,6 +75,10 @@ export function ProjectDetailClient({
   hydratedProject,
   customerDisplay,
   companyDisplay,
+  ownerDisplay,
+  customerOptions = [],
+  companyOptions = [],
+  responsibleOptions = [],
   totals,
   budgetControl,
   summaryRows,
@@ -117,7 +125,7 @@ export function ProjectDetailClient({
 
   const customer = customerDisplay || String(currentProject["ชื่อลูกค้า"] || currentProject["ลูกค้า"] || "-");
   const company = companyDisplay || String(currentProject["บริษัท"] || currentProject["บริษัทรับงาน"] || "-");
-  const owner = String(currentProject["รับผิดชอบ"] || "-");
+  const owner = ownerDisplay || String(currentProject["รับผิดชอบ"] || "-");
   const date = formatDateDisplay(currentProject["วันที่"]);
   const location = String(hydratedProject["สถานที่"] || "-");
 
@@ -617,7 +625,7 @@ export function ProjectDetailClient({
             <DataTable
               columns={relatedColumns}
               rows={displayedSummaryRows}
-              limit={100}
+              limit={20}
               title="รายการบิลเบิกจ่ายที่เกี่ยวข้อง"
               subtitle={`ทั้งหมด ${displayedSummaryRows.length} รายการ`}
               showSearch
@@ -1093,6 +1101,10 @@ export function ProjectDetailClient({
             project={hydratedProject}
             customerDisplay={customer}
             companyDisplay={company}
+            ownerDisplay={owner}
+            customerOptions={customerOptions}
+            companyOptions={companyOptions}
+            responsibleOptions={responsibleOptions}
             initialEditing={autoEditMode}
           />
         </div>

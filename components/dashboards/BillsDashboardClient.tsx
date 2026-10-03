@@ -248,7 +248,7 @@ export function BillsDashboardClient({
 
   const refreshBillsData = useCallback(async () => {
     try {
-      const res = await fetch(`/api/bills?pageSize=10000&page=1&_t=${Date.now()}`, {
+      const res = await fetch(`/api/bills?pageSize=1000&page=1&_t=${Date.now()}`, {
         cache: "no-store",
         headers: { "Pragma": "no-cache" }
       });

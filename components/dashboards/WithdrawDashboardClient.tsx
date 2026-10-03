@@ -12,6 +12,7 @@ import { getCostCodeBadgeStyle } from "@/lib/cost-codes";
 import { isVatActive, isDeductActive, parseDeductPercent, isCreditActive, parseCreditDays } from "@/lib/project-summary";
 import { useYearFilter } from "@/lib/context/YearFilterContext";
 import { BillStatusBadge } from "@/components/bills/BillStatusBadge";
+import { normalizeBillType } from "@/lib/bills/bill-status";
 
 export type WithdrawFilters = {
   requester?: string;
@@ -1431,10 +1432,7 @@ export function WithdrawDashboardClient({
 
 export function getRowBillType(row?: SheetRow | Record<string, any> | null): string {
   if (!row) return "หลัก";
-  const raw = String(row["บิล"] || row.bill || row.bill_type || "").trim();
-  if (raw === "ย่อย" || raw.includes("ย่อย")) return "ย่อย";
-  if (raw === "หลัก" || raw.includes("หลัก")) return "หลัก";
-  return raw || "หลัก";
+  return normalizeBillType(row);
 }
 
 function getCurrentActor(): string {

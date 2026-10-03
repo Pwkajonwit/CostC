@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { money, toNumber } from "@/lib/utils/numbers";
 import { parseDeductPercent, isVatActive } from "@/lib/project-summary";
+import { calculateBillFinancials } from "@/lib/finance/tax-calculator";
 import { formatDateDisplay, normalizeDateToIso } from "@/lib/utils/dates";
 import type { SheetRow } from "@/lib/types";
 import { BillDocumentModal } from "@/components/documents/BillDocumentModal";
@@ -35,36 +36,12 @@ import { DocumentIndexModal } from "@/components/documents/DocumentIndexModal";
 import type { BillDocumentModel } from "@/lib/bills/bill-document";
 
 function getBillWhtInfo(b: SheetRow) {
-  const percent = parseDeductPercent(b["หัก"] ?? b.deduct ?? b.withholding_tax);
-  const wage = toNumber(
-    b["ค่าแรง+พนักงาน+อื่นๆ"] ||
-      b["ค่าแรง+พนักงาน+อื่น"] ||
-      b["ค่าแรง"] ||
-      b["ค่าจ้าง"] ||
-      b["ยอดเงิน"]
-  );
-  let amount = toNumber(b["3เปอร์เซ็น"] || b["3เปอร์"] || b["จำนวนหัก"] || b.deduct_amount);
-
-  // In the CSV, column "หัก 3%" often contains the net payable (e.g. 5,820 when wage is 6,000).
-  // If raw "หัก 3%" is greater than half the wage, it is the net paid amount, so the tax amount is wage - net.
-  const rawWhtCol = toNumber(b["หัก 3%"]);
-  if (amount <= 0 && rawWhtCol > 0) {
-    if (wage > 0 && rawWhtCol > wage * 0.5) {
-      amount = Math.max(0, Math.round((wage - rawWhtCol) * 100) / 100);
-    } else {
-      amount = rawWhtCol;
-    }
-  }
-
-  if (amount <= 0 && percent > 0) {
-    const hasVat = isVatActive(b.vat ?? b["vat"] ?? b.VAT);
-    if (hasVat) {
-      amount = Math.round(((wage / 1.07) * (percent / 100)) * 100) / 100;
-    } else {
-      amount = Math.round((wage * (percent / 100)) * 100) / 100;
-    }
-  }
-  return { percent, amount, hasWht: percent > 0 || amount > 0 };
+  const fin = calculateBillFinancials(b);
+  return {
+    percent: fin.taxRate,
+    amount: fin.withholdingTax,
+    hasWht: fin.hasDeduct && (fin.withholdingTax > 0 || fin.taxRate > 0)
+  };
 }
 
 function parseBillMonthKey(dateStr: string): { key: string; label: string; year: number; month: number } | null {
