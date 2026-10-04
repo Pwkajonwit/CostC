@@ -40,7 +40,10 @@ function getBillWhtInfo(b: SheetRow) {
   return {
     percent: fin.taxRate,
     amount: fin.withholdingTax,
-    hasWht: fin.hasDeduct && (fin.withholdingTax > 0 || fin.taxRate > 0)
+    hasWht: fin.hasDeduct && (fin.withholdingTax > 0 || fin.taxRate > 0),
+    hasVat: fin.hasVat,
+    taxBase: fin.taxBase,
+    isCorporate: fin.isCorporate,
   };
 }
 
@@ -1126,11 +1129,24 @@ export function DocumentsManagerClient({
                       </td>
 
                       <td className="py-2.5 px-3 text-right font-medium text-slate-900 text-[11px]">
-                        {money(wageAmt)}
+                        <div>{money(wageAmt)}</div>
+                        {whtInfo.hasVat && whtInfo.taxBase < wageAmt && (
+                          <div
+                            className="text-[10px] text-purple-700 font-semibold whitespace-nowrap"
+                            title={`ยอดรวม VAT (ฐานคิดหัก 3% ก่อน VAT คือ ${money(whtInfo.taxBase)})`}
+                          >
+                            ก่อน VAT {money(whtInfo.taxBase)}
+                          </div>
+                        )}
                       </td>
 
                       <td className="py-2.5 px-3 text-right font-medium text-amber-700 text-[11px]">
-                        {money(wht3Amt)}
+                        <div>{money(wht3Amt)}</div>
+                        {whtInfo.hasVat && whtInfo.taxBase < wageAmt && (
+                          <div className="text-[9.5px] text-slate-400 font-normal whitespace-nowrap">
+                            (คิดจาก {money(whtInfo.taxBase)})
+                          </div>
+                        )}
                       </td>
 
                       <td className="py-2.5 px-3 text-right font-bold text-emerald-700 text-[11px]">
