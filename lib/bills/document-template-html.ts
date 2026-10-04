@@ -531,8 +531,14 @@ export function renderDocumentIndexHtml(
           <td style="border: 1px solid #000; padding: 2px 4px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${name}">${name}</td>
           <td style="border: 1px solid #000; text-align: center; font-size: 10.5px; white-space: nowrap; padding: 2px;">${idCard}</td>
           <td style="border: 1px solid #000; padding: 2px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${address}">${address}</td>
-          <td style="border: 1px solid #000; text-align: right; padding: 2px 4px; font-weight: 500;">${fmt(wage)}</td>
-          <td style="border: 1px solid #000; text-align: right; padding: 2px 4px; font-weight: 500;">${fmt(whtAmt)}</td>
+          <td style="border: 1px solid #000; text-align: right; padding: 2px 4px; font-weight: 500;">
+            <div>${fmt(wage)}</div>
+            ${item.amounts?.hasVat && item.amounts.taxBase < wage ? `<div style="font-size: 8.5px; color: #6b21a8; font-weight: normal;">(ก่อน VAT ${fmt(item.amounts.taxBase)})</div>` : ""}
+          </td>
+          <td style="border: 1px solid #000; text-align: right; padding: 2px 4px; font-weight: 500;">
+            <div>${fmt(whtAmt)}</div>
+            ${item.amounts?.hasVat && item.amounts.taxBase < wage ? `<div style="font-size: 8px; color: #64748b; font-weight: normal;">(จาก ${fmt(item.amounts.taxBase)})</div>` : ""}
+          </td>
           <td style="border: 1px solid #000; text-align: right; padding: 2px 4px; font-weight: bold; color: #065f46;">${fmt(netPayable)}</td>
           <td style="border: 1px solid #000; text-align: center; font-size: 10.5px; padding: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${issuer}</td>
           <td style="border: 1px solid #000; padding: 2px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${jobDesc}">${jobDesc}</td>

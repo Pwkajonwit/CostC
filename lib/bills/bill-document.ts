@@ -53,6 +53,7 @@ export interface BillDocumentModel {
     thaiBahtTextTotal: string;   // ตัวหนังสือยอดเงินสุทธิ
     thaiBahtTextTax: string;     // ตัวหนังสือยอดภาษีหักนำส่ง
     taxBase: number;             // ฐานภาษีก่อนหัก ณ ที่จ่าย (ก่อน VAT สำหรับ 50 ทวิ)
+    hasVat?: boolean;            // มีภาษีมูลค่าเพิ่ม VAT 7% รวมอยู่ในยอดหรือไม่
   };
 
   issuer?: string;               // ผู้จ่าย / ผู้จัดทำบิล
@@ -269,6 +270,7 @@ export async function getBillDocumentData(
       thaiBahtTextTotal: thaiBahtText(netPayable),
       thaiBahtTextTax: thaiBahtText(withholdingTax),
       taxBase,
+      hasVat: fin.hasVat,
     },
 
     issuer,
