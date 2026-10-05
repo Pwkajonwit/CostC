@@ -3268,6 +3268,8 @@ export type BankLookupInfo = {
   bankName?: string;
   storeName?: string;
   vendorName?: string;
+  fullName?: string;
+  nickname?: string;
 };
 
 export const DEFAULT_THAI_BANKS: Record<string, string> = {
@@ -3406,6 +3408,8 @@ export async function getBankInfoMap(forceRefresh = false): Promise<Map<string, 
           bankName: bankName || undefined,
           storeName: storeDisplayName,
           vendorName: storeDisplayName,
+          fullName: fullName || name,
+          nickname: name,
         };
 
         if (id) {
@@ -3448,6 +3452,8 @@ export async function getBankInfoMap(forceRefresh = false): Promise<Map<string, 
           bankName: bankName || undefined,
           storeName: contractorDisplayName,
           vendorName: contractorDisplayName,
+          fullName: fullName || nickname,
+          nickname: nickname,
         };
 
         if (id) {
@@ -3490,6 +3496,8 @@ export async function getBankInfoMap(forceRefresh = false): Promise<Map<string, 
           bankName: bankName || undefined,
           storeName: memberDisplayName,
           vendorName: memberDisplayName,
+          fullName: fullName || nickname,
+          nickname: nickname,
         };
 
         if (id) {
@@ -4205,6 +4213,10 @@ export function resolveBankInfo(
     accountName: accountName || undefined,
     accountNo: accountNo || undefined,
     bankName: bankName || undefined,
+    fullName: fallbackInfo?.fullName || undefined,
+    nickname: fallbackInfo?.nickname || undefined,
+    storeName: fallbackInfo?.storeName || undefined,
+    vendorName: fallbackInfo?.vendorName || undefined,
   };
 }
 
@@ -4220,6 +4232,8 @@ export function resolveRequesterBankInfo(
   accountName?: string;
   accountNo?: string;
   bankName?: string;
+  fullName?: string;
+  nickname?: string;
 } {
   const getFromMap = (key: string): BankLookupInfo | undefined => {
     if (!key) return undefined;
@@ -4301,6 +4315,8 @@ export function resolveRequesterBankInfo(
     accountName: accountName || undefined,
     accountNo: (accountNo && accountNo !== "non" && accountNo !== "-") ? accountNo : undefined,
     bankName: bankName || undefined,
+    fullName: requesterInfo?.fullName || undefined,
+    nickname: requesterInfo?.nickname || undefined,
   };
 }
 
@@ -6144,6 +6160,7 @@ export interface DailyTransferGroup {
   bankName: string;
   accountNo: string;
   accountName: string;
+  nickname?: string;
   totalAmount: number;
   category: "main" | "sub";
   bills: Array<{
@@ -6229,14 +6246,17 @@ export function createDailyTransferSummaryFlex(
       let bankName = "";
       let accountNo = "";
       let accountName = "";
+      let payeeNickname = "";
 
       if (category === "sub") {
         // Sub-bill: transfer goes to the requester (ผู้เบิก)
         const reqBank = resolveRequesterBankInfo(b, bankInfoMap, peopleMap);
-        payeeName = reqBank.accountName || reqBank.requesterName || String(b["ผู้เบิก"] || b.requester || "ผู้เบิก").trim();
+        const realFullName = reqBank.fullName || reqBank.accountName || b["ชื่อ-นามสกุล"] || b.data?.["ชื่อ-นามสกุล"] || "";
+        payeeName = realFullName || reqBank.requesterName || String(b["ผู้เบิก"] || b.requester || "ผู้เบิก").trim();
         bankName = reqBank.bankName || "";
         accountNo = reqBank.accountNo || "";
         accountName = reqBank.accountName || "";
+        payeeNickname = reqBank.nickname || "";
       } else {
         // Main bill: transfer goes to store / contractor
         const rawVendorType = String(b["ร้านค้า/ผู้รับเหมา"] || b.vendor_type || "").trim();
@@ -6257,9 +6277,29 @@ export function createDailyTransferSummaryFlex(
         }
 
         const bankInfo = resolveBankInfo(b, bankInfoMap);
-        payeeName = resolveVendorName(rawVendorCandidate, bankInfoMap, b, peopleMap);
+
+        // Prioritize real full name (ชื่อจริง / ชื่อ-นามสกุล) instead of nickname (ชื่อเล่น)
+        let realName = bankInfo?.fullName || bankInfo?.accountName || "";
+        if (!realName && rawVendorCandidate) {
+          const rawInfo = bankInfoMap instanceof Map
+            ? (bankInfoMap.get(rawVendorCandidate) || bankInfoMap.get(rawVendorCandidate.toLowerCase()))
+            : (bankInfoMap ? (bankInfoMap as any)[rawVendorCandidate] : undefined);
+          if (rawInfo) {
+            realName = rawInfo.fullName || rawInfo.accountName || "";
+          }
+        }
+        if (!realName) {
+          realName = String(
+            b["ชื่อ-นามสกุล"] || b.full_name ||
+            b["ชื่อบัญชี"] || b.account_name ||
+            b.data?.["ชื่อ-นามสกุล"] || b.data?.full_name ||
+            b.data?.data?.["ชื่อ-นามสกุล"] || ""
+          ).trim();
+        }
+
+        payeeName = realName || resolveVendorName(rawVendorCandidate, bankInfoMap, b, peopleMap);
         if ((!payeeName || payeeName === "-" || /^[a-zA-Z]{1,3}[-_]?\d+$/i.test(payeeName) || /^[a-zA-Z]{1,3}[-_]?\d+(\s*,\s*[a-zA-Z]{1,3}[-_]?\d+)+$/i.test(payeeName)) && bankInfo) {
-          payeeName = bankInfo.storeName || bankInfo.accountName || payeeName;
+          payeeName = bankInfo.fullName || bankInfo.accountName || bankInfo.storeName || payeeName;
         }
         if (!payeeName || payeeName === "-") {
           payeeName = String(b["ผู้เบิก"] || b.requester || "ผู้รับเงิน").trim();
@@ -6269,6 +6309,7 @@ export function createDailyTransferSummaryFlex(
         bankName = String(bankInfo?.bankName || b["ธนาคาร"] || b.bank_name || "").trim();
         accountNo = String(bankInfo?.accountNo || b["เลขบัญชี"] || b.bank_account || "").trim();
         accountName = String(bankInfo?.accountName || b["ชื่อบัญชี"] || b.account_name || "").trim();
+        payeeNickname = String(bankInfo?.nickname || "").trim();
       }
 
       const cleanAccDigits = accountNo.replace(/\D/g, "");
@@ -6296,6 +6337,7 @@ export function createDailyTransferSummaryFlex(
         if (!existing.accountNo && accountNo) existing.accountNo = accountNo;
         if (!existing.bankName && bankName) existing.bankName = bankName;
         if (!existing.accountName && accountName) existing.accountName = accountName;
+        if (!existing.nickname && payeeNickname) existing.nickname = payeeNickname;
       } else {
         map.set(groupKey, {
           groupKey,
@@ -6303,6 +6345,7 @@ export function createDailyTransferSummaryFlex(
           bankName,
           accountNo,
           accountName,
+          nickname: payeeNickname,
           totalAmount: netTransferAmt,
           category,
           bills: [billItem]
