@@ -847,6 +847,10 @@ function sanitizeBySchema(row: SheetRow, tableName: string) {
       row[field.name] = (row[field.name] as string).replace(/^\d+\s*/, "");
     }
     if (field.type === "Hidden") return;
+    if (field.name === "สินค้า" && String(row["ร้านค้า/ผู้รับเหมา"] ?? row.vendor_type ?? "").trim() === "พนักงาน") {
+      row["สินค้า"] = "301 พนักงาน";
+      return;
+    }
     if (hasMultiItems && amountCols.includes(field.name) && hasRowValue(row[field.name])) return;
     // CRITICAL: NEVER wipe out "วันจ่าย" or "เครดิต" if a value was provided
     if (field.name === "วันจ่าย" && (hasRowValue(row["วันจ่าย"]) || hasRowValue(row.paid_date))) return;
@@ -864,6 +868,7 @@ function validateRequiredBySchema(row: SheetRow, tableName: string) {
     if (field.name === "สินค้า") {
       const isMulti = String(row["_is_multi_item"] ?? "").trim() === "true" || Array.isArray(row.items) || (row.data && Array.isArray((row.data as any).items));
       if (isMulti) return false;
+      if (vType === "พนักงาน") return false;
       if (vType === "ผู้รับเหมา" && (hasRowValue(row["ประเภท"]) || hasRowValue(row["รายละเอียดงาน"]))) {
         return false;
       }
@@ -893,6 +898,12 @@ function validateRequiredBySchema(row: SheetRow, tableName: string) {
 function isFieldVisible(field: ReturnType<typeof getFormSchema>[number], row: SheetRow) {
   const vendorType = String(row["ร้านค้า/ผู้รับเหมา"] ?? row.vendor_type ?? "").trim();
   const category = String(row["ประเภท"] ?? row.category ?? "").trim();
+
+  if (field.name === "สินค้า") {
+    const isMulti = String(row["_is_multi_item"] ?? "").trim() === "true" || Array.isArray(row.items) || (row.data && Array.isArray((row.data as any).items));
+    if (isMulti) return false;
+    return vendorType !== "พนักงาน";
+  }
 
   if (field.name === "statusค่าแรง") {
     return vendorType === "ผู้รับเหมา";

@@ -20,7 +20,7 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
     { name: "ร้านค้า", type: "Ref", refTable: TABLES.STORE, refKey: "id_store", refLabel: "ชื่อร้านค้า", required: true, showIf: { column: "ร้านค้า/ผู้รับเหมา", equals: "ร้านค้า" } },
     { name: "ผู้รับเหมา", type: "Ref", refTable: TABLES.CONTRACT_WORK, refKey: "id_Conwork", refLabel: "ชื่อเล่น", required: true, showIf: { column: "ร้านค้า/ผู้รับเหมา", equals: "ผู้รับเหมา" }, filterBy: { field: "ID Project", column: "ID Project", openContract: true }, refFill: { "รายละเอียดงาน": "รายละเอียดงาน", "ค่าแรงคงเหลือ": "{ค่าแรงคงเหลือ} จาก {ยอดเงินจ้าง}" } },
     { name: "รายละเอียดงาน", type: "Text", readonly: true, showIf: { column: "ร้านค้า/ผู้รับเหมา", equals: "ผู้รับเหมา" } },
-    { name: "สินค้า", type: "Enum", values: [], dynamicValues: "productCategoryOptions", required: true, description: "ดึงจากตั้งค่าหมวดหมู่สินค้า" },
+    { name: "สินค้า", type: "Enum", values: [], dynamicValues: "productCategoryOptions", required: true, description: "ดึงจากตั้งค่าหมวดหมู่สินค้า", showIf: { column: "ร้านค้า/ผู้รับเหมา", in: ["ร้านค้า", "ผู้รับเหมา"] } },
     { name: "ประเภท", type: "Enum", values: [], inputMode: "buttons", required: true, dynamicValues: "billTypeOptions" },
     { name: "รูปถ่ายบิล", type: "Image" },
     { name: "ค่าของ", label: "ค่าใช้จ่าย", type: "Decimal", required: true, showIf: { column: "ประเภท", in: [...PURE_MATERIAL_CATEGORY_OPTIONS, "1.ค่าของ"] } },

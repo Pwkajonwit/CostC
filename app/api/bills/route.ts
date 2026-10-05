@@ -261,6 +261,7 @@ function ensureBillVendorType(row: SheetRow) {
     if (!row["ร้าน/บุคคล"] && row["ชื่อพนักงาน"]) row["ร้าน/บุคคล"] = row["ชื่อพนักงาน"];
     if (!row["ประเภท"]) row["ประเภท"] = "301 พนักงาน";
     if (!row["สินค้า/ทำงาน"]) row["สินค้า/ทำงาน"] = row["ชื่อพนักงาน"] ? `ค่าแรง (${row["ชื่อพนักงาน"]})` : "301 พนักงาน";
+    if (!row["สินค้า"]) row["สินค้า"] = "301 พนักงาน";
     return;
   }
 
@@ -305,6 +306,10 @@ function sanitizeBySchema(row: SheetRow, tableName: string) {
       row[field.name] = (row[field.name] as string).replace(/^\d+\s*/, "");
     }
     if (field.type === "Hidden") return;
+    if (field.name === "สินค้า" && String(row["ร้านค้า/ผู้รับเหมา"] ?? row.vendor_type ?? "").trim() === "พนักงาน") {
+      row["สินค้า"] = "301 พนักงาน";
+      return;
+    }
     if (hasMultiItems && amountCols.includes(field.name) && hasValue(row[field.name])) return;
     // CRITICAL: NEVER wipe out "วันจ่าย" or "เครดิต" if a value was provided
     if (field.name === "วันจ่าย" && (hasValue(row["วันจ่าย"]) || hasValue(row.paid_date))) return;
@@ -322,6 +327,7 @@ function validateRequiredBySchema(row: SheetRow, tableName: string) {
     if (field.name === "สินค้า") {
       const isMulti = String(row["_is_multi_item"] ?? "").trim() === "true" || Array.isArray(row.items) || (row.data && Array.isArray((row.data as any).items));
       if (isMulti) return false;
+      if (vType === "พนักงาน") return false;
       if (vType === "ผู้รับเหมา" && (hasValue(row["ประเภท"]) || hasValue(row["รายละเอียดงาน"]))) {
         return false;
       }
@@ -351,6 +357,12 @@ function validateRequiredBySchema(row: SheetRow, tableName: string) {
 function isFieldVisible(field: ReturnType<typeof getFormSchema>[number], row: SheetRow) {
   const vendorType = String(row["ร้านค้า/ผู้รับเหมา"] ?? row.vendor_type ?? "").trim();
   const category = String(row["ประเภท"] ?? row.category ?? "").trim();
+
+  if (field.name === "สินค้า") {
+    const isMulti = String(row["_is_multi_item"] ?? "").trim() === "true" || Array.isArray(row.items) || (row.data && Array.isArray((row.data as any).items));
+    if (isMulti) return false;
+    return vendorType !== "พนักงาน";
+  }
 
   if (field.name === "statusค่าแรง") {
     return vendorType === "ผู้รับเหมา";
