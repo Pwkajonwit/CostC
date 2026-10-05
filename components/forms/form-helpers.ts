@@ -1337,6 +1337,9 @@ export function sanitizeValuesForSubmit(values: Record<string, string>, form: Fo
       if (next["ชื่อพนักงาน"]) {
         next["ร้าน/บุคคล"] = next["ชื่อพนักงาน"];
       }
+      if (!next["สินค้า/ทำงาน"]) {
+        next["สินค้า/ทำงาน"] = next["ชื่อพนักงาน"] ? `ค่าแรง (${next["ชื่อพนักงาน"]})` : "301 พนักงาน";
+      }
       next["ผู้รับเหมา"] = "";
       next["ร้านค้า"] = "";
       next["statusค่าแรง"] = "";
