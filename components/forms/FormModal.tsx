@@ -1755,6 +1755,13 @@ export function FormModal({
       }
     }
 
+    if (submitValues["ร้านค้า/ผู้รับเหมา"] === "พนักงาน") {
+      submitValues["ประเภท"] = "301 พนักงาน";
+      if (!submitValues["สินค้า"]) submitValues["สินค้า"] = "301 พนักงาน";
+      if (!submitValues["สินค้า/ทำงาน"]) submitValues["สินค้า/ทำงาน"] = submitValues["ชื่อพนักงาน"] ? `ค่าแรง (${submitValues["ชื่อพนักงาน"]})` : "301 พนักงาน";
+      if (submitValues["ชื่อพนักงาน"]) submitValues["ร้าน/บุคคล"] = submitValues["ชื่อพนักงาน"];
+    }
+
     const validationError = validateVisibleRequiredFields(submitValues, activeForm);
     if (validationError) {
       setError(validationError);
