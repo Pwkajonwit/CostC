@@ -4177,11 +4177,14 @@ export function resolveBankInfo(
   };
 
   const rawStore = String(bill["ร้านค้า"] || bill.store_id || bill.data?.["ร้านค้า"] || bill.data?.data?.["ร้านค้า"] || "").trim();
+  const rawStoreName = String(bill["ชื่อร้านค้า"] || bill.store_name || bill.data?.["ชื่อร้านค้า"] || bill.data?.data?.["ชื่อร้านค้า"] || "").trim();
   const rawContractor = String(bill["ผู้รับเหมา"] || bill.contractor_id || bill.data?.["ผู้รับเหมา"] || bill.data?.data?.["ผู้รับเหมา"] || "").trim();
+  const rawContractorName = String(bill["ชื่อผู้รับเหมา"] || bill.contractor_name || bill.data?.["ชื่อผู้รับเหมา"] || bill.data?.data?.["ชื่อผู้รับเหมา"] || "").trim();
+  const rawNickname = String(bill["ชื่อเล่น"] || bill.nickname || bill.data?.["ชื่อเล่น"] || "").trim();
   const rawVendor = String(bill["ร้าน/บุคคล"] || bill["ร้านค้า/ผู้รับเหมา"] || bill.vendor_or_person || bill.data?.["ร้าน/บุคคล"] || bill.data?.data?.["ร้าน/บุคคล"] || "").trim();
   const rawRequester = String(bill["ผู้เบิก"] || bill.requester || bill.data?.["ผู้เบิก"] || bill.data?.data?.["ผู้เบิก"] || "").trim();
 
-  let vendorInfo = getFromMap(rawStore) || getFromMap(rawContractor) || getFromMap(rawVendor);
+  let vendorInfo = getFromMap(rawStore) || getFromMap(rawStoreName) || getFromMap(rawContractor) || getFromMap(rawContractorName) || getFromMap(rawNickname) || getFromMap(rawVendor);
   if (!vendorInfo && rawVendor.includes(" - ")) {
     const parts = rawVendor.split(" - ");
     vendorInfo = getFromMap(parts[0]) || getFromMap(parts[1]);
@@ -6249,16 +6252,15 @@ export function createDailyTransferSummaryFlex(
       let payeeNickname = "";
 
       if (category === "sub") {
-        // Sub-bill: transfer goes to the requester (ผู้เบิก)
+        // Sub-bill: transfer goes to the requester (ผู้เบิก) - prioritize nickname (ชื่อเล่น)
         const reqBank = resolveRequesterBankInfo(b, bankInfoMap, peopleMap);
-        const realFullName = reqBank.fullName || reqBank.accountName || b["ชื่อ-นามสกุล"] || b.data?.["ชื่อ-นามสกุล"] || "";
-        payeeName = realFullName || reqBank.requesterName || String(b["ผู้เบิก"] || b.requester || "ผู้เบิก").trim();
-        bankName = reqBank.bankName || "";
-        accountNo = reqBank.accountNo || "";
-        accountName = reqBank.accountName || "";
-        payeeNickname = reqBank.nickname || "";
+        payeeNickname = String(reqBank.nickname || resolveRequesterNameFromMap(String(b["ผู้เบิก"] || b.requester || ""), peopleMap) || "").trim();
+        payeeName = payeeNickname || reqBank.requesterName || String(b["ผู้เบิก"] || b.requester || "ผู้เบิก").trim();
+        bankName = reqBank.bankName || String(b["ธนาคาร"] || b.bank_name || "").trim();
+        accountNo = reqBank.accountNo || String(b["เลขบัญชี"] || b.bank_account || "").trim();
+        accountName = String(reqBank.accountName || reqBank.fullName || b["ชื่อบัญชี"] || b.account_name || b["ชื่อ-นามสกุล"] || b.full_name || "").trim();
       } else {
-        // Main bill: transfer goes to store / contractor
+        // Main bill: transfer goes to store / contractor - prioritize nickname (ชื่อเล่น)
         const rawVendorType = String(b["ร้านค้า/ผู้รับเหมา"] || b.vendor_type || "").trim();
         const isContractor = rawVendorType === "ผู้รับเหมา" || Boolean(b["ผู้รับเหมา"]) || Boolean(b.contractor_id);
         let rawVendorCandidate = "";
@@ -6278,38 +6280,39 @@ export function createDailyTransferSummaryFlex(
 
         const bankInfo = resolveBankInfo(b, bankInfoMap);
 
-        // Prioritize real full name (ชื่อจริง / ชื่อ-นามสกุล) instead of nickname (ชื่อเล่น)
-        let realName = bankInfo?.fullName || bankInfo?.accountName || "";
-        if (!realName && rawVendorCandidate) {
+        // Prioritize nickname (ชื่อเล่น) for contractor / store / payee
+        let candidateNickname = String(bankInfo?.nickname || "").trim();
+        if (!candidateNickname && rawVendorCandidate) {
           const rawInfo = bankInfoMap instanceof Map
             ? (bankInfoMap.get(rawVendorCandidate) || bankInfoMap.get(rawVendorCandidate.toLowerCase()))
             : (bankInfoMap ? (bankInfoMap as any)[rawVendorCandidate] : undefined);
-          if (rawInfo) {
-            realName = rawInfo.fullName || rawInfo.accountName || "";
+          if (rawInfo?.nickname) {
+            candidateNickname = String(rawInfo.nickname).trim();
           }
         }
-        if (!realName) {
-          realName = String(
-            b["ชื่อ-นามสกุล"] || b.full_name ||
-            b["ชื่อบัญชี"] || b.account_name ||
-            b.data?.["ชื่อ-นามสกุล"] || b.data?.full_name ||
-            b.data?.data?.["ชื่อ-นามสกุล"] || ""
+        if (!candidateNickname) {
+          candidateNickname = String(
+            b["ชื่อเล่น"] || b.nickname ||
+            b.data?.["ชื่อเล่น"] || b.data?.nickname ||
+            b.data?.data?.["ชื่อเล่น"] || ""
           ).trim();
         }
 
-        payeeName = realName || resolveVendorName(rawVendorCandidate, bankInfoMap, b, peopleMap);
-        if ((!payeeName || payeeName === "-" || /^[a-zA-Z]{1,3}[-_]?\d+$/i.test(payeeName) || /^[a-zA-Z]{1,3}[-_]?\d+(\s*,\s*[a-zA-Z]{1,3}[-_]?\d+)+$/i.test(payeeName)) && bankInfo) {
-          payeeName = bankInfo.fullName || bankInfo.accountName || bankInfo.storeName || payeeName;
+        // Resolved payee name: uses nickname if available, otherwise resolved vendor/store name
+        let resolvedPayee = candidateNickname || resolveVendorName(rawVendorCandidate, bankInfoMap, b, peopleMap);
+        if ((!resolvedPayee || resolvedPayee === "-" || /^[a-zA-Z]{1,3}[-_]?\d+$/i.test(resolvedPayee) || /^[a-zA-Z]{1,3}[-_]?\d+(\s*,\s*[a-zA-Z]{1,3}[-_]?\d+)+$/i.test(resolvedPayee)) && bankInfo) {
+          resolvedPayee = candidateNickname || bankInfo.nickname || bankInfo.storeName || bankInfo.vendorName || bankInfo.accountName || bankInfo.fullName || resolvedPayee;
         }
-        if (!payeeName || payeeName === "-") {
-          payeeName = String(b["ผู้เบิก"] || b.requester || "ผู้รับเงิน").trim();
+        if (!resolvedPayee || resolvedPayee === "-") {
+          resolvedPayee = String(b["ผู้เบิก"] || b.requester || "ผู้รับเงิน").trim();
         }
-        payeeName = payeeName.replace(/^\d+[\.\s\-]+/, "").trim() || payeeName;
+        resolvedPayee = resolvedPayee.replace(/^\d+[\.\s\-]+/, "").trim() || resolvedPayee;
 
+        payeeName = resolvedPayee;
         bankName = String(bankInfo?.bankName || b["ธนาคาร"] || b.bank_name || "").trim();
         accountNo = String(bankInfo?.accountNo || b["เลขบัญชี"] || b.bank_account || "").trim();
-        accountName = String(bankInfo?.accountName || b["ชื่อบัญชี"] || b.account_name || "").trim();
-        payeeNickname = String(bankInfo?.nickname || "").trim();
+        accountName = String(bankInfo?.accountName || bankInfo?.fullName || b["ชื่อบัญชี"] || b.account_name || b["ชื่อ-นามสกุล"] || b.full_name || "").trim();
+        payeeNickname = candidateNickname || String(bankInfo?.nickname || "").trim();
       }
 
       const cleanAccDigits = accountNo.replace(/\D/g, "");
@@ -6338,6 +6341,9 @@ export function createDailyTransferSummaryFlex(
         if (!existing.bankName && bankName) existing.bankName = bankName;
         if (!existing.accountName && accountName) existing.accountName = accountName;
         if (!existing.nickname && payeeNickname) existing.nickname = payeeNickname;
+        if (payeeNickname && existing.payeeName !== payeeNickname) {
+          existing.payeeName = payeeNickname;
+        }
       } else {
         map.set(groupKey, {
           groupKey,
