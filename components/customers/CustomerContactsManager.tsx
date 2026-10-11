@@ -20,19 +20,48 @@ import type { CustomerContact } from "@/lib/supabase/supabase-db";
 interface CustomerContactsManagerProps {
   customerId: string;
   customerName: string;
+  initialShortName?: string;
   initialContacts?: CustomerContact[];
 }
 
 export function CustomerContactsManager({
   customerId,
   customerName,
+  initialShortName = "",
   initialContacts = []
 }: CustomerContactsManagerProps) {
   const [contacts, setContacts] = useState<CustomerContact[]>(initialContacts);
+  const [shortName, setShortName] = useState(initialShortName);
+  const [isEditingShort, setIsEditingShort] = useState(false);
+  const [shortInput, setShortInput] = useState(initialShortName);
+  const [savingShort, setSavingShort] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editingContact, setEditingContact] = useState<CustomerContact | null>(null);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const handleSaveShortName = async () => {
+    setSavingShort(true);
+    try {
+      const res = await fetch("/api/customers/short-name", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerId,
+          customerName,
+          shortName: shortInput.trim()
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "บันทึกชื่อย่อไม่สำเร็จ");
+      setShortName(shortInput.trim());
+      setIsEditingShort(false);
+    } catch (e: any) {
+      alert(e.message || "เกิดข้อผิดพลาดในการบันทึกชื่อย่อ");
+    } finally {
+      setSavingShort(false);
+    }
+  };
 
   // Form states
   const [formName, setFormName] = useState("");
@@ -157,14 +186,77 @@ export function CustomerContactsManager({
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={openAddModal}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-xs font-medium rounded-lg shadow-2xs transition cursor-pointer"
-        >
-          <Plus size={14} />
-          <span>เพิ่มผู้ติดต่อ</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Customer Short Name Editor */}
+          <div className="flex items-center gap-1.5 bg-blue-50/80 border border-blue-200/80 rounded-lg px-2.5 py-1">
+            <span className="text-[11px] font-semibold text-blue-700">ชื่อย่อ (LINE/Flex):</span>
+            {isEditingShort ? (
+              <div className="flex items-center gap-1">
+                <input
+                  type="text"
+                  value={shortInput}
+                  onChange={(e) => setShortInput(e.target.value)}
+                  placeholder="เช่น คาร์กิลล์"
+                  className="px-2 py-0.5 text-xs bg-white border border-blue-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 w-28 sm:w-36 text-slate-800"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveShortName();
+                    if (e.key === "Escape") {
+                      setIsEditingShort(false);
+                      setShortInput(shortName);
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveShortName}
+                  disabled={savingShort}
+                  className="p-1 text-emerald-600 hover:bg-emerald-100/60 rounded cursor-pointer transition"
+                  title="บันทึก"
+                >
+                  {savingShort ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditingShort(false);
+                    setShortInput(shortName);
+                  }}
+                  className="p-1 text-slate-400 hover:text-slate-600 rounded cursor-pointer transition"
+                  title="ยกเลิก"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-bold text-blue-900 font-sans">
+                  {shortName || "-"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShortInput(shortName);
+                    setIsEditingShort(true);
+                  }}
+                  className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-100/60 rounded cursor-pointer transition"
+                  title="แก้ไขชื่อย่อสำหรับแสดงใน Flex / LINE"
+                >
+                  <Edit2 size={12} />
+                </button>
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={openAddModal}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-xs font-medium rounded-lg shadow-2xs transition cursor-pointer"
+          >
+            <Plus size={14} />
+            <span>เพิ่มผู้ติดต่อ</span>
+          </button>
+        </div>
       </div>
 
       {/* Content */}
