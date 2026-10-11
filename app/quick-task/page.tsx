@@ -258,9 +258,7 @@ export default function QuickTaskPage() {
         ? data.taskIds.map((id: any) => `#${id}`).join(", ")
         : `#${data.taskId}`;
 
-      setSuccessMsg(
-        `🎉 เปิดงานสำเร็จทั้งหมด ${data.count || validTasks.length} รายการ! (${taskListText}) บันทึกและส่งแจ้งเตือนเข้าห้อง LINE เรียบร้อยแล้ว`
-      );
+      setSuccessMsg(`เปิดงานสำเร็จ (${taskListText})`);
 
       if (typeof window !== "undefined") {
         window.scrollTo({ top: 0, behavior: "smooth" });
@@ -284,18 +282,15 @@ export default function QuickTaskPage() {
         />
 
         {successMsg && (
-          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs flex items-start justify-between gap-2.5 shadow-2xs animate-in fade-in slide-in-from-top-2">
-            <div className="flex items-start gap-2">
-              <CheckCircle2 size={18} className="text-emerald-600 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-bold text-emerald-900">บันทึกเปิดงานสำเร็จ!</p>
-                <p className="text-emerald-700 mt-0.5 leading-relaxed">{successMsg}</p>
-              </div>
+          <div className="p-2.5 px-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs flex items-center justify-between gap-2 shadow-2xs animate-in fade-in slide-in-from-top-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+              <span className="font-semibold text-emerald-900 truncate">{successMsg}</span>
             </div>
             <button
               type="button"
               onClick={() => setSuccessMsg(null)}
-              className="text-emerald-500 hover:text-emerald-800 p-0.5 rounded transition cursor-pointer"
+              className="text-emerald-500 hover:text-emerald-800 p-0.5 rounded transition cursor-pointer shrink-0"
             >
               <X size={16} />
             </button>

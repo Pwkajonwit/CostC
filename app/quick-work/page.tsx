@@ -48,6 +48,8 @@ interface SystemCompany {
 interface SystemCustomer {
   id: string;
   name: string | null;
+  short_name?: string | null;
+  "ชื่อย่อ"?: string | null;
 }
 
 interface CustomerContactItem {
@@ -679,11 +681,12 @@ function QuickWorkContent() {
     });
     systemCustomers.forEach((cus) => {
       const name = cus.name || cus.id;
+      const short = cus.short_name || cus["ชื่อย่อ"];
       list.push({
         key: `cus-${cus.id}`,
         value: name,
-        label: `${cus.id} - ${name}`,
-        subLabel: "ลูกค้า",
+        label: short ? `${cus.id} - [${short}] ${name}` : `${cus.id} - ${name}`,
+        subLabel: short ? `ลูกค้า (${short})` : "ลูกค้า",
         item: cus,
       });
     });
@@ -882,9 +885,11 @@ function QuickWorkContent() {
           const liffModule = await import("@line/liff");
           const liff = liffModule.default || (window as any).liff;
           if (liff && typeof liff.isInClient === "function" && liff.isInClient()) {
+            const teamDisplay = team.toUpperCase().startsWith("PW") ? team.toUpperCase() : `PW${team}`;
+            const numLabel = returnedWorkId.replace(/\D/g, "");
             const altText = isUpd
-              ? `[อัปเดตงานรับเหมา: ${returnedWorkId}] ${title.trim()}`
-              : `[เปิดงานรับเหมา: ${returnedWorkId}] ${title.trim()}`;
+              ? `[อัปเดตงาน: ${teamDisplay} ลำดับ ${numLabel}] ${title.trim()}`
+              : `[เปิดงาน: ${teamDisplay} ลำดับ ${numLabel}] ${title.trim()}`;
             await liff.sendMessages([
               {
                 type: "flex",
@@ -911,10 +916,12 @@ function QuickWorkContent() {
         setNote("");
       }
       setErrorMsg(null);
+      const teamDisplay = team.toUpperCase().startsWith("PW") ? team.toUpperCase() : `PW${team}`;
+      const numLabel = returnedWorkId.replace(/\D/g, "");
       setSuccessMsg(
         isUpd
-          ? `🎉 อัปเดตงานรับเหมาสำเร็จ! (รหัส ${returnedWorkId}) บันทึกและส่ง Flex แจ้งเตือนเข้า LINE เรียบร้อยแล้ว`
-          : `🎉 เปิดงานรับเหมาสำเร็จ! (รหัส ${returnedWorkId}) บันทึกและส่ง Flex แจ้งเตือนเข้า LINE เรียบร้อยแล้ว`
+          ? `อัปเดตงานสำเร็จ (${teamDisplay} #${numLabel})`
+          : `เปิดงานสำเร็จ (${teamDisplay} #${numLabel})`
       );
 
       if (typeof window !== "undefined") {
@@ -949,26 +956,15 @@ function QuickWorkContent() {
         />
 
         {successMsg && (
-          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs flex items-start justify-between gap-2.5 shadow-2xs animate-in fade-in slide-in-from-top-2">
-            <div className="flex items-start gap-2">
-              <CheckCircle2 size={18} className="text-emerald-600 shrink-0 mt-0.5" />
-              <div className="space-y-1.5">
-                <p className="font-bold text-emerald-900">บันทึกสำเร็จ!</p>
-                <p className="text-emerald-700 leading-relaxed">{successMsg}</p>
-                <button
-                  type="button"
-                  onClick={handleShareWork}
-                  className="inline-flex items-center gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-3 py-1.5 rounded-lg shadow-2xs transition cursor-pointer active:scale-95"
-                >
-                  <Share2 size={13} />
-                  <span>ส่งต่อ (แชร์งานเข้า LINE)</span>
-                </button>
-              </div>
+          <div className="p-2.5 px-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs flex items-center justify-between gap-2 shadow-2xs animate-in fade-in slide-in-from-top-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+              <span className="font-semibold text-emerald-900 truncate">{successMsg}</span>
             </div>
             <button
               type="button"
               onClick={() => setSuccessMsg(null)}
-              className="text-emerald-500 hover:text-emerald-800 p-0.5 rounded transition"
+              className="text-emerald-500 hover:text-emerald-800 p-0.5 rounded transition cursor-pointer shrink-0"
             >
               <X size={16} />
             </button>

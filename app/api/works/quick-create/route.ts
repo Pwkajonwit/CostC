@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 import { getLineTargetGroup, sendFlexMessageDetailed } from "@/lib/line/line";
 import { createWorkAssignmentFlex } from "@/lib/line/line-tasks-works";
-import { uploadFileToSupabaseStorage, getCustomerContactsMap } from "@/lib/supabase/supabase-db";
+import { uploadFileToSupabaseStorage, getCustomerContactsMap, getCustomerShortNamesMap, resolveCustomerShortName } from "@/lib/supabase/supabase-db";
 import { saveWorkAttachment, getWorkAttachment } from "@/lib/tasks/task-attachments";
 
 export const dynamic = "force-dynamic";
@@ -17,8 +17,8 @@ export async function GET(request: NextRequest) {
     const rawId = String(searchParams.get("id") || searchParams.get("work_id") || "").trim();
     const cleanId = parseInt(rawId.replace(/\D/g, ""), 10);
 
-    // Fetch system options (contractors, companies, customers, customer contacts) in parallel
-    const [contractorsRes, companiesRes, customersRes, customerContacts] = await Promise.all([
+    // Fetch system options (contractors, companies, customers, customer contacts, short names) in parallel
+    const [contractorsRes, companiesRes, customersRes, customerContacts, customerShortNames] = await Promise.all([
       supabaseAdmin
         .from("contractors")
         .select("id, nickname, full_name, phone")
@@ -32,11 +32,16 @@ export async function GET(request: NextRequest) {
         .select("id, name")
         .order("id", { ascending: true }),
       getCustomerContactsMap(),
+      getCustomerShortNamesMap(),
     ]);
 
     const contractors = contractorsRes.data || [];
     const companies = companiesRes.data || [];
-    const customers = customersRes.data || [];
+    const rawCustomers = customersRes.data || [];
+    const customers = rawCustomers.map(c => ({
+      ...c,
+      short_name: customerShortNames[c.id] || customerShortNames[c.name] || resolveCustomerShortName(c.name, customerShortNames) || ""
+    }));
 
     // If no work id requested, return just the master data options
     if (!cleanId) {
@@ -46,6 +51,7 @@ export async function GET(request: NextRequest) {
         companies,
         customers,
         customerContacts,
+        customerShortNames,
       });
     }
 
@@ -297,6 +303,10 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // Resolve short name for company/customer
+    const shortNamesMap = await getCustomerShortNamesMap();
+    const shortCompany = company !== "-" ? (shortNamesMap[company] || resolveCustomerShortName(company, shortNamesMap) || undefined) : undefined;
+
     // Generate Rich Flex Message Card
     const flex = createWorkAssignmentFlex({
       id: pwId,
@@ -309,7 +319,8 @@ export async function POST(request: NextRequest) {
       date_inspect: date_inspect !== "-" ? date_inspect : undefined,
       date_propose: date_propose !== "-" ? date_propose : undefined,
       company: company !== "-" ? company : undefined,
-      project_name: company !== "-" ? company : (team ? `ทีม ${team}` : "งานรับเหมา"),
+      company_short: shortCompany,
+      project_name: company !== "-" ? (shortCompany || company) : (team ? `ทีม ${team}` : "งานรับเหมา"),
       contractor_name: contact1 !== "-" ? contact1 : undefined,
       amount: amount > 0 ? amount : 0,
       details: title,
@@ -324,9 +335,10 @@ export async function POST(request: NextRequest) {
     });
 
     // Notify LINE target group for PW
+    const teamDisplay = team.toUpperCase().startsWith("PW") ? team.toUpperCase() : `PW${team}`;
     const altText = isUpdate
-      ? `[อัปเดตงานรับเหมา: ${pwId}] ${title}`
-      : `[เปิดงานรับเหมา: ${pwId}] ${title}`;
+      ? `[อัปเดตงาน: ${teamDisplay} ลำดับ ${workIdNum}] ${title}`
+      : `[เปิดงาน: ${teamDisplay} ลำดับ ${workIdNum}] ${title}`;
 
     try {
       const pwGroup = await getLineTargetGroup("pw");

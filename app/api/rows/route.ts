@@ -10,7 +10,7 @@ import { getFormSchema } from "@/lib/schemas";
 import { isVatActive, isDeductActive, parseDeductPercent, parseCreditDays, parseBillItems } from "@/lib/project-summary";
 import { appendAuditLog, appendRow, bulkAppendRows, deleteRows, getRows, getSystemOptions, invalidateTableCache, updateRow } from "@/lib/db";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
-import { getDbTableName, getNextBillSequence, syncContractWorkPaidAmount } from "@/lib/supabase/supabase-db";
+import { getDbTableName, getNextBillSequence, syncContractWorkPaidAmount, getCustomerShortNamesMap, saveCustomerShortName, resolveCustomerShortName } from "@/lib/supabase/supabase-db";
 import { extractMemberPermissions, type UserPermissions } from "@/lib/user-permissions";
 import { autoClearPettyCashOnSubBillApproval, isSubBill } from "@/lib/petty-cash/petty-cash-clear";
 import { isLaborCost, isMaterialCost, isStaffCost, isOtherExpense } from "@/lib/cost-codes";
@@ -121,6 +121,18 @@ export async function GET(request: NextRequest) {
   if (!tableName) return NextResponse.json({ error: "Missing tableName" }, { status: 400 });
 
   let allRows = await getRows(tableName);
+  const isCust = tableName === TABLES.CUSTOMER || tableName === "customers" || tableName === "ลูกค้า" || viewName.includes("ลูกค้า");
+  if (isCust) {
+    const shortNamesMap = await getCustomerShortNamesMap();
+    allRows = allRows.map(r => {
+      const k = String(r["id_cus"] || r["id"] || "").trim();
+      const name = String(r["ชื่อลูกค้า"] || r["name"] || "").trim();
+      return {
+        ...r,
+        "ชื่อย่อ": r["ชื่อย่อ"] || shortNamesMap[k] || shortNamesMap[name] || resolveCustomerShortName(name, shortNamesMap) || "-"
+      };
+    });
+  }
   if (search) {
     const q = search.toLowerCase();
     allRows = allRows.filter(row => Object.values(row).some(value => String(value || "").toLowerCase().includes(q)));
@@ -256,6 +268,13 @@ export async function POST(request: NextRequest) {
       }
       row.id = row["id_Conwork"];
     }
+    const isCustomerTable = tableName === TABLES.CUSTOMER || tableName === "customers" || tableName === "ลูกค้า" || tableName === "8. ลูกค้า" || tableName === "8.ลูกค้า";
+    let pendingCustomerShortName = "";
+    if (isCustomerTable) {
+      pendingCustomerShortName = String(row["ชื่อย่อ"] ?? row.short_name ?? "").trim();
+      delete row["ชื่อย่อ"];
+      delete row.short_name;
+    }
     sanitizeBySchema(row, tableName);
     validateRequiredBySchema(row, tableName);
     if (tableName === TABLES.DATA) {
@@ -268,6 +287,10 @@ export async function POST(request: NextRequest) {
         : (tableName === TABLES.DATA || tableName === "Data" || tableName === "bills")
           ? await applyBillFormulas(row)
           : row;
+    if (isCustomerTable) {
+      delete output["ชื่อย่อ"];
+      delete output.short_name;
+    }
     if (isPettyCash) {
       const amt = Number(output["จำนวนเงิน"] || 0);
       const clr = Number(output["ยอดเคลียร์แล้ว"] || 0);
@@ -278,6 +301,13 @@ export async function POST(request: NextRequest) {
       }
     }
     await appendRow(tableName, output);
+    if (isCustomerTable && pendingCustomerShortName) {
+      const cusId = String(output["id_cus"] || output.id || row["id_cus"] || row.id || "").trim();
+      const cusName = String(output["ชื่อลูกค้า"] || output.name || row["ชื่อลูกค้า"] || row.name || "").trim();
+      if (cusId) {
+        await saveCustomerShortName(cusId, pendingCustomerShortName, cusName);
+      }
+    }
     await appendAuditLog({
       action: "CREATE",
       tableName,
@@ -396,6 +426,17 @@ export async function PATCH(request: NextRequest) {
             } else if (amt > 0 && clr < amt && currentStatus === "เคลียร์บิลแล้ว") {
               values["สถานะ"] = "จ่ายเงินแล้ว";
             }
+          }
+          const isCustomerTable = tableName === TABLES.CUSTOMER || tableName === "customers" || tableName === "ลูกค้า" || tableName === "8. ลูกค้า" || tableName === "8.ลูกค้า";
+          if (isCustomerTable) {
+            const shortName = values["ชื่อย่อ"] !== undefined ? String(values["ชื่อย่อ"]).trim() : (values.short_name !== undefined ? String(values.short_name).trim() : undefined);
+            const cusId = String(existing["id_cus"] || existing.id || targetIdentifier).trim();
+            const cusName = String(values["ชื่อลูกค้า"] || existing["ชื่อลูกค้า"] || existing.name || "").trim();
+            if (shortName !== undefined && cusId) {
+              await saveCustomerShortName(cusId, shortName, cusName);
+            }
+            delete values["ชื่อย่อ"];
+            delete values.short_name;
           }
           const originalTarget = existing.id || (keyCol && existing[keyCol] ? existing[keyCol] : undefined) || targetIdentifier || existing._sheetRow;
           return updateRow(tableName, originalTarget, values);
@@ -639,6 +680,17 @@ export async function PATCH(request: NextRequest) {
       } else if (amt > 0 && clr < amt && currentStatus === "เคลียร์บิลแล้ว") {
         output["สถานะ"] = "จ่ายเงินแล้ว";
       }
+    }
+    const isCustomerTable = tableName === TABLES.CUSTOMER || tableName === "customers" || tableName === "ลูกค้า" || tableName === "8. ลูกค้า" || tableName === "8.ลูกค้า";
+    if (isCustomerTable) {
+      const shortName = output["ชื่อย่อ"] !== undefined ? String(output["ชื่อย่อ"]).trim() : (output.short_name !== undefined ? String(output.short_name).trim() : undefined);
+      const cusId = String(existing["id_cus"] || existing.id || targetRowKey).trim();
+      const cusName = String(output["ชื่อลูกค้า"] || existing["ชื่อลูกค้า"] || existing.name || "").trim();
+      if (shortName !== undefined && cusId) {
+        await saveCustomerShortName(cusId, shortName, cusName);
+      }
+      delete output["ชื่อย่อ"];
+      delete output.short_name;
     }
     console.log(`[PATCH /api/rows] tableName: "${tableName}", targetRowKey: "${targetRowKey}", values:`, patch);
     const originalTarget = existing.id || (keyCol && existing[keyCol] ? existing[keyCol] : undefined) || targetRowKey || existing._sheetRow;
