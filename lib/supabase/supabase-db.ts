@@ -4,6 +4,7 @@ import { normalizeDateToIso, formatDateDisplay, getTodayDateIso } from "@/lib/ut
 import { cached, clearCache } from "@/lib/utils/cache";
 import { isVatActive, isDeductActive, parseDeductPercent, parseCreditDays } from "@/lib/project-summary";
 import { MATERIAL_100_CODES, EQUIPMENT_500_CODES, ALL_STORE_CATEGORIES, ALL_CONTRACTOR_CATEGORIES } from "@/lib/cost-codes";
+import { getAllTaskAttachments, getAllWorkAttachments, saveTaskAttachment, saveWorkAttachment } from "@/lib/tasks/task-attachments";
 
 export type SheetRow = Record<string, any>;
 
@@ -97,7 +98,13 @@ const TABLE_MAP: Record<string, string> = {
   เปิดเงินสดย่อย: "petty_cash",
   PETTY_CASH: "petty_cash",
   petty_cash: "petty_cash",
-  pettycash: "petty_cash"
+  pettycash: "petty_cash",
+  "1. จัดการงาน (Tasks)": "tasks",
+  "11. จัดการงาน (Tasks)": "tasks",
+  tasks: "tasks",
+  "2. งานรับเหมา & PW": "works",
+  "12. งานรับเหมา & PW": "works",
+  works: "works"
 };
 
 export function getDbTableName(tableName: string): string {
@@ -143,10 +150,25 @@ export function getDbTableName(tableName: string): string {
   if (normalized === "loan" || normalized === "loans" || tableName === "ยืมเงิน") {
     return "loans";
   }
-  if (normalized === "tasks" || normalized === "task" || tableName === "งาน" || tableName === "Tasks") {
+  if (
+    normalized === "tasks" ||
+    normalized === "task" ||
+    tableName === "งาน" ||
+    tableName === "Tasks" ||
+    tableName.toLowerCase().includes("tasks") ||
+    tableName.includes("จัดการงาน")
+  ) {
     return "tasks";
   }
-  if (normalized === "works" || normalized === "work" || tableName === "งานPW" || tableName === "PW" || tableName === "Works") {
+  if (
+    normalized === "works" ||
+    normalized === "work" ||
+    tableName === "งานPW" ||
+    tableName === "PW" ||
+    tableName === "Works" ||
+    tableName.toLowerCase().includes("works") ||
+    tableName.includes("งานรับเหมา & pw")
+  ) {
     return "works";
   }
   if (normalized === "plans" || normalized === "plan" || tableName === "แผนงาน" || tableName === "Plan") {
@@ -529,6 +551,10 @@ export function mapSupabaseRowToSheetRow(dbTable: string, row: Record<string, an
     const typeNum = Number(row.task_type ?? row["ประเภท"] ?? 1);
     res["ประเภท"] = typeNum === 2 ? "2 (แผนงาน)" : typeNum === 3 ? "3 (PJSA)" : "1 (เอกสาร)";
     res["task_type"] = typeNum;
+    const taskImg = row.image_url ?? row.image ?? row["เอกสาร"] ?? row["รูปภาพ"] ?? row["รูปถ่าย"] ?? row["ไฟล์แนบ"] ?? dataObj["เอกสาร"] ?? dataObj["รูปภาพ"] ?? dataObj["image_url"] ?? dataObj["attachments"] ?? "";
+    res["รูปภาพ"] = taskImg;
+    res["เอกสาร"] = taskImg;
+    res["image_url"] = taskImg;
   } else if (dbTable === "works") {
     res["id"] = row.id ?? row["id"];
     res["ลำดับ"] = row.id ?? row["ลำดับ"];
@@ -546,7 +572,21 @@ export function mapSupabaseRowToSheetRow(dbTable: string, row: Record<string, an
     res["เบอร์2"] = row.phone2 ?? row["เบอร์2"] ?? "-";
     res["บริษัท"] = row.company ?? row["บริษัท"] ?? "-";
     res["สถานะ"] = row.status ?? row["สถานะ"] ?? "รอดูงาน";
-    res["หมายเหตุ"] = row.note ?? row["หมายเหตุ"] ?? "";
+    let noteVal = row.note ?? row["หมายเหตุ"] ?? "";
+    let legacyImg = "";
+    if (typeof noteVal === "string" && noteVal.includes("http")) {
+      const match = noteVal.match(/(?:รูปภาพ|เอกสาร|ไฟล์แนบ):\s*(https?:\/\/[^\s\n\r]+)/i);
+      if (match) {
+        legacyImg = match[1];
+        noteVal = noteVal.replace(/(?:รูปภาพ|เอกสาร|ไฟล์แนบ):\s*https?:\/\/[^\s\n\r]+/gi, "").trim();
+        if (!noteVal) noteVal = "-";
+      }
+    }
+    res["หมายเหตุ"] = noteVal;
+    const workImg = row.image_url ?? row.image ?? row["เอกสาร"] ?? row["รูปภาพ"] ?? row["รูปถ่าย"] ?? row["ไฟล์แนบ"] ?? dataObj["เอกสาร"] ?? dataObj["รูปภาพ"] ?? dataObj["image_url"] ?? dataObj["attachments"] ?? legacyImg ?? "";
+    res["รูปภาพ"] = workImg;
+    res["เอกสาร"] = workImg;
+    res["image_url"] = workImg;
   } else if (dbTable === "plans") {
     res["id"] = row.id ?? row["id"];
     res["ลำดับ"] = row.id ?? row["ลำดับ"];
@@ -991,6 +1031,8 @@ export function mapSheetRowToSupabaseRow(tableName: string, row: Record<string, 
     if (row["สถานะ"] !== undefined || row["status"] !== undefined) {
       dbRow.status = String(row["สถานะ"] ?? row["status"] ?? "ดำเนินการ").trim();
     }
+    // Note: 'tasks' table in Postgres does not have image_url or data columns
+    // Image attachments are saved to system_options.task_attachments
   } else if (dbTable === "works") {
     if (row["id"] !== undefined || row["ลำดับ"] !== undefined) {
       const parsedId = Number(row["id"] ?? row["ลำดับ"]);
@@ -1038,6 +1080,8 @@ export function mapSheetRowToSupabaseRow(tableName: string, row: Record<string, 
     if (row["หมายเหตุ"] !== undefined || row["note"] !== undefined) {
       dbRow.note = String(row["หมายเหตุ"] ?? row["note"] ?? "").trim();
     }
+    // Note: 'works' table in Postgres does not have image_url or data columns
+    // Image attachments are saved to system_options.work_attachments
   } else if (dbTable === "plans") {
     if (row["id"] !== undefined || row["ลำดับ"] !== undefined) {
       const parsedId = Number(row["id"] ?? row["ลำดับ"]);
@@ -1129,6 +1173,86 @@ export async function getEntityBankMapFromSupabase(): Promise<Record<string, str
       return {};
     }
   });
+}
+
+export interface CustomerContact {
+  id: string;
+  name: string;
+  phone: string;
+  position?: string;
+  email?: string;
+  note?: string;
+  is_primary?: boolean;
+  created_at?: string;
+}
+
+export async function getCustomerContactsMap(): Promise<Record<string, CustomerContact[]>> {
+  if (!isSupabaseConfigured()) return {};
+  return cached("sys_opt:customer_contacts", 60_000, async () => {
+    try {
+      const { data } = await supabaseAdmin.from("system_options").select("*").eq("id", "customer_contacts").maybeSingle();
+      return (data?.data && typeof data.data === "object") ? data.data : {};
+    } catch (e) {
+      return {};
+    }
+  });
+}
+
+export async function saveCustomerContact(customerId: string, contact: CustomerContact) {
+  if (!isSupabaseConfigured() || !customerId || !contact.name) return [];
+  try {
+    const { data } = await supabaseAdmin.from("system_options").select("*").eq("id", "customer_contacts").maybeSingle();
+    const existingMap = (data?.data && typeof data.data === "object") ? { ...data.data } : {};
+    const cusKey = String(customerId).trim();
+    const list: CustomerContact[] = Array.isArray(existingMap[cusKey]) ? [...existingMap[cusKey]] : [];
+
+    const existingIndex = list.findIndex(c => c.id === contact.id);
+    if (existingIndex >= 0) {
+      list[existingIndex] = { ...list[existingIndex], ...contact };
+    } else {
+      list.push({
+        ...contact,
+        id: contact.id || `ct_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        created_at: contact.created_at || new Date().toISOString()
+      });
+    }
+
+    existingMap[cusKey] = list;
+    await supabaseAdmin.from("system_options").upsert({
+      id: "customer_contacts",
+      data: existingMap,
+      updated_at: new Date().toISOString()
+    });
+    clearCache("sys_opt:customer_contacts");
+    clearCache("sys_opt:all");
+    return list;
+  } catch (e) {
+    console.warn("Failed to persist customer contact in system_options:", e);
+    throw e;
+  }
+}
+
+export async function deleteCustomerContact(customerId: string, contactId: string) {
+  if (!isSupabaseConfigured() || !customerId || !contactId) return [];
+  try {
+    const { data } = await supabaseAdmin.from("system_options").select("*").eq("id", "customer_contacts").maybeSingle();
+    const existingMap = (data?.data && typeof data.data === "object") ? { ...data.data } : {};
+    const cusKey = String(customerId).trim();
+    if (Array.isArray(existingMap[cusKey])) {
+      existingMap[cusKey] = existingMap[cusKey].filter((c: any) => c.id !== contactId);
+    }
+    await supabaseAdmin.from("system_options").upsert({
+      id: "customer_contacts",
+      data: existingMap,
+      updated_at: new Date().toISOString()
+    });
+    clearCache("sys_opt:customer_contacts");
+    clearCache("sys_opt:all");
+    return existingMap[cusKey] || [];
+  } catch (e) {
+    console.warn("Failed to delete customer contact in system_options:", e);
+    throw e;
+  }
 }
 
 export async function getNextBillSequence(customStart?: number): Promise<number> {
@@ -1345,8 +1469,8 @@ export async function updateRowInSupabase(tableName: string, keyColumn: string, 
       (keyColumn !== "id" && keyColumn !== "_sheetRow" ? patch[keyColumn] : undefined) ??
       patch.id);
 
-  // For auto-increment tables (bills, tasks, loans), prevent updating primary key id
-  if (dbTable === "bills" || dbTable === "tasks" || dbTable === "loans") {
+  // For auto-increment tables (bills, tasks, works, plans, loans), prevent updating primary key id
+  if (dbTable === "bills" || dbTable === "tasks" || dbTable === "works" || dbTable === "plans" || dbTable === "loans") {
     delete dbPatch.id;
   } else if (entityCode !== undefined && entityCode !== null && String(entityCode).trim() !== "") {
     // For contract_works, never allow setting primary key id to CT...
@@ -1364,7 +1488,7 @@ export async function updateRowInSupabase(tableName: string, keyColumn: string, 
   }
 
   const numId = Number(primaryVal);
-  if (Number.isFinite(numId) && String(primaryVal).trim() !== "" && (dbTable === "bills" || dbTable === "tasks" || dbTable === "loans")) {
+  if (Number.isFinite(numId) && String(primaryVal).trim() !== "" && (dbTable === "bills" || dbTable === "tasks" || dbTable === "works" || dbTable === "plans" || dbTable === "loans")) {
     primaryVal = numId;
   } else if (typeof primaryVal === "string") {
     primaryVal = primaryVal.trim();
@@ -1393,6 +1517,26 @@ export async function updateRowInSupabase(tableName: string, keyColumn: string, 
       sideTasks.push(saveProjectBudgetAllocation(targetProjId, patch));
     }
 
+    if (dbTable === "tasks" || tableName === "tasks" || tableName === "1. จัดการงาน (Tasks)" || tableName === "11. จัดการงาน (Tasks)") {
+      const targetTaskId = String(patch["ลำดับ"] ?? patch.id ?? primaryVal ?? keyValue);
+      const imgVal = patch["เอกสาร"] ?? patch["รูปภาพ"] ?? patch["image_url"] ?? patch["ไฟล์แนบ"];
+      if (imgVal !== undefined && targetTaskId) {
+        const rawStr = String(imgVal || "").trim();
+        const imgs = rawStr ? rawStr.split(/\s*,\s*|\s*;\s*|\n+/).filter(Boolean) : [];
+        sideTasks.push(saveTaskAttachment({ taskId: targetTaskId, images: imgs }));
+      }
+    }
+
+    if (dbTable === "works" || tableName === "works" || tableName === "2. งานรับเหมา & PW" || tableName === "12. งานรับเหมา & PW") {
+      const targetWorkId = String(patch["ลำดับ"] ?? patch.id ?? primaryVal ?? keyValue);
+      const imgVal = patch["เอกสาร"] ?? patch["รูปภาพ"] ?? patch["image_url"] ?? patch["ไฟล์แนบ"];
+      if (imgVal !== undefined && targetWorkId) {
+        const rawStr = String(imgVal || "").trim();
+        const imgs = rawStr ? rawStr.split(/\s*,\s*|\s*;\s*|\n+/).filter(Boolean) : [];
+        sideTasks.push(saveWorkAttachment({ workId: targetWorkId, images: imgs }));
+      }
+    }
+
     sideTasks.push(syncCustomOptionsFromRow(patch));
 
     // Run side-effects concurrently without blocking
@@ -1407,6 +1551,10 @@ export async function updateRowInSupabase(tableName: string, keyColumn: string, 
       const mergedData = cleanDataPayload({ ...existingData, ...existingDbPatchData, ...incomingPatch });
       delete mergedData.data;
       dbPatch.data = mergedData;
+      if (dbTable === "works" || dbTable === "tasks") {
+        delete dbPatch.data;
+        delete dbPatch.image_url;
+      }
 
       if (dbTable === "bills") {
         const checkDeductVal = patch["หัก"] !== undefined 
@@ -1450,6 +1598,10 @@ export async function updateRowInSupabase(tableName: string, keyColumn: string, 
       const mergedData = cleanDataPayload({ ...existingDbPatchData, ...incomingPatch });
       delete mergedData.data;
       dbPatch.data = mergedData;
+      if (dbTable === "works" || dbTable === "tasks") {
+        delete dbPatch.data;
+        delete dbPatch.image_url;
+      }
 
       if (dbTable === "bills") {
         const checkDeductVal = patch["หัก"] !== undefined ? patch["หัก"] : dbPatch.withholding_tax;
@@ -1693,6 +1845,8 @@ export async function getRowsFromSupabase(tableName: string, maxRows = 10_000): 
     const isMasterTable = dbTable === "stores" || dbTable === "contractors" || dbTable === "master_members";
     const isBillTable = dbTable === "bills";
     const isProjectTable = dbTable === "projects";
+    const isTaskTable = dbTable === "tasks";
+    const isWorkTable = dbTable === "works";
 
     const fetchTableRows = async (): Promise<{ data: any[] | null; error: any }> => {
       if (maxRows <= 1000) {
@@ -1719,11 +1873,13 @@ export async function getRowsFromSupabase(tableName: string, maxRows = 10_000): 
       return { data: allRows, error: null };
     };
 
-    const [mainResult, entityBankMap, billFollowDatesMap, projectBudgetsMap] = await Promise.all([
+    const [mainResult, entityBankMap, billFollowDatesMap, projectBudgetsMap, taskAttachmentsMap, workAttachmentsMap] = await Promise.all([
       fetchTableRows(),
       isMasterTable ? getEntityBankMapFromSupabase() : Promise.resolve({} as Record<string, string>),
       isBillTable ? getBillFollowDatesFromSupabase() : Promise.resolve({} as Record<string, Record<string, string>>),
-      isProjectTable ? getProjectBudgetAllocationsFromSupabase() : Promise.resolve({} as Record<string, Record<string, any>>)
+      isProjectTable ? getProjectBudgetAllocationsFromSupabase() : Promise.resolve({} as Record<string, Record<string, any>>),
+      isTaskTable ? getAllTaskAttachments() : Promise.resolve({} as Record<string, any>),
+      isWorkTable ? getAllWorkAttachments() : Promise.resolve({} as Record<string, any>)
     ]);
 
     const { data, error } = mainResult;
@@ -1866,6 +2022,43 @@ export async function getRowsFromSupabase(tableName: string, maxRows = 10_000): 
         const pId = String(res["ID Project"] || res.id || res._sheetRow || "");
         if (pId && projectBudgetsMap[pId]) {
           Object.assign(res, projectBudgetsMap[pId]);
+        }
+      }
+
+      if (isTaskTable && taskAttachmentsMap) {
+        const tId = String(row.id || res.id || res["ลำดับ"] || "");
+        const att = taskAttachmentsMap[tId];
+        if (att) {
+          if (Array.isArray(att.images) && att.images.length > 0 && !res["เอกสาร"]) {
+            const joinedUrls = att.images.filter(Boolean).join(", ");
+            res["เอกสาร"] = joinedUrls;
+            res["รูปภาพ"] = joinedUrls;
+            res["image_url"] = joinedUrls;
+          }
+          if (att.submittedBy) {
+            res["ผู้เปิดงาน"] = att.submittedBy;
+            res["ผู้สร้าง"] = att.submittedBy;
+          }
+        }
+      }
+
+      if (isWorkTable && workAttachmentsMap) {
+        const wId = String(row.id || res.id || res["ลำดับ"] || "");
+        const att = workAttachmentsMap[wId];
+        if (att) {
+          if (Array.isArray(att.images) && att.images.length > 0 && !res["เอกสาร"]) {
+            const joinedUrls = att.images.filter(Boolean).join(", ");
+            res["เอกสาร"] = joinedUrls;
+            res["รูปภาพ"] = joinedUrls;
+            res["image_url"] = joinedUrls;
+          }
+          if (att.submittedBy) {
+            res["ผู้เปิดงาน"] = att.submittedBy;
+            res["ผู้สร้าง"] = att.submittedBy;
+          }
+        }
+        if (!res["ผู้เปิดงาน"] && row.contact2 && row.contact2 !== "-") {
+          res["ผู้เปิดงาน"] = row.contact2;
         }
       }
 
@@ -2406,6 +2599,10 @@ export async function insertRowToSupabase(tableName: string, rowData: Record<str
   const dbTable = getDbTableName(tableName);
   const dbRow = mapSheetRowToSupabaseRow(tableName, rowData);
   dbRow.data = { ...(rowData.data || {}), ...rowData };
+  if (dbTable === "works" || dbTable === "tasks") {
+    delete dbRow.data;
+    delete dbRow.image_url;
+  }
 
   const bankVal = rowData["ธนาคาร"] || rowData["bank_name"];
   const entityId = dbRow.id || rowData["id_store"] || rowData["id_Contractor"] || rowData["รหัสพนักงาน"];
@@ -2418,6 +2615,26 @@ export async function insertRowToSupabase(tableName: string, rowData: Record<str
   if (dbTable === "projects" || tableName === "Project" || tableName === "PROJECT") {
     const targetProjId = String(rowData["ID Project"] ?? rowData.id ?? dbRow.id);
     sideTasks.push(saveProjectBudgetAllocation(targetProjId, rowData));
+  }
+
+  if (dbTable === "tasks" || tableName === "tasks" || tableName === "1. จัดการงาน (Tasks)" || tableName === "11. จัดการงาน (Tasks)") {
+    const targetTaskId = String(rowData["ลำดับ"] ?? rowData.id ?? dbRow.id);
+    const imgVal = rowData["เอกสาร"] ?? rowData["รูปภาพ"] ?? rowData["image_url"] ?? rowData["ไฟล์แนบ"];
+    if (imgVal && targetTaskId) {
+      const rawStr = String(imgVal || "").trim();
+      const imgs = rawStr.split(/\s*,\s*|\s*;\s*|\n+/).filter(Boolean);
+      sideTasks.push(saveTaskAttachment({ taskId: targetTaskId, images: imgs }));
+    }
+  }
+
+  if (dbTable === "works" || tableName === "works" || tableName === "2. งานรับเหมา & PW" || tableName === "12. งานรับเหมา & PW") {
+    const targetWorkId = String(rowData["ลำดับ"] ?? rowData.id ?? dbRow.id);
+    const imgVal = rowData["เอกสาร"] ?? rowData["รูปภาพ"] ?? rowData["image_url"] ?? rowData["ไฟล์แนบ"];
+    if (imgVal && targetWorkId) {
+      const rawStr = String(imgVal || "").trim();
+      const imgs = rawStr.split(/\s*,\s*|\s*;\s*|\n+/).filter(Boolean);
+      sideTasks.push(saveWorkAttachment({ workId: targetWorkId, images: imgs }));
+    }
   }
 
   sideTasks.push(syncCustomOptionsFromRow(rowData));
@@ -2469,6 +2686,11 @@ export async function insertRowToSupabase(tableName: string, rowData: Record<str
             break;
           }
           continue;
+        }
+        if (dbTable === "tasks") {
+          delete dbRow.id;
+          res = await supabaseAdmin.from(dbTable).insert(dbRow).select();
+          if (!res.error) break;
         }
         res = await supabaseAdmin.from(dbTable).upsert(dbRow).select();
         if (!res.error) break;
@@ -2946,9 +3168,11 @@ export async function cleanupOrphanedStorageImages(bucketName = "repairs", dryRu
     const files = fileList || [];
     const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
 
-    const { data: billsData } = await supabaseAdmin
-      .from("bills")
-      .select("image_url, data");
+    const [{ data: billsData }, { data: tasksData }, { data: worksData }] = await Promise.all([
+      supabaseAdmin.from("bills").select("image_url, data"),
+      Promise.resolve(supabaseAdmin.from("tasks").select("image_url, data")).catch(() => ({ data: [] as any[] })),
+      Promise.resolve(supabaseAdmin.from("works").select("image_url, data")).catch(() => ({ data: [] as any[] }))
+    ]);
 
     const activePaths = new Set<string>();
 
@@ -2977,6 +3201,25 @@ export async function cleanupOrphanedStorageImages(bucketName = "repairs", dryRu
       if (b.data && typeof b.data === "object") {
         if (b.data["รูปถ่ายบิล"]) extractPath(b.data["รูปถ่ายบิล"]);
         if (b.data["รูปภาพ"]) extractPath(b.data["รูปภาพ"]);
+        if (b.data["image_url"]) extractPath(b.data["image_url"]);
+      }
+    }
+
+    for (const t of tasksData || []) {
+      if (t.image_url) extractPath(t.image_url);
+      if (t.data && typeof t.data === "object") {
+        if (t.data["รูปภาพ"]) extractPath(t.data["รูปภาพ"]);
+        if (t.data["image_url"]) extractPath(t.data["image_url"]);
+        if (t.data["attachments"]) extractPath(t.data["attachments"]);
+      }
+    }
+
+    for (const w of worksData || []) {
+      if (w.image_url) extractPath(w.image_url);
+      if (w.data && typeof w.data === "object") {
+        if (w.data["รูปภาพ"]) extractPath(w.data["รูปภาพ"]);
+        if (w.data["image_url"]) extractPath(w.data["image_url"]);
+        if (w.data["attachments"]) extractPath(w.data["attachments"]);
       }
     }
 

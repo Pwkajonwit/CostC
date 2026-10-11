@@ -374,7 +374,7 @@ export async function deleteRows(tableName: string, targetKeys: (number | string
         String(r.id_Company) === itemKey
       );
       if (foundRow) {
-        const imgField = foundRow["รูปถ่ายบิล"] || foundRow["รูปถ่าย"] || foundRow["รูปภาพ"] || foundRow.image || foundRow.image_url || foundRow["สลิป"];
+        const imgField = foundRow["รูปถ่ายบิล"] || foundRow["รูปถ่าย"] || foundRow["รูปภาพ"] || foundRow["ไฟล์แนบ"] || foundRow["เอกสารแนบ"] || foundRow.image || foundRow.image_url || foundRow.attachments || foundRow["สลิป"];
         if (typeof imgField === "string" && imgField.trim()) {
           imageUrls.push(imgField.trim());
         }

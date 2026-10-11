@@ -339,7 +339,28 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
     { name: "ดู/ทำ", type: "Date", initialValue: "today" },
     { name: "ส่งงาน", type: "Date" },
     { name: "ประเภท", type: "Enum", values: ["1 (เอกสาร)", "2 (แผนงาน)", "3 (PJSA)"], initialValue: "1 (เอกสาร)", inputMode: "buttons" },
-    { name: "สถานะ", type: "Enum", values: ["ดำเนินการ", "สำเร็จ"], initialValue: "ดำเนินการ", inputMode: "buttons" }
+    { name: "สถานะ", type: "Enum", values: ["ดำเนินการ", "ส่งงานแล้ว", "สำเร็จ"], initialValue: "ดำเนินการ", inputMode: "buttons" },
+    { name: "เอกสาร", label: "เอกสาร / รูปภาพ", type: "Image", description: "รูปถ่ายหน้างาน / เอกสารแนบ" }
+  ],
+  "1. จัดการงาน (Tasks)": [
+    { name: "ลำดับ", type: "Number", key: true, initialValue: "nextTaskId", readonlyOnEdit: true },
+    { name: "รายการ", type: "Text", required: true, description: "ชื่องาน หรือ รายละเอียดงาน" },
+    { name: "ผู้รับมอบหมาย", type: "Ref", refTable: TABLES.PEOPLE, refKey: "ชื่อเล่น", refLabel: "ชื่อเล่น", required: true },
+    { name: "ดู/ทำ", type: "Date", initialValue: "today" },
+    { name: "ส่งงาน", type: "Date" },
+    { name: "ประเภท", type: "Enum", values: ["1 (เอกสาร)", "2 (แผนงาน)", "3 (PJSA)"], initialValue: "1 (เอกสาร)", inputMode: "buttons" },
+    { name: "สถานะ", type: "Enum", values: ["ดำเนินการ", "ส่งงานแล้ว", "สำเร็จ"], initialValue: "ดำเนินการ", inputMode: "buttons" },
+    { name: "เอกสาร", label: "เอกสาร / รูปภาพ", type: "Image", description: "รูปถ่ายหน้างาน / เอกสารแนบ" }
+  ],
+  "tasks": [
+    { name: "ลำดับ", type: "Number", key: true, initialValue: "nextTaskId", readonlyOnEdit: true },
+    { name: "รายการ", type: "Text", required: true, description: "ชื่องาน หรือ รายละเอียดงาน" },
+    { name: "ผู้รับมอบหมาย", type: "Ref", refTable: TABLES.PEOPLE, refKey: "ชื่อเล่น", refLabel: "ชื่อเล่น", required: true },
+    { name: "ดู/ทำ", type: "Date", initialValue: "today" },
+    { name: "ส่งงาน", type: "Date" },
+    { name: "ประเภท", type: "Enum", values: ["1 (เอกสาร)", "2 (แผนงาน)", "3 (PJSA)"], initialValue: "1 (เอกสาร)", inputMode: "buttons" },
+    { name: "สถานะ", type: "Enum", values: ["ดำเนินการ", "ส่งงานแล้ว", "สำเร็จ", "ยกเลิก"], initialValue: "ดำเนินการ", inputMode: "buttons" },
+    { name: "เอกสาร", label: "เอกสาร / รูปภาพ", type: "Image", description: "รูปถ่ายหน้างาน / เอกสารแนบ" }
   ],
   [TABLES.WORKS]: [
     { name: "ลำดับ", type: "Number", key: true, initialValue: "nextWorkId", readonlyOnEdit: true },
@@ -355,8 +376,45 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
     { name: "ติดต่อ2", type: "Text" },
     { name: "เบอร์2", type: "Text" },
     { name: "บริษัท", type: "Text" },
-    { name: "สถานะ", type: "Enum", values: ["รอดูงาน", "รอเสนอ", "ส่งแล้ว", "ประชุม", "ปิดประชุม", "ประมูล", "ปิดประมูล"], initialValue: "รอดูงาน", inputMode: "dropdown" },
-    { name: "หมายเหตุ", type: "LongText" }
+    { name: "สถานะ", type: "Enum", values: ["รอดูงาน", "รอเสนอ", "ส่งแล้ว", "ประชุม", "ปิดประชุม", "ประมูล", "ปิดประมูล", "ได้งาน (เปิดจ้าง)", "แพ้ประมูล/ไม่ได้งาน", "ยกเลิก", "สำเร็จ"], initialValue: "รอดูงาน", inputMode: "dropdown" },
+    { name: "หมายเหตุ", type: "LongText" },
+    { name: "เอกสาร", label: "เอกสาร / รูปภาพ", type: "Image", description: "รูปถ่ายหน้างาน / เอกสารแนบ" }
+  ],
+  "2. งานรับเหมา & PW": [
+    { name: "ลำดับ", type: "Number", key: true, initialValue: "nextWorkId", readonlyOnEdit: true },
+    { name: "ทีม", type: "Enum", values: ["PW", "PW1", "PW2", "PW3", "PW4"], initialValue: "PW", inputMode: "buttons" },
+    { name: "กิจกรรม", type: "Enum", values: ["เสนอราคา", "ประชุมงาน", "ประมูล"], initialValue: "เสนอราคา", inputMode: "buttons" },
+    { name: "เรื่อง", type: "Text", required: true, description: "ชื่องานรับเหมา หรือ หัวข้อกิจกรรม" },
+    { name: "PR", type: "Text" },
+    { name: "สถานที่", type: "Text" },
+    { name: "นัดดู", type: "Text", description: "วันเวลาที่นัดดูหน้างาน เช่น 28/08/26 เวลา 14:00" },
+    { name: "นัดเสนอ", type: "Text", description: "วันเวลาที่นัดส่งใบเสนอราคา" },
+    { name: "ติดต่อ1", type: "Text" },
+    { name: "เบอร์1", type: "Text" },
+    { name: "ติดต่อ2", type: "Text" },
+    { name: "เบอร์2", type: "Text" },
+    { name: "บริษัท", type: "Text" },
+    { name: "สถานะ", type: "Enum", values: ["รอดูงาน", "รอเสนอ", "ส่งแล้ว", "ประชุม", "ปิดประชุม", "ประมูล", "ปิดประมูล", "ได้งาน (เปิดจ้าง)", "แพ้ประมูล/ไม่ได้งาน", "ยกเลิก", "สำเร็จ"], initialValue: "รอดูงาน", inputMode: "dropdown" },
+    { name: "หมายเหตุ", type: "LongText" },
+    { name: "เอกสาร", label: "เอกสาร / รูปภาพ", type: "Image", description: "รูปถ่ายหน้างาน / เอกสารแนบ" }
+  ],
+  "works": [
+    { name: "ลำดับ", type: "Number", key: true, initialValue: "nextWorkId", readonlyOnEdit: true },
+    { name: "ทีม", type: "Enum", values: ["PW", "PW1", "PW2", "PW3", "PW4"], initialValue: "PW", inputMode: "buttons" },
+    { name: "กิจกรรม", type: "Enum", values: ["เสนอราคา", "ประชุมงาน", "ประมูล"], initialValue: "เสนอราคา", inputMode: "buttons" },
+    { name: "เรื่อง", type: "Text", required: true, description: "ชื่องานรับเหมา หรือ หัวข้อกิจกรรม" },
+    { name: "PR", type: "Text" },
+    { name: "สถานที่", type: "Text" },
+    { name: "นัดดู", type: "Text", description: "วันเวลาที่นัดดูหน้างาน เช่น 28/08/26 เวลา 14:00" },
+    { name: "นัดเสนอ", type: "Text", description: "วันเวลาที่นัดส่งใบเสนอราคา" },
+    { name: "ติดต่อ1", type: "Text" },
+    { name: "เบอร์1", type: "Text" },
+    { name: "ติดต่อ2", type: "Text" },
+    { name: "เบอร์2", type: "Text" },
+    { name: "บริษัท", type: "Text" },
+    { name: "สถานะ", type: "Enum", values: ["รอดูงาน", "รอเสนอ", "ส่งแล้ว", "ประชุม", "ปิดประชุม", "ประมูล", "ปิดประมูล", "ได้งาน (เปิดจ้าง)", "แพ้ประมูล/ไม่ได้งาน", "ยกเลิก", "สำเร็จ"], initialValue: "รอดูงาน", inputMode: "dropdown" },
+    { name: "หมายเหตุ", type: "LongText" },
+    { name: "เอกสาร", label: "เอกสาร / รูปภาพ", type: "Image", description: "รูปถ่ายหน้างาน / เอกสารแนบ" }
   ]
 };
 
@@ -374,6 +432,28 @@ export function getFormSchema(tableName: string) {
   }
   if (normalized === "pettycash" || normalized === "petty_cash" || tableName === TABLES.PETTY_CASH || tableName === "เปิดเงินสดย่อย") {
     return FORM_SCHEMAS[TABLES.PETTY_CASH] || [];
+  }
+  if (
+    normalized === "tasks" ||
+    normalized === "task" ||
+    tableName === TABLES.TASKS ||
+    tableName === "1. จัดการงาน (Tasks)" ||
+    tableName === "11. จัดการงาน (Tasks)" ||
+    tableName.toLowerCase().includes("tasks") ||
+    tableName.includes("จัดการงาน")
+  ) {
+    return FORM_SCHEMAS[TABLES.TASKS] || [];
+  }
+  if (
+    normalized === "works" ||
+    normalized === "work" ||
+    tableName === TABLES.WORKS ||
+    tableName === "2. งานรับเหมา & PW" ||
+    tableName === "12. งานรับเหมา & PW" ||
+    tableName.toLowerCase().includes("works") ||
+    tableName.includes("งานรับเหมา & pw")
+  ) {
+    return FORM_SCHEMAS[TABLES.WORKS] || [];
   }
   return FORM_SCHEMAS[tableName] || [];
 }

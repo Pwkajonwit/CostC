@@ -13,7 +13,8 @@ import { money, toNumber } from "@/lib/utils/numbers";
 import { getHeaders, getRows } from "@/lib/db";
 import { getViewById, getViewColumns } from "@/lib/views";
 import { CategoryTableView } from "@/components/views/CategoryTableView";
-import { getSystemOptionsFromSupabase } from "@/lib/supabase/supabase-db";
+import { getSystemOptionsFromSupabase, getCustomerContactsMap } from "@/lib/supabase/supabase-db";
+import { CustomerContactsManager } from "@/components/customers/CustomerContactsManager";
 import { hydrateProjectRowsForList } from "@/lib/project-summary";
 import { DetailEditTrigger } from "@/components/forms/DetailEditTrigger";
 import { getFormPayload } from "@/lib/form";
@@ -84,6 +85,12 @@ export async function renderRowDetailPage(id: string, rowKey: string) {
   const displayName = getDisplayViewName(view.id, view.name);
   const schemaEditEventName = isSchemaForm ? `open-${id}-detail-edit-form` : undefined;
   const initialForm = isSchemaForm ? await getFormPayload(view.table).catch(() => null) : null;
+
+  let customerContacts: any[] = [];
+  if (id === "customers") {
+    const contactsMap = await getCustomerContactsMap();
+    customerContacts = contactsMap[primaryCode] || contactsMap[decodedKey] || contactsMap[String(row.id || "")] || [];
+  }
 
   const isStoreDetail = id === "stores";
   let storePurchasesSummary: { totalAmount: number; billCount: number; lastDate: string } | null = null;
@@ -224,6 +231,15 @@ export async function renderRowDetailPage(id: string, rowKey: string) {
             </dl>
           </div>
         </article>
+
+        {/* CUSTOMER CONTACTS SECTION */}
+        {id === "customers" && (
+          <CustomerContactsManager
+            customerId={primaryCode || decodedKey}
+            customerName={String(row["ชื่อลูกค้า"] || title)}
+            initialContacts={customerContacts}
+          />
+        )}
 
         {/* RELATED TRANSACTION SECTIONS */}
         {relatedSections.map(section => (
@@ -463,13 +479,28 @@ async function renderView(
     const headers = rawRows.length > 0 ? Object.keys(rawRows[0]).filter(col => !col.startsWith("_")) : [];
     const isSchemaForm = usesSchemaForm(view.id);
 
+    let contactsMap: Record<string, any[]> = {};
+    if (view.id === "customers") {
+      contactsMap = await getCustomerContactsMap();
+    }
+
     const hydratedRows = view.id === "contract-open"
       ? await hydrateContractRows(rawRows, { projects: projectRows, contractors: contractorRows, dataRows: projectDataRows })
       : view.id === "project-all"
         ? hydrateProjectRowsForList(rawRows, projectDataRows)
         : view.id === "contractors"
           ? hydrateContractorsWithYearlySpend(rawRows, projectDataRows)
-          : rawRows;
+          : view.id === "customers"
+            ? rawRows.map(r => {
+                const k = String(r["id_cus"] || r["id"] || "").trim();
+                const cts = contactsMap[k] || [];
+                const summary = cts.map(c => `${c.name}${c.phone ? ` (${c.phone})` : ""}`).join(", ");
+                return {
+                  ...r,
+                  "ผู้ติดต่อ": summary || "-"
+                };
+              })
+            : rawRows;
     if (view.id === "contract-open") {
       hydratedRows.sort((a, b) => compareContractRows(a, b, sort === "latest"));
     }
