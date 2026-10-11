@@ -12,6 +12,7 @@ import {
 } from "./line";
 import { normalizeDateToIso, getTodayDateIso, formatDateDisplay, formatDateThai } from "@/lib/utils/dates";
 import { getTaskAttachment, getAllTaskAttachments, getAllWorkAttachments, getWorkAttachment, setActiveTaskUploadSession } from "@/lib/tasks/task-attachments";
+import { resolveCustomerShortName } from "@/lib/supabase/supabase-db";
 
 // ==========================================
 // 1. Data Models & Interfaces
@@ -55,7 +56,9 @@ export function normalizeWorkItem(w: any): UnifiedWorkItem {
     subDetails: w.location ? `สถานที่: ${w.location}` : undefined,
     assignee: w.contact1 || "ช่างรับเหมา",
     phone: w.phone1 && w.phone1 !== "-" ? w.phone1 : undefined,
-    project: w.company && w.company !== "-" ? w.company : (w.team ? `ทีม ${w.team}` : "งานรับเหมา"),
+    project: (w.company && w.company !== "-")
+      ? (w.short_name || w.company_short || resolveCustomerShortName(w.company) || w.company)
+      : (w.team ? `ทีม ${w.team}` : "งานรับเหมา"),
     status: w.status || "รอดูงาน",
     dateStr: w.date_inspect || w.date_propose || "-",
     amount: w.amount ? Number(w.amount) : undefined,
@@ -66,6 +69,20 @@ export function normalizeWorkItem(w: any): UnifiedWorkItem {
 // ==========================================
 // 2. Flex Message Generators
 // ==========================================
+
+const formatPhoneNumber = (val?: string) => {
+  if (!val || val === "-" || val.trim() === "") return "-";
+  const digits = val.replace(/\D/g, "");
+  if (!digits) return val.trim();
+  // Format strictly as XXX-XXXXXXX
+  if (digits.length >= 10) {
+    return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+  }
+  if (digits.length === 9) {
+    return `${digits.slice(0, 2)}-${digits.slice(2)}`;
+  }
+  return val.trim();
+};
 
 /**
  * Single Card: Work Assignment (ใบมอบหมายงาน PW)
@@ -88,6 +105,8 @@ export function createWorkAssignmentFlex(work: {
   date_inspect?: string;
   date_propose?: string;
   company?: string;
+  company_short?: string;
+  short_name?: string;
   note?: string;
   image_url?: string;
   images?: string[];
@@ -103,15 +122,22 @@ export function createWorkAssignmentFlex(work: {
   const displayTitle = work.title || work.details || "งานรับเหมา";
   const rawId = work.id ? String(work.id) : "-";
   const cleanId = rawId.replace(/\D/g, "") || rawId;
-  const formattedId = rawId.startsWith("PW-")
-    ? rawId
-    : rawId.startsWith("PW")
-    ? `PW-${rawId.replace(/^PW/i, "")}`
-    : cleanId !== "-"
-    ? `PW-${cleanId}`
-    : rawId;
 
-  const teamLabel = work.team ? (work.team.startsWith("PW") ? work.team : `PW${work.team}`) : "PW";
+  // Format team label strictly from work.team (PW, PW1, PW2, PW3, PW4, PW5)
+  const teamLabel = work.team
+    ? (work.team.toUpperCase().startsWith("PW") ? work.team.toUpperCase() : `PW${work.team}`)
+    : "PW";
+
+  const getWorkTeamBadgeStyle = (teamStr: string) => {
+    const t = teamStr.toUpperCase();
+    if (t.includes("1")) return { bg: "#ECFDF5", border: "#A7F3D0", text: "#047857" }; // Green (PW1)
+    if (t.includes("2")) return { bg: "#EFF6FF", border: "#BFDBFE", text: "#1D4ED8" }; // Blue (PW2)
+    if (t.includes("3")) return { bg: "#FAF5FF", border: "#E9D5FF", text: "#7E22CE" }; // Purple (PW3)
+    if (t.includes("4")) return { bg: "#FFFBEB", border: "#FDE68A", text: "#B45309" }; // Amber (PW4)
+    if (t.includes("5")) return { bg: "#FFF1F2", border: "#FECDD3", text: "#E11D48" }; // Rose/Red (PW5)
+    if (t === "PW" || t === "PM") return { bg: "#EEF2FF", border: "#C7D2FE", text: "#4338CA" }; // Indigo (PW)
+    return { bg: "#F8FAFC", border: "#CBD5E1", text: "#334155" }; // Slate
+  };
 
   const statusRaw = String(work.status || work.activity_type || "รอดูงาน").trim();
   let statusDisplay = statusRaw === "เสนอราคา" ? "รอดูงาน" : statusRaw;
@@ -139,8 +165,8 @@ export function createWorkAssignmentFlex(work: {
 
   const addRow = (label: string, value?: string, isPhone = false) => {
     if (!value || value === "-" || value.trim() === "") return;
-    const cleanVal = value.trim();
-    const phoneDigits = cleanVal.replace(/\D/g, "");
+    const cleanVal = isPhone ? formatPhoneNumber(value) : value.trim();
+    const phoneDigits = value.replace(/\D/g, "");
     const canCall = isPhone && phoneDigits.length >= 9;
 
     rows.push({
@@ -178,12 +204,14 @@ export function createWorkAssignmentFlex(work: {
     });
   };
 
-  const companyOrProject = (work.company && work.company !== "-")
+  const rawCompany = (work.company && work.company !== "-")
     ? work.company
     : (work.project_name && work.project_name !== "-" && !work.project_name.startsWith("ทีม") ? work.project_name : undefined);
 
+  const displayCompany = work.company_short || work.short_name || resolveCustomerShortName(rawCompany) || rawCompany;
+
   addRow("สถานที่", work.location);
-  addRow("บริษัท", companyOrProject);
+  addRow("บริษัท", displayCompany);
   addRow("เลขที่ PR", work.pr_no);
   let inspectDisplay = work.date_inspect;
   if (inspectDisplay && inspectDisplay !== "-" && !inspectDisplay.includes(":")) {
@@ -198,8 +226,9 @@ export function createWorkAssignmentFlex(work: {
   addRow("ผู้รับเหมา", work.contractor_name || work.contact);
   addRow("เบอร์โทร", work.phone, true);
   if (work.creator) {
-    const creatorDisplay = work.creator_phone && work.creator_phone !== "-"
-      ? `${work.creator} (${work.creator_phone})`
+    const creatorPhoneFormatted = work.creator_phone && work.creator_phone !== "-" ? formatPhoneNumber(work.creator_phone) : "";
+    const creatorDisplay = creatorPhoneFormatted
+      ? `${work.creator} (${creatorPhoneFormatted})`
       : work.creator;
     addRow("ผู้เปิดงาน", creatorDisplay);
   }
@@ -208,43 +237,41 @@ export function createWorkAssignmentFlex(work: {
   }
   addRow("หมายเหตุ", work.note);
 
+  const teamBadgeStyle = getWorkTeamBadgeStyle(teamLabel);
   const topBadges: any[] = [
     {
       type: "box",
       layout: "horizontal",
-      flex: 0,
-      backgroundColor: "#ECFDF5",
-      borderColor: "#A7F3D0",
+      backgroundColor: teamBadgeStyle.bg,
+      borderColor: teamBadgeStyle.border,
       borderWidth: "1px",
       cornerRadius: "4px",
-      paddingStart: "7px",
-      paddingEnd: "7px",
-      paddingTop: "2px",
-      paddingBottom: "2px",
+      paddingStart: "8px",
+      paddingEnd: "8px",
+      paddingTop: "3px",
+      paddingBottom: "3px",
       alignItems: "center",
       contents: [
         {
           type: "text",
           text: teamLabel,
-          color: "#047857",
+          color: teamBadgeStyle.text,
           size: "xxs",
           weight: "bold",
-          wrap: false,
         },
       ],
     },
     {
       type: "box",
       layout: "horizontal",
-      flex: 0,
       backgroundColor: statusStyle.bg,
       borderColor: statusStyle.border,
       borderWidth: "1px",
       cornerRadius: "4px",
-      paddingStart: "7px",
-      paddingEnd: "7px",
-      paddingTop: "2px",
-      paddingBottom: "2px",
+      paddingStart: "8px",
+      paddingEnd: "8px",
+      paddingTop: "3px",
+      paddingBottom: "3px",
       alignItems: "center",
       contents: [
         {
@@ -253,7 +280,6 @@ export function createWorkAssignmentFlex(work: {
           color: statusStyle.text,
           size: "xxs",
           weight: "bold",
-          wrap: false,
         },
       ],
     },
@@ -263,15 +289,14 @@ export function createWorkAssignmentFlex(work: {
     topBadges.push({
       type: "box",
       layout: "horizontal",
-      flex: 0,
       backgroundColor: "#EFF6FF",
       borderColor: "#BFDBFE",
       borderWidth: "1px",
       cornerRadius: "4px",
-      paddingStart: "7px",
-      paddingEnd: "7px",
-      paddingTop: "2px",
-      paddingBottom: "2px",
+      paddingStart: "8px",
+      paddingEnd: "8px",
+      paddingTop: "3px",
+      paddingBottom: "3px",
       alignItems: "center",
       contents: [
         {
@@ -280,48 +305,30 @@ export function createWorkAssignmentFlex(work: {
           color: "#2563EB",
           size: "xxs",
           weight: "bold",
-          wrap: false,
         },
       ],
     });
   }
 
+  const idText = cleanId && cleanId !== "-" ? `ลำดับ: ${cleanId}` : `งาน ${rawId}`;
+
   const bodyContents: any[] = [
-    // 1. Top Badges Row (Team, Activity/Status, Update badge, ID)
+    // 1. Top Badges Row (Team, Activity/Status, Update badge on left, ID on right)
     {
       type: "box",
       layout: "horizontal",
+      spacing: "xs",
       alignItems: "center",
       contents: [
+        ...topBadges,
         {
-          type: "box",
-          layout: "horizontal",
-          spacing: "xs",
+          type: "text",
+          text: idText,
+          size: "xs",
+          color: "#334155",
+          weight: "bold",
+          align: "end",
           flex: 1,
-          contents: topBadges,
-        },
-        {
-          type: "box",
-          layout: "horizontal",
-          flex: 0,
-          backgroundColor: "#F8FAFC",
-          borderColor: "#E2E8F0",
-          borderWidth: "1px",
-          cornerRadius: "4px",
-          paddingStart: "8px",
-          paddingEnd: "8px",
-          paddingTop: "2px",
-          paddingBottom: "2px",
-          contents: [
-            {
-              type: "text",
-              text: formattedId,
-              size: "xs",
-              color: "#0F172A",
-              weight: "bold",
-              wrap: false,
-            },
-          ],
         },
       ],
     },
@@ -395,8 +402,25 @@ export function createWorkAssignmentFlex(work: {
     },
   };
 
-  // Action Buttons: "อัพเดทข้อมูล" & "ปิด"
+  // Action Buttons: "คัดลอก", "อัพเดทข้อมูล" & "ปิด"
   const editUrl = cleanId && cleanId !== "-" ? getLiffUrl(`/quick-work?id=PW-${cleanId}`) : getLiffUrl("/quick-work");
+
+  // Construct structured text for 1-tap clipboard copying (ลำดับก่อน แล้วตามด้วยทีม)
+  const copyLines = [
+    cleanId && cleanId !== "-" ? `ลำดับ: ${cleanId}` : null,
+    `ทีม: ${teamLabel}`,
+    `เรื่อง: ${displayTitle}`,
+    displayCompany ? `บริษัท: ${displayCompany}` : null,
+    work.location && work.location !== "-" ? `สถานที่: ${work.location}` : null,
+    work.pr_no && work.pr_no !== "-" ? `PR: ${work.pr_no}` : null,
+    inspectDisplay && inspectDisplay !== "-" ? `นัดดูหน้างาน: ${inspectDisplay}` : null,
+    proposeDisplay && proposeDisplay !== "-" ? `นัดส่งเสนอ: ${proposeDisplay}` : null,
+    work.contractor_name || work.contact ? `ผู้รับเหมา: ${work.contractor_name || work.contact}` : null,
+    work.phone && work.phone !== "-" ? `เบอร์โทร: ${formatPhoneNumber(work.phone)}` : null,
+    work.creator ? `ผู้เปิดงาน: ${work.creator}${work.creator_phone && work.creator_phone !== "-" ? ` (${formatPhoneNumber(work.creator_phone)})` : ""}` : null,
+    work.amount && work.amount > 0 ? `ยอดเสนอ: ฿${formattedAmount}` : null,
+    work.note && work.note !== "-" ? `หมายเหตุ: ${work.note}` : null,
+  ].filter(Boolean).join("\n");
 
   bodyContents.push({
     type: "separator",
@@ -405,6 +429,36 @@ export function createWorkAssignmentFlex(work: {
   });
 
   const actionButtons: any[] = [
+    {
+      type: "box",
+      layout: "horizontal",
+      backgroundColor: "#F1F5F9",
+      borderColor: "#CBD5E1",
+      borderWidth: "1px",
+      cornerRadius: "6px",
+      paddingStart: "8px",
+      paddingEnd: "8px",
+      paddingTop: "6px",
+      paddingBottom: "6px",
+      alignItems: "center",
+      justifyContent: "center",
+      flex: 1,
+      action: {
+        type: "clipboard",
+        label: "คัดลอก",
+        clipboardText: copyLines,
+      },
+      contents: [
+        {
+          type: "text",
+          text: "คัดลอก",
+          size: "xs",
+          color: "#334155",
+          weight: "bold",
+          align: "center",
+        },
+      ],
+    },
     {
       type: "box",
       layout: "horizontal",
@@ -427,7 +481,7 @@ export function createWorkAssignmentFlex(work: {
       contents: [
         {
           type: "text",
-          text: "อัพเดทข้อมูล",
+          text: "อัพเดท",
           size: "xs",
           color: "#2563EB",
           weight: "bold",
@@ -1277,7 +1331,7 @@ export function createTaskDetailFlex(params: {
  */
 export function createWorkSummaryFlex(
   works: Array<UnifiedWorkItem | any>,
-  options?: { title?: string; teamName?: string; attachmentsMap?: Record<string, any> }
+  options?: { title?: string; teamName?: string; attachmentsMap?: Record<string, any>; groupUrl?: string }
 ): Record<string, any> {
   const isAllTeams = !options?.teamName || options.teamName === "ทั้งหมด";
   const defaultTitle = isAllTeams ? "รายการงานรับเหมา (ทุกทีม)" : `รายการงาน ${options?.teamName}`;
@@ -1292,7 +1346,8 @@ export function createWorkSummaryFlex(
     if (t.includes("3")) return { bg: "#FAF5FF", border: "#E9D5FF", text: "#7E22CE" }; // Purple (PW3)
     if (t.includes("4")) return { bg: "#FFFBEB", border: "#FDE68A", text: "#B45309" }; // Amber (PW4)
     if (t.includes("5")) return { bg: "#FFF1F2", border: "#FECDD3", text: "#E11D48" }; // Rose/Red (PW5)
-    return { bg: "#F8FAFC", border: "#CBD5E1", text: "#334155" }; // Slate (PW)
+    if (t === "PW" || t === "PM") return { bg: "#EEF2FF", border: "#C7D2FE", text: "#4338CA" }; // Indigo (PW)
+    return { bg: "#F8FAFC", border: "#CBD5E1", text: "#334155" }; // Slate
   };
 
   // Helper to format date & time as in Image 1: "วันนัดดู 10/10/26 เวลา 10:00 น" หรือ "วันนัดเสนอ 10/10/26 เวลา 10:00 น"
@@ -1302,13 +1357,13 @@ export function createWorkSummaryFlex(
     else if (sectionName === "ประชุม") label = "วันนัดประชุม";
     else if (sectionName === "ประมูล") label = "วันนัดประมูล";
 
-    if (!rawDate || rawDate === "-" || rawDate === "null") return `${label}  -`;
+    if (!rawDate || rawDate === "-" || rawDate === "null") return `${label} -`;
     let timeStr = "";
     const timeMatch = rawDate.match(/(?:เวลา\s*)?(\d{1,2}:\d{2})/);
     if (timeMatch) {
-      timeStr = `  เวลา  ${timeMatch[1]} น`;
+      timeStr = ` ${timeMatch[1]} น.`;
     } else {
-      timeStr = `  เวลา  10:00 น`;
+      timeStr = ` 10:00 น.`;
     }
     let datePart = "";
     const dmyMatch = rawDate.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
@@ -1329,9 +1384,9 @@ export function createWorkSummaryFlex(
       }
     }
     if (datePart) {
-      return `${label}  ${datePart}${timeStr}`;
+      return `${label} ${datePart}${timeStr}`;
     }
-    return `${label}  ${rawDate}${rawDate.includes(":") ? "" : "  เวลา  10:00 น"}`;
+    return `${label} ${rawDate}`;
   };
 
   // Categorize works into 4 active pipeline sections matching Image 1
@@ -1377,7 +1432,10 @@ export function createWorkSummaryFlex(
 
   const bodyContents: any[] = [];
 
-  // 1. Top Card Header (inside body - no header block) with Top-Right Action Button
+  const rawGroupUrl = options?.groupUrl || process.env.GROUP_PW || "line://ti/g/-vtaBD82Mz";
+  const groupPwUrl = rawGroupUrl.replace(/^https?:\/\/line\.me\/(?:R\/)?/i, "line://");
+
+  // 1. Top Card Header (Title on left, small buttons in top-right corner)
   bodyContents.push({
     type: "box",
     layout: "horizontal",
@@ -1386,51 +1444,95 @@ export function createWorkSummaryFlex(
       {
         type: "box",
         layout: "vertical",
-        flex: 1,
+        flex: 6,
         contents: [
           {
             type: "text",
             text: title,
             weight: "bold",
             size: "sm",
-            color: "#0F172A"
+            color: "#0F172A",
+            wrap: false
           },
           {
             type: "text",
             text: isAllTeams
-              ? `พบ ${totalItemsCount} รายการล่าสุด (รวมทุกทีม)`
-              : `พบ ${totalItemsCount} รายการล่าสุด (ทีม ${options?.teamName})`,
+              ? `${totalItemsCount} รายการล่าสุด (รวมทุกทีม)`
+              : `${totalItemsCount} รายการล่าสุด (ทีม ${options?.teamName})`,
             size: "xxs",
             color: "#64748B",
-            margin: "xs"
+            margin: "xs",
+            wrap: false
           }
         ]
       },
       {
         type: "box",
         layout: "horizontal",
-        backgroundColor: "#2563EB",
-        cornerRadius: "6px",
-        width: "88px",
-        paddingTop: "5px",
-        paddingBottom: "5px",
+        spacing: "xs",
         alignItems: "center",
-        justifyContent: "center",
-        flex: 0,
-        action: {
-          type: "uri",
-          label: "เปิดงานใหม่",
-          uri: getLiffUrl("/quick-work")
-        },
+        justifyContent: "flex-end",
+        flex: 4,
         contents: [
+          ...(groupPwUrl
+            ? [
+                {
+                  type: "box",
+                  layout: "horizontal",
+                  backgroundColor: "#06C755",
+                  cornerRadius: "4px",
+                  paddingStart: "8px",
+                  paddingEnd: "8px",
+                  paddingTop: "4px",
+                  paddingBottom: "4px",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  action: {
+                    type: "uri",
+                    label: "กลุ่ม",
+                    uri: groupPwUrl
+                  },
+                  contents: [
+                    {
+                      type: "text",
+                      text: "กลุ่ม",
+                      size: "xxs",
+                      weight: "bold",
+                      color: "#FFFFFF",
+                      align: "center",
+                      wrap: false
+                    }
+                  ]
+                }
+              ]
+            : []),
           {
-            type: "text",
-            text: "+ เปิดงานใหม่",
-            size: "xxs",
-            weight: "bold",
-            color: "#FFFFFF",
-            align: "center",
-            wrap: false
+            type: "box",
+            layout: "horizontal",
+            backgroundColor: "#2563EB",
+            cornerRadius: "4px",
+            paddingStart: "8px",
+            paddingEnd: "8px",
+            paddingTop: "4px",
+            paddingBottom: "4px",
+            alignItems: "center",
+            justifyContent: "center",
+            action: {
+              type: "uri",
+              label: "+ เปิดงาน",
+              uri: getLiffUrl("/quick-work")
+            },
+            contents: [
+              {
+                type: "text",
+                text: "+ เปิดงาน",
+                size: "xxs",
+                weight: "bold",
+                color: "#FFFFFF",
+                align: "center",
+                wrap: false
+              }
+            ]
           }
         ]
       }
@@ -1507,18 +1609,57 @@ export function createWorkSummaryFlex(
     for (let i = 0; i < list.length; i++) {
       const w = list[i];
       const idStr = String(w.id || "").replace(/\D/g, "");
-      const dateRaw = sectionName === "รอเสนอ"
-        ? String(w.date_propose && w.date_propose !== "-" ? w.date_propose : (w.date_inspect || "-"))
-        : String(w.date_inspect || w.date_propose || "-");
       const locationStr = w.location && w.location !== "-" ? String(w.location) : "-";
-      const companyStr = w.company && w.company !== "-" ? String(w.company) : "-";
-      const detailStr = w.note && w.note !== "-" ? String(w.note) : (w.contact1 && w.contact1 !== "-" ? `ช่าง${w.contact1}` : (w.pr_no && w.pr_no !== "-" ? `PR:${w.pr_no}` : "-"));
+      const rawCompanyStr = w.company && w.company !== "-" ? String(w.company) : "-";
+      const companyStr = w.short_name || w.company_short || resolveCustomerShortName(rawCompanyStr) || rawCompanyStr;
+      const contactLabel = w.contact1 && w.contact1 !== "-" ? `ติดต่อ ${w.contact1}` : "";
+      const detailStr = w.note && w.note !== "-" ? String(w.note) : (contactLabel || (w.pr_no && w.pr_no !== "-" ? `PR:${w.pr_no}` : "-"));
 
-      const dateInspectFormatted = formatInspectForCard(dateRaw, sectionName);
+      const isProposeState = sectionName === "รอเสนอ" || String(w.status || "").includes("เสนอ") || String(w.activity_type || "").includes("เสนอ");
+      let dateRaw = "-";
+      let dateSectionLabel = sectionName;
+
+      if (isProposeState) {
+        // เมื่อสถานะเป็นรอเสนอ ให้แสดงวันที่รอเสนอ (date_propose) แทน
+        if (w.date_propose && w.date_propose !== "-" && w.date_propose !== "null") {
+          dateRaw = String(w.date_propose);
+          dateSectionLabel = "รอเสนอ";
+        } else if (w.date_inspect && w.date_inspect !== "-" && w.date_inspect !== "null") {
+          dateRaw = String(w.date_inspect);
+          dateSectionLabel = "รอดูงาน";
+        }
+      } else {
+        dateRaw = String(w.date_inspect && w.date_inspect !== "-" ? w.date_inspect : (w.date_propose || "-"));
+        dateSectionLabel = sectionName;
+      }
+
+      const dateInspectFormatted = formatInspectForCard(dateRaw, dateSectionLabel);
       const workEditUrl = getLiffUrl(`/quick-work?id=PW-${idStr || w.id}`);
 
       const itemTeam = w.team ? (String(w.team).toUpperCase().startsWith("PW") || String(w.team).toUpperCase().startsWith("PM") ? String(w.team).toUpperCase() : `PW${w.team}`) : "PW";
-      const teamBadgeStyle = getTeamBadgeStyle(itemTeam);
+
+      let inspectDisplay = w.date_inspect && w.date_inspect !== "-" ? String(w.date_inspect).trim() : "";
+      if (inspectDisplay && !inspectDisplay.includes(":")) {
+        inspectDisplay = `${inspectDisplay} เวลา 10:00 น.`;
+      }
+
+      let proposeDisplay = w.date_propose && w.date_propose !== "-" ? String(w.date_propose).trim() : "";
+      if (proposeDisplay && !proposeDisplay.includes(":")) {
+        proposeDisplay = `${proposeDisplay} เวลา 10:00 น.`;
+      }
+
+      const itemCopyLines = [
+        idStr ? `ลำดับ: ${idStr}` : (w.id ? `ลำดับ: ${w.id}` : null),
+        `ทีม: ${itemTeam}`,
+        `เรื่อง: ${w.title || "-"}`,
+        companyStr && companyStr !== "-" ? `บริษัท: ${companyStr}` : null,
+        inspectDisplay ? `นัดดูหน้างาน: ${inspectDisplay}` : null,
+        proposeDisplay ? `นัดส่งเสนอ: ${proposeDisplay}` : (!inspectDisplay && dateInspectFormatted ? dateInspectFormatted.replace(/\s+/g, " ") : null),
+        w.contact1 && w.contact1 !== "-" ? `ติดต่อ: ${w.contact1}` : null,
+        w.phone1 && w.phone1 !== "-" ? `เบอร์โทร: ${formatPhoneNumber(w.phone1)}` : null,
+        locationStr && locationStr !== "-" ? `สถานที่: ${locationStr}` : null,
+        w.note && w.note !== "-" ? `หมายเหตุ: ${w.note}` : null
+      ].filter(Boolean).join("\n");
 
       bodyContents.push({
         type: "box",
@@ -1529,7 +1670,7 @@ export function createWorkSummaryFlex(
         paddingEnd: "4px",
         spacing: "xs",
         contents: [
-          // Line 1: [PW1] [ #5 ] ชื่องาน | สถานที่ แพร่ | ที่โรงงาน บริษัท
+          // Line 1: [ #11 ] จ๋าหะ • คาร์กิลล์ | ติดต่อ นายสมคิด
           {
             type: "box",
             layout: "horizontal",
@@ -1537,20 +1678,14 @@ export function createWorkSummaryFlex(
             contents: [
               {
                 type: "text",
-                flex: 4,
+                flex: 7,
                 wrap: false,
                 size: "xs",
                 contents: [
                   {
                     type: "span",
-                    text: `[${itemTeam}] `,
-                    color: teamBadgeStyle.text,
-                    weight: "bold"
-                  },
-                  {
-                    type: "span",
-                    text: `[ #${idStr || w.id} ]  `,
-                    color: "#0F172A",
+                    text: `[ #${idStr || w.id} ] `,
+                    color: "#2563EB",
                     weight: "bold"
                   },
                   {
@@ -1558,29 +1693,31 @@ export function createWorkSummaryFlex(
                     text: String(w.title || "ชื่องาน"),
                     color: "#0F172A",
                     weight: "bold"
-                  }
+                  },
+                  ...(companyStr && companyStr !== "-"
+                    ? [
+                        {
+                          type: "span",
+                          text: ` • ${companyStr}`,
+                          color: "#475569",
+                          weight: "bold"
+                        }
+                      ]
+                    : [])
                 ]
               },
               {
                 type: "text",
-                text: `สถานที่  ${locationStr}`,
+                text: contactLabel || (detailStr !== "-" ? detailStr : ""),
                 size: "xxs",
-                color: "#334155",
-                flex: 3,
-                wrap: false
-              },
-              {
-                type: "text",
-                text: detailStr,
-                size: "xxs",
-                color: "#475569",
+                color: "#64748B",
                 flex: 3,
                 align: "end",
                 wrap: false
               }
             ]
           },
-          // Line 2: วันนัดดู 10/10/26 เวลา 10:00 น | บริษัท Insee | [ อัพเดท ] [ ปิด ]
+          // Line 2: วันนัดดู 11/10/26 10:00 น. | [ คัดลอก ] [ อัพเดท ] [ ปิด ]
           {
             type: "box",
             layout: "horizontal",
@@ -1591,25 +1728,45 @@ export function createWorkSummaryFlex(
                 text: dateInspectFormatted,
                 size: "xxs",
                 color: "#475569",
-                flex: 4,
-                wrap: false
-              },
-              {
-                type: "text",
-                text: `บริษัท  ${companyStr}`,
-                size: "xxs",
-                color: "#0F172A",
-                weight: "bold",
-                flex: 3,
+                flex: 6,
                 wrap: false
               },
               {
                 type: "box",
                 layout: "horizontal",
-                flex: 3,
+                flex: 4,
                 justifyContent: "flex-end",
                 spacing: "xs",
                 contents: [
+                  {
+                    type: "box",
+                    layout: "horizontal",
+                    backgroundColor: "#F1F5F9",
+                    borderColor: "#CBD5E1",
+                    borderWidth: "1px",
+                    cornerRadius: "4px",
+                    paddingTop: "2px",
+                    paddingBottom: "2px",
+                    paddingStart: "5px",
+                    paddingEnd: "5px",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    action: {
+                      type: "clipboard",
+                      label: "คัดลอก",
+                      clipboardText: itemCopyLines
+                    },
+                    contents: [
+                      {
+                        type: "text",
+                        text: "คัดลอก",
+                        size: "xxs",
+                        weight: "bold",
+                        color: "#334155",
+                        align: "center"
+                      }
+                    ]
+                  },
                   {
                     type: "box",
                     layout: "horizontal",
@@ -1617,8 +1774,8 @@ export function createWorkSummaryFlex(
                     cornerRadius: "4px",
                     paddingTop: "3px",
                     paddingBottom: "3px",
-                    paddingStart: "8px",
-                    paddingEnd: "8px",
+                    paddingStart: "5px",
+                    paddingEnd: "5px",
                     alignItems: "center",
                     justifyContent: "center",
                     action: {
@@ -1644,8 +1801,8 @@ export function createWorkSummaryFlex(
                     cornerRadius: "4px",
                     paddingTop: "3px",
                     paddingBottom: "3px",
-                    paddingStart: "8px",
-                    paddingEnd: "8px",
+                    paddingStart: "5px",
+                    paddingEnd: "5px",
                     alignItems: "center",
                     justifyContent: "center",
                     action: {
@@ -1671,11 +1828,13 @@ export function createWorkSummaryFlex(
         ]
       });
 
-      // เส้นล่างเพื่อแยกแต่ละรายการ
-      bodyContents.push({
-        type: "separator",
-        color: "#E2E8F0"
-      });
+      if (i < list.length - 1) {
+        bodyContents.push({
+          type: "separator",
+          color: "#F1F5F9",
+          margin: "sm"
+        });
+      }
     }
   }
 
@@ -3148,14 +3307,9 @@ export async function handleTaskCommands(
     }
 
     if (isSubmitKeywordMessage) {
-      // User PASTED the template into the group -> acknowledge cleanly and invite file/photo drop
-      const statusTitle = isClosing ? "ปิดงาน (สำเร็จ)" : "ส่งงาน";
-      const confirmMsg = [
-        `รับข้อมูล${statusTitle} [#${numId}] เรียบร้อยแล้วครับ`,
-        `ผู้รับผิดชอบ: ${assignee}`,
-        `รายการ: ${taskTitle}`,
-        `ส่งรูปถ่าย หรือ แนบไฟล์เอกสาร (PDF, Excel, Word) ลงในกลุ่มนี้ต่อได้ทันทีครับ (ระบบจะบันทึกเข้างานให้อัตโนมัติ)`
-      ].join("\n");
+      // User PASTED the template into the group -> acknowledge cleanly and invite file/photo drop (1 line compact)
+      const statusTitle = isClosing ? "ปิดงาน" : "ส่งงาน";
+      const confirmMsg = `รับ${statusTitle} [#${numId}] เรียบร้อย ส่งรูปหรือไฟล์ต่อได้เลยครับ`;
 
       await replyTextMessage(replyToken, confirmMsg);
       return true;
@@ -3478,16 +3632,20 @@ export async function handleWorkCommands(
     /^งาน\s*(?:pw|pm)[1-5]$/i.test(cleanTrimmed);
 
   const isBasePwQuery =
+    /^(?:pw|pm)$/i.test(norm) ||
+    /^(?:pw|pm)$/i.test(cleanTrimmed) ||
+    /^(?:pw|pm):work$/i.test(cleanTrimmed) ||
+    /^งาน\s*(?:pw|pm)$/i.test(cleanTrimmed) ||
+    /^(?:pw|pm)\s*งาน$/i.test(cleanTrimmed) ||
+    /^(?:ทีม|team)\s*(?:pw|pm)$/i.test(cleanTrimmed) ||
     norm === "pw" ||
     norm === "pm" ||
     cleanTrimmed === "pw" ||
     cleanTrimmed === "pm" ||
-    cleanTrimmed === "pw:work" ||
-    cleanTrimmed === "pm:work" ||
     cleanTrimmed === "งานpw" ||
     cleanTrimmed === "งานpm";
 
-  // CASE A: PWALL -> แสดงแยก 5 Flex (PW1, PW2, PW3, PW4, PW5) ไม่ปนกันใน Flex เดียว
+  // CASE A: PWALL -> แสดงแยกทุกทีม (PW, PW1, PW2, PW3, PW4, PW5) ไม่ปนกันใน Flex เดียว
   if (isPwAllQuery) {
     const { data: allActiveWorks, error: fetchErr } = await supabaseAdmin
       .from("works")
@@ -3496,23 +3654,37 @@ export async function handleWorkCommands(
       .order("id", { ascending: false });
 
     if (fetchErr) {
-      console.error("❌ Error fetching works for pwall:", fetchErr);
+      console.error("Error fetching works for pwall:", fetchErr);
     }
 
     const attachmentsMap = await getAllWorkAttachments();
-    const pwTeams = ["PW1", "PW2", "PW3", "PW4", "PW5"] as const;
+    // เพิ่มทีม "PW" เฉยๆ เข้าไปด้วย รวมเป็น 6 ทีม (PW, PW1, PW2, PW3, PW4, PW5)
+    const pwTeams = ["PW", "PW1", "PW2", "PW3", "PW4", "PW5"] as const;
 
     const flexList: Array<{ altText: string; contents: Record<string, any> }> = [];
 
     for (const teamName of pwTeams) {
-      const teamNum = teamName.replace(/\D/g, ""); // "1", "2", "3", "4", "5"
-      const pmName = `PM${teamNum}`;
+      let teamWorks: any[] = [];
+      if (teamName === "PW") {
+        teamWorks = (allActiveWorks || []).filter((w) => {
+          const t = String(w.team || "").trim().toUpperCase();
+          return t === "PW" || t === "PM" || !t || (!/^(?:PW|PM)[1-5]$/i.test(t) && !/^[1-5]$/.test(t));
+        });
+      } else {
+        const teamNum = teamName.replace(/\D/g, ""); // "1", "2", "3", "4", "5"
+        const pmName = `PM${teamNum}`;
 
-      // Filter works strictly for this team - no mixing!
-      const teamWorks = (allActiveWorks || []).filter((w) => {
-        const t = String(w.team || "").trim().toUpperCase();
-        return t === teamName || t === pmName || t === teamNum;
-      });
+        // Filter works strictly for this team - no mixing!
+        teamWorks = (allActiveWorks || []).filter((w) => {
+          const t = String(w.team || "").trim().toUpperCase();
+          return t === teamName || t === pmName || t === teamNum;
+        });
+      }
+
+      // เมื่อเรียก PWall ทีมไหนไม่มีงาน ไม่ต้องแสดง
+      if (!teamWorks || teamWorks.length === 0) {
+        continue;
+      }
 
       const flex = createWorkSummaryFlex(teamWorks, {
         teamName,
@@ -3525,8 +3697,20 @@ export async function handleWorkCommands(
       });
     }
 
-    const sent = await replyMultipleFlexMessages(replyToken, flexList);
-    if (!sent && targetId) {
+    if (flexList.length === 0) {
+      await replyTextMessage(replyToken, "ไม่มีงานรับเหมาค้างในระบบ");
+      return true;
+    }
+
+    // LINE Messaging API ตอบกลับได้สูงสุด 5 ข้อความต่อ Reply Token
+    // แบ่งส่ง 5 ชุดแรกผ่าน replyToken และชุดที่เหลือ ส่งผ่าน push
+    const firstBatch = flexList.slice(0, 5);
+    const secondBatch = flexList.slice(5);
+
+    const sent = await replyMultipleFlexMessages(replyToken, firstBatch);
+    if (secondBatch.length > 0 && targetId) {
+      await sendMultipleFlexMessagesDetailed(targetId, secondBatch);
+    } else if (!sent && targetId) {
       await sendMultipleFlexMessagesDetailed(targetId, flexList);
     }
     return true;
@@ -3561,6 +3745,8 @@ export async function handleWorkCommands(
         textSummary += `${i + 1}. [PW-${w.id}] ${w.title || "งานรับเหมา"}\n   - สถานะ: ${w.status || "รอดูงาน"}\n   - นัดดู: ${w.date_inspect || "-"}\n   - ติดต่อ: ${w.contact1 || "-"} (${w.phone1 || "-"})\n\n`;
       });
       await replyTextMessage(replyToken, textSummary.trim() || `ไม่มีงานค้าง (${teamFilter})`);
+    } else if (!sent && targetId) {
+      await sendFlexMessageDetailed(targetId, altText, flex);
     }
     return true;
   }
@@ -3569,17 +3755,20 @@ export async function handleWorkCommands(
   if (isBasePwQuery) {
     const teamFilter = "PW";
 
-    const { data: rawWorks } = await supabaseAdmin
+    const { data: rawWorks, error: fetchErr } = await supabaseAdmin
       .from("works")
       .select("*")
-      .or("team.eq.PW,team.eq.PM,team.is.null,team.eq.''")
       .not("status", "in", '("เสร็จ","สำเร็จ","ปิดงาน")')
       .order("id", { ascending: false })
-      .limit(20);
+      .limit(30);
+
+    if (fetchErr) {
+      console.error("Error fetching works for pw:", fetchErr);
+    }
 
     const filteredWorks = (rawWorks || []).filter((w) => {
       const t = String(w.team || "").trim().toUpperCase();
-      return !/^(?:PW|PM)[1-5]$/i.test(t) && !/^[1-5]$/.test(t);
+      return t === "PW" || t === "PM" || !t || (!/^(?:PW|PM)[1-5]$/i.test(t) && !/^[1-5]$/.test(t));
     });
 
     const attachmentsMap = await getAllWorkAttachments();
@@ -3596,6 +3785,8 @@ export async function handleWorkCommands(
         textSummary += `${i + 1}. [PW-${w.id}] ${w.title || "งานรับเหมา"}\n   - สถานะ: ${w.status || "รอดูงาน"}\n   - นัดดู: ${w.date_inspect || "-"}\n   - ติดต่อ: ${w.contact1 || "-"} (${w.phone1 || "-"})\n\n`;
       });
       await replyTextMessage(replyToken, textSummary.trim() || "ไม่มีงานค้าง (PW)");
+    } else if (!sent && targetId) {
+      await sendFlexMessageDetailed(targetId, altText, flex);
     }
     return true;
   }

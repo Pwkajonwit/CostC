@@ -217,6 +217,7 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
   [TABLES.CUSTOMER]: [
     { name: "id_cus", type: "Text", key: true, initialValue: "nextCustomerId", required: true },
     { name: "ชื่อลูกค้า", type: "Text", required: true },
+    { name: "ชื่อย่อ", type: "Text", placeholder: "เช่น ซีพีเอฟ, คาร์กิลล์" },
     { name: "ที่อยู่", type: "LongText" },
     { name: "เลขที่ผู้เสียภาษี", type: "Text", placeholder: "X-XXXX-XXXXX-XX-X" }
   ],

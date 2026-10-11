@@ -13,7 +13,7 @@ import { money, toNumber } from "@/lib/utils/numbers";
 import { getHeaders, getRows } from "@/lib/db";
 import { getViewById, getViewColumns } from "@/lib/views";
 import { CategoryTableView } from "@/components/views/CategoryTableView";
-import { getSystemOptionsFromSupabase, getCustomerContactsMap } from "@/lib/supabase/supabase-db";
+import { getSystemOptionsFromSupabase, getCustomerContactsMap, getCustomerShortNamesMap, resolveCustomerShortName } from "@/lib/supabase/supabase-db";
 import { CustomerContactsManager } from "@/components/customers/CustomerContactsManager";
 import { hydrateProjectRowsForList } from "@/lib/project-summary";
 import { DetailEditTrigger } from "@/components/forms/DetailEditTrigger";
@@ -89,7 +89,9 @@ export async function renderRowDetailPage(id: string, rowKey: string) {
   let customerContacts: any[] = [];
   if (id === "customers") {
     const contactsMap = await getCustomerContactsMap();
+    const shortNamesMap = await getCustomerShortNamesMap();
     customerContacts = contactsMap[primaryCode] || contactsMap[decodedKey] || contactsMap[String(row.id || "")] || [];
+    row["ชื่อย่อ"] = row["ชื่อย่อ"] || shortNamesMap[primaryCode] || shortNamesMap[decodedKey] || shortNamesMap[String(row["ชื่อลูกค้า"] || "")] || resolveCustomerShortName(String(row["ชื่อลูกค้า"] || ""), shortNamesMap) || "-";
   }
 
   const isStoreDetail = id === "stores";
@@ -237,6 +239,7 @@ export async function renderRowDetailPage(id: string, rowKey: string) {
           <CustomerContactsManager
             customerId={primaryCode || decodedKey}
             customerName={String(row["ชื่อลูกค้า"] || title)}
+            initialShortName={String(row["ชื่อย่อ"] && row["ชื่อย่อ"] !== "-" ? row["ชื่อย่อ"] : "")}
             initialContacts={customerContacts}
           />
         )}
@@ -480,8 +483,10 @@ async function renderView(
     const isSchemaForm = usesSchemaForm(view.id);
 
     let contactsMap: Record<string, any[]> = {};
+    let shortNamesMap: Record<string, string> = {};
     if (view.id === "customers") {
       contactsMap = await getCustomerContactsMap();
+      shortNamesMap = await getCustomerShortNamesMap();
     }
 
     const hydratedRows = view.id === "contract-open"
@@ -493,10 +498,13 @@ async function renderView(
           : view.id === "customers"
             ? rawRows.map(r => {
                 const k = String(r["id_cus"] || r["id"] || "").trim();
+                const name = String(r["ชื่อลูกค้า"] || r["name"] || "").trim();
                 const cts = contactsMap[k] || [];
                 const summary = cts.map(c => `${c.name}${c.phone ? ` (${c.phone})` : ""}`).join(", ");
+                const shortName = r["ชื่อย่อ"] || shortNamesMap[k] || shortNamesMap[name] || resolveCustomerShortName(name, shortNamesMap) || "-";
                 return {
                   ...r,
+                  "ชื่อย่อ": shortName,
                   "ผู้ติดต่อ": summary || "-"
                 };
               })

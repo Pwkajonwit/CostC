@@ -483,11 +483,13 @@ export function mapSupabaseRowToSheetRow(dbTable: string, row: Record<string, an
     res["id_cus"] = row.id ?? row["id_cus"];
     res["_sheetRow"] = row.id ?? row._sheetRow;
     res["ชื่อลูกค้า"] = row.name ?? row["ชื่อลูกค้า"];
+    res["ชื่อย่อ"] = row.short_name ?? row["ชื่อย่อ"] ?? "";
     res["ที่อยู่"] = row.address ?? row["ที่อยู่"];
     res["เลขที่ผู้เสียภาษี"] = row.tax_id ?? row["เลขที่ผู้เสียภาษี"];
     delete res.name;
     delete res.address;
     delete res.tax_id;
+    delete res.short_name;
   } else if (dbTable === "companies") {
     res["id_Company"] = row.id ?? row["id_Company"];
     res["_sheetRow"] = row.id ?? row._sheetRow;
@@ -1254,6 +1256,121 @@ export async function deleteCustomerContact(customerId: string, contactId: strin
     throw e;
   }
 }
+
+export const DEFAULT_CUSTOMER_SHORT_NAMES: Record<string, string> = {
+  "ON101": "CPF",
+  "ON102": "อินเตอร์เพ็ท",
+  "ON103": "CPF Food",
+  "ON104": "คาร์กิลล์",
+  "ON105": "นครหลวงคอนกรีต",
+  "ON107": "DSG",
+  "ON108": "OR / ปตท.",
+  "ON109": "ม.ธรรมศาสตร์",
+  "บริษัท คาร์กิลล์มีทส์ (ไทยแลนด์) จำกัด (สำนักงานใหญ่)": "คาร์กิลล์",
+  "บริษัท ซีพีเอฟ (ประเทศไทย) จำกัด (มหาชน)": "CPF",
+  "บริษัท อินเตอร์เนชั่นแนล เพ็ท ฟู้ด จำกัด": "อินเตอร์เพ็ท",
+  "บริษัท ซีพีเอฟ ฟู้ด แอนด์ เบฟเวอร์เรจ จำกัด (สาขาที่  00002)": "CPF Food",
+  "บริษัท นครหลวงคอนกรีต จำกัด (สำนักงานใหญ่)": "นครหลวงคอนกรีต",
+  "DSG INTERNATIONAL (THAILAND) PUBLIC COMPANY lIMITED": "DSG",
+  "บริษัท ปตท. น้ำมันและค้าปลีก จำกัด (มหาชน)": "OR / ปตท.",
+  "ธรรมศาสตร์": "ม.ธรรมศาสตร์"
+};
+
+let cachedCustomerShortNames: Record<string, string> = { ...DEFAULT_CUSTOMER_SHORT_NAMES };
+
+export async function getCustomerShortNamesMap(): Promise<Record<string, string>> {
+  if (!isSupabaseConfigured()) return { ...DEFAULT_CUSTOMER_SHORT_NAMES };
+  return cached("sys_opt:customer_short_names", 60_000, async () => {
+    try {
+      const { data } = await supabaseAdmin.from("system_options").select("*").eq("id", "customer_short_names").maybeSingle();
+      const customMap = (data?.data && typeof data.data === "object") ? data.data : {};
+      const merged = { ...DEFAULT_CUSTOMER_SHORT_NAMES, ...customMap };
+      cachedCustomerShortNames = merged;
+      return merged;
+    } catch (e) {
+      return { ...DEFAULT_CUSTOMER_SHORT_NAMES };
+    }
+  });
+}
+
+export async function saveCustomerShortName(customerId: string, shortName: string, customerName?: string) {
+  if (!isSupabaseConfigured() || !customerId) return {};
+  try {
+    const { data } = await supabaseAdmin.from("system_options").select("*").eq("id", "customer_short_names").maybeSingle();
+    const existingMap: Record<string, string> = (data?.data && typeof data.data === "object") ? { ...data.data } : {};
+    const cusKey = String(customerId).trim();
+    const cleanShort = String(shortName || "").trim();
+
+    if (cleanShort) {
+      existingMap[cusKey] = cleanShort;
+      if (customerName && String(customerName).trim()) {
+        existingMap[String(customerName).trim()] = cleanShort;
+      }
+    } else {
+      delete existingMap[cusKey];
+      if (customerName && String(customerName).trim()) {
+        delete existingMap[String(customerName).trim()];
+      }
+    }
+
+    await supabaseAdmin.from("system_options").upsert({
+      id: "customer_short_names",
+      data: existingMap,
+      updated_at: new Date().toISOString()
+    });
+    cachedCustomerShortNames = { ...DEFAULT_CUSTOMER_SHORT_NAMES, ...existingMap };
+    clearCache("sys_opt:customer_short_names");
+    clearCache("sys_opt:all");
+    clearCache("rows:customers");
+    clearCache("rows:ลูกค้า");
+    return existingMap;
+  } catch (e) {
+    console.warn("Failed to persist customer short name in system_options:", e);
+    throw e;
+  }
+}
+
+export function resolveCustomerShortName(nameOrId?: string, map?: Record<string, string>): string {
+  if (!nameOrId || nameOrId === "-") return "";
+  const clean = String(nameOrId).trim();
+  if (!clean) return "";
+
+  const lookupMap = map && Object.keys(map).length > 0 ? map : cachedCustomerShortNames;
+
+  // 1. Direct match (by id or full name)
+  if (lookupMap[clean]) return lookupMap[clean];
+
+  // 2. Case-insensitive match
+  const lowerClean = clean.toLowerCase();
+  for (const [k, v] of Object.entries(lookupMap)) {
+    if (!v) continue;
+    if (k.toLowerCase() === lowerClean) return v;
+  }
+
+  // 3. Substring match for company keywords
+  for (const [k, v] of Object.entries(lookupMap)) {
+    if (!v || k.length < 3) continue;
+    if (clean.includes(k) || k.includes(clean)) return v;
+  }
+
+  // 4. Strip common prefixes like 'บริษัท ' and suffixes like ' จำกัด...'
+  const simplified = clean
+    .replace(/^บริษัท\s+/i, "")
+    .replace(/\s*\(มหาชน\)/i, "")
+    .replace(/\s*\(สำนักงานใหญ่\)/i, "")
+    .replace(/\s*จำกัด.*$/i, "")
+    .trim();
+
+  if (simplified && lookupMap[simplified]) return lookupMap[simplified];
+
+  for (const [k, v] of Object.entries(lookupMap)) {
+    if (!v || k.length < 3) continue;
+    if (simplified.includes(k) || k.includes(simplified)) return v;
+  }
+
+  return "";
+}
+
 
 export async function getNextBillSequence(customStart?: number): Promise<number> {
   if (!isSupabaseConfigured()) return 1;
