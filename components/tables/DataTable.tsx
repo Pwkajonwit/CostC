@@ -393,7 +393,20 @@ function ColorDot({ value }: { value: unknown }) {
 }
 
 function isImageColumn(column: string) {
-  return column === "รูปถ่ายบิล" || column.includes("รูปถ่าย") || column.toLowerCase().includes("image");
+  const col = column.trim().toLowerCase();
+  return (
+    column === "รูปถ่ายบิล" ||
+    column === "เอกสาร" ||
+    column === "รูปภาพ" ||
+    column === "รูปถ่าย" ||
+    column === "ไฟล์แนบ" ||
+    column === "เอกสารแนบ" ||
+    column.includes("รูปถ่าย") ||
+    column.includes("รูปภาพ") ||
+    column.includes("ไฟล์แนบ") ||
+    col.includes("image") ||
+    col.includes("attachment")
+  );
 }
 
 function extractRowSequence(row: SheetRow): number {
@@ -426,6 +439,11 @@ function isCenterColumn(column: string): boolean {
     col === "ผู้เบิก" ||
     col === "ว/ด/ป" ||
     col === "รูปถ่ายบิล" ||
+    col === "เอกสาร" ||
+    col === "รูปภาพ" ||
+    col === "รูปถ่าย" ||
+    col === "ไฟล์แนบ" ||
+    col === "เอกสารแนบ" ||
     col === "สถานะ" ||
     col === "จัดการ" ||
     col === "statusค่าแรง" ||

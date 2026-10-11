@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   ArrowDownUp,
+  Award,
   BriefcaseBusiness,
   Building2,
   Car,
@@ -16,6 +17,7 @@ import {
   Database,
   FileText,
   FolderKanban,
+  FolderOpen,
   Gauge,
   HandCoins,
   IdCard,
@@ -65,6 +67,8 @@ const ICONS: Record<string, any> = {
   loans: HandCoins,
   tasks: ClipboardList,
   works: BriefcaseBusiness,
+  "task-folders": FolderOpen,
+  "task-performance": Award,
   settings: Database,
   "settings-general": Building2,
 };
@@ -80,6 +84,8 @@ function hrefFor(viewId: string) {
   if (viewId === "documents") return "/documents";
   if (viewId === "reports") return "/reports";
   if (viewId === "project-analytics") return "/project-analytics";
+  if (viewId === "task-folders") return "/task-folders";
+  if (viewId === "task-performance") return "/task-performance";
   if (viewId === "settings") return "/settings";
   if (viewId === "settings-general") return "/settings/general";
   return `/views/${viewId}`;
@@ -127,7 +133,7 @@ export function DualSidebar({ collapsed, onToggleCollapse, currentUser }: DualSi
     if (path.startsWith("/settings") || path.startsWith("/line-system") || path.startsWith("/users")) {
       return "system";
     }
-    if (path.startsWith("/views/tasks") || path.startsWith("/views/works") || path === "/tasks" || path === "/works") {
+    if (path.startsWith("/views/tasks") || path.startsWith("/views/works") || path === "/tasks" || path === "/works" || path.startsWith("/task-folders")) {
       return "task";
     }
     if (path.startsWith("/views/")) {
@@ -155,7 +161,7 @@ export function DualSidebar({ collapsed, onToggleCollapse, currentUser }: DualSi
   const isSettingsActive = pathname.startsWith("/settings");
   const isGeneralSettingsActive = pathname === "/settings/general";
 
-  const isTaskPath = pathname.startsWith("/views/tasks") || pathname.startsWith("/views/works");
+  const isTaskPath = pathname.startsWith("/views/tasks") || pathname.startsWith("/views/works") || pathname.startsWith("/task-folders");
   const isMasterPath = pathname.startsWith("/views/") && !isTaskPath;
 
   const currentTab = filterText ? "all" : activeCategory;

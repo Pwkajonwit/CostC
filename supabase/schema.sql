@@ -145,6 +145,7 @@ CREATE TABLE IF NOT EXISTS public.works (
   company TEXT,                                             -- บริษัท
   status TEXT DEFAULT 'รอดูงาน',                              -- สถานะ (รอดูงาน, รอเสนอ, ส่งแล้ว, ประชุม, ฯลฯ)
   note TEXT,                                                -- หมายเหตุ
+  image_url TEXT,                                           -- รูปถ่ายหน้างาน
   data JSONB DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
 );

@@ -1200,7 +1200,28 @@ export function applyRefFill(values: Record<string, string>, field: FieldSchema,
   });
 }
 
-export function isFieldVisible(field: FieldSchema, values: Record<string, string>, form?: FormPayload): boolean {
+export function isFieldVisible(field: FieldSchema, values: Record<string, string>, form?: FormPayload | null): boolean {
+  const rawTable = String(form?.tableName || "").toLowerCase();
+  const isTaskTable =
+    rawTable.includes("task") ||
+    rawTable.includes("จัดการงาน") ||
+    (values["ผู้รับมอบหมาย"] !== undefined && (values["ดู/ทำ"] !== undefined || values["ส่งงาน"] !== undefined));
+
+  const isWorkTable =
+    rawTable.includes("work") ||
+    rawTable.includes("งานรับเหมา & pw") ||
+    (values["กิจกรรม"] !== undefined && values["เรื่อง"] !== undefined);
+
+  // Non-bill tables (Tasks, Works, Plans, Master Tables) do not participate in bill expense category logic!
+  if (isTaskTable || isWorkTable) {
+    if (!field.showIf) return true;
+    const actual = values[field.showIf.column] || "";
+    if (field.showIf.equals !== undefined) return actual === field.showIf.equals;
+    if (field.showIf.in) return field.showIf.in.includes(actual);
+    if (field.showIf.notBlank) return hasValue(actual);
+    return true;
+  }
+
   const vendorType = values["ร้านค้า/ผู้รับเหมา"] || "ร้านค้า";
   const cat = values["ประเภท"] || "";
 
@@ -1257,6 +1278,7 @@ export function isFieldVisible(field: FieldSchema, values: Record<string, string
     return vendorType === "ร้านค้า" && isOtherExpense(cat);
   }
   if (field.name === "รายการ") {
+    if (isTaskTable || isWorkTable || rawTable.includes("plan")) return true;
     return isOtherExpense(cat) || cat.startsWith("603") || cat.includes("เช่าเครื่องจักร");
   }
   if (field.name === "ค่าของ") {
@@ -1444,7 +1466,9 @@ export function getFieldClassName(field: FieldSchema, values?: Record<string, st
     field.type === "Image" ||
     field.type === "File" ||
     field.type === "EnumList" ||
-    field.name === "ร้านค้า/ผู้รับเหมา"
+    field.name === "ร้านค้า/ผู้รับเหมา" ||
+    field.name === "รายการ" ||
+    field.name === "เรื่อง"
   ) {
     return "col-span-full";
   }
@@ -1458,6 +1482,9 @@ export function getFieldClassName(field: FieldSchema, values?: Record<string, st
     field.name === "ชื่อพนักงาน" ||
     field.name === "ประเภท"
   ) {
+    return "col-span-1 sm:col-span-2 lg:col-span-2";
+  }
+  if (field.name === "สถานะ" && field.inputMode === "buttons") {
     return "col-span-1 sm:col-span-2 lg:col-span-2";
   }
   return "col-span-1";

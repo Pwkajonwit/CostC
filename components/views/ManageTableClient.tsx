@@ -89,6 +89,11 @@ export function ManageTableClient({
 
   const isContractorTable = tableName === TABLES.CONTRACTOR || tableName === "contractors" || tableName === "รับเหมา" || viewName.includes("รับเหมา");
   const isStoreTable = tableName === TABLES.STORE || tableName === "stores" || tableName === "ร้านค้า" || viewName.includes("ร้านค้า") || viewName.includes("4. ร้านค้า");
+  const isTasksTable = tableName === TABLES.TASKS || tableName === "tasks" || viewName.toLowerCase().includes("task") || viewName.includes("จัดการงาน");
+  const isWorksTable = tableName === TABLES.WORKS || tableName === "works" || viewName.toLowerCase().includes("work") || viewName.includes("งานรับเหมา & PW");
+
+  const [taskFilter, setTaskFilter] = useState<"all" | "active" | "completed">("all");
+  const [workFilter, setWorkFilter] = useState<"all" | "active" | "won" | "closed">("all");
 
   // ตรวจสอบสิทธิ์การลบข้อมูลมาสเตอร์ (เฉพาะ Owner, Admin หรือผู้ที่มี can_delete เท่านั้น)
   const [canDeleteMaster, setCanDeleteMaster] = useState<boolean>(false);
@@ -125,6 +130,39 @@ export function ManageTableClient({
         });
       }
     }
+    // Filter for Tasks (Auto-archiving / active filter)
+    if (isTasksTable && taskFilter !== "all") {
+      if (taskFilter === "active") {
+        result = result.filter(r => {
+          const st = String(r["สถานะ"] || r.status || "").trim();
+          return st !== "สำเร็จ" && st !== "เสร็จ" && st !== "ยกเลิก";
+        });
+      } else if (taskFilter === "completed") {
+        result = result.filter(r => {
+          const st = String(r["สถานะ"] || r.status || "").trim();
+          return st === "สำเร็จ" || st === "เสร็จ";
+        });
+      }
+    }
+    // Filter for Works (Pipeline / resolution filter)
+    if (isWorksTable && workFilter !== "all") {
+      if (workFilter === "active") {
+        result = result.filter(r => {
+          const st = String(r["สถานะ"] || r.status || "").trim();
+          return !st.includes("ได้งาน") && !st.includes("สำเร็จ") && !st.includes("แพ้") && !st.includes("ไม่ได้งาน") && !st.includes("ยกเลิก");
+        });
+      } else if (workFilter === "won") {
+        result = result.filter(r => {
+          const st = String(r["สถานะ"] || r.status || "").trim();
+          return st.includes("ได้งาน");
+        });
+      } else if (workFilter === "closed") {
+        result = result.filter(r => {
+          const st = String(r["สถานะ"] || r.status || "").trim();
+          return st.includes("สำเร็จ") || st.includes("เสร็จ") || st.includes("แพ้") || st.includes("ไม่ได้งาน") || st.includes("ยกเลิก") || st.includes("ปิดประชุม") || st.includes("ปิดประมูล");
+        });
+      }
+    }
     if (localSearch.trim()) {
       const lower = localSearch.toLowerCase();
       result = result.filter(row => Object.values(row).some(val => String(val).toLowerCase().includes(lower)));
@@ -133,7 +171,8 @@ export function ManageTableClient({
       result.reverse();
     }
     return result;
-  }, [rows, localSearch, sortDesc, isStoreTable, storeFilter]);
+  }, [rows, localSearch, sortDesc, isStoreTable, storeFilter, isTasksTable, taskFilter, isWorksTable, workFilter]);
+
 
   const storeStats = useMemo(() => {
     if (!isStoreTable) return null;
@@ -810,6 +849,96 @@ export function ManageTableClient({
               </button>
             </div>
           )}
+
+          {/* Quick Filter Pills for Tasks (Active vs Completed Archive) */}
+          {isTasksTable && (
+            <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => { setTaskFilter("all"); setPage(1); }}
+                className={`px-2.5 py-1 rounded-full text-2xs font-medium transition cursor-pointer shrink-0 ${
+                  taskFilter === "all"
+                    ? "bg-slate-900 text-white"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                ทั้งหมด ({rows.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => { setTaskFilter("active"); setPage(1); }}
+                className={`px-2.5 py-1 rounded-full text-2xs font-medium transition cursor-pointer flex items-center gap-1 shrink-0 ${
+                  taskFilter === "active"
+                    ? "bg-amber-600 text-white"
+                    : "bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200/60"
+                }`}
+              >
+                <span>⚡ กำลังทำ / ส่งงาน</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setTaskFilter("completed"); setPage(1); }}
+                className={`px-2.5 py-1 rounded-full text-2xs font-medium transition cursor-pointer flex items-center gap-1 shrink-0 ${
+                  taskFilter === "completed"
+                    ? "bg-emerald-600 text-white"
+                    : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200/60"
+                }`}
+              >
+                <span>✅ สำเร็จแล้ว (คลังงาน)</span>
+              </button>
+            </div>
+          )}
+
+          {/* Quick Filter Pills for Works (Pipeline Stages) */}
+          {isWorksTable && (
+            <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => { setWorkFilter("all"); setPage(1); }}
+                className={`px-2.5 py-1 rounded-full text-2xs font-medium transition cursor-pointer shrink-0 ${
+                  workFilter === "all"
+                    ? "bg-slate-900 text-white"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                ทั้งหมด ({rows.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => { setWorkFilter("active"); setPage(1); }}
+                className={`px-2.5 py-1 rounded-full text-2xs font-medium transition cursor-pointer flex items-center gap-1 shrink-0 ${
+                  workFilter === "active"
+                    ? "bg-blue-600 text-white"
+                    : "bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200/60"
+                }`}
+              >
+                <span>⏳ กำลังดำเนินการ</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setWorkFilter("won"); setPage(1); }}
+                className={`px-2.5 py-1 rounded-full text-2xs font-medium transition cursor-pointer flex items-center gap-1 shrink-0 ${
+                  workFilter === "won"
+                    ? "bg-emerald-600 text-white"
+                    : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200/60"
+                }`}
+              >
+                <span>🎉 ได้งาน</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setWorkFilter("closed"); setPage(1); }}
+                className={`px-2.5 py-1 rounded-full text-2xs font-medium transition cursor-pointer flex items-center gap-1 shrink-0 ${
+                  workFilter === "closed"
+                    ? "bg-slate-700 text-white"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"
+                }`}
+              >
+                <span>📁 สำเร็จ/จบงาน</span>
+              </button>
+            </div>
+          )}
+
 
           {/* Live Search Input Box */}
           <div className="relative flex items-center flex-1 min-w-[180px] max-w-xs">
@@ -1741,7 +1870,22 @@ function ColorDot({ value }: { value: RowValue | undefined }) {
 }
 
 function isImageColumn(column: string) {
-  return column === "image" || column.includes("รูปถ่าย") || column.toLowerCase().includes("image");
+  const col = column.trim().toLowerCase();
+  return (
+    column === "image" ||
+    column === "เอกสาร" ||
+    column === "เอกสารแนบ" ||
+    column === "รูปภาพ" ||
+    column === "รูปถ่าย" ||
+    column === "รูปถ่ายบิล" ||
+    column === "ไฟล์แนบ" ||
+    column === "สลิป" ||
+    column.includes("รูปถ่าย") ||
+    column.includes("รูปภาพ") ||
+    column.includes("ไฟล์แนบ") ||
+    col.includes("image") ||
+    col.includes("attachment")
+  );
 }
 
 function isDateColumn(column: string) {
@@ -1749,7 +1893,19 @@ function isDateColumn(column: string) {
 }
 
 function isCenterColumn(column: string) {
-  return column === "color" || column === "COLOR" || column === "จัดการ" || column === "ประเภท" || column === "สถานะ" || column === "เครดิตจ่าย";
+  return (
+    column === "color" ||
+    column === "COLOR" ||
+    column === "จัดการ" ||
+    column === "ประเภท" ||
+    column === "สถานะ" ||
+    column === "เครดิตจ่าย" ||
+    column === "เอกสาร" ||
+    column === "เอกสารแนบ" ||
+    column === "รูปภาพ" ||
+    column === "รูปถ่าย" ||
+    isImageColumn(column)
+  );
 }
 
 function isAmountColumn(column: string) {

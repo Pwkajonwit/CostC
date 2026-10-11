@@ -14,6 +14,7 @@ import {
   FileSpreadsheet,
   FileText,
   FolderKanban,
+  FolderOpen,
   Gauge,
   HandCoins,
   IdCard,
@@ -52,7 +53,8 @@ const ICONS: Record<string, ComponentType<{ size?: number; strokeWidth?: number 
   companies: Building2,
   loans: HandCoins,
   tasks: ClipboardList,
-  works: BriefcaseBusiness
+  works: BriefcaseBusiness,
+  "task-folders": FolderOpen
 };
 
 const MOBILE_VIEW_IDS = ["dashboard-main", "bill-entry", "withdraw-request", "contract-open", "bill-follow", "work-status"];
@@ -67,6 +69,7 @@ function hrefFor(view: (typeof PRIMARY_VIEWS)[number]) {
   if (view.id === "documents") return "/documents";
   if (view.id === "reports") return "/reports";
   if (view.id === "project-analytics") return "/project-analytics";
+  if (view.id === "task-folders") return "/task-folders";
   return `/views/${view.id}`;
 }
 
@@ -78,6 +81,13 @@ export function AppShell({ children, peopleRows = [], currentUser = null }: { ch
   const [refreshing, setRefreshing] = useState(false);
   const mobileSearchInputRef = useRef<HTMLInputElement>(null);
   const pathname = usePathname();
+  if (
+    pathname === "/quick-work" || pathname?.startsWith("/quick-work/") ||
+    pathname === "/quick-task" || pathname?.startsWith("/quick-task/") ||
+    pathname === "/task-upload" || pathname?.startsWith("/task-upload/")
+  ) {
+    return <>{children}</>;
+  }
   const router = useRouter();
   const mobileViews = PRIMARY_VIEWS.filter(view => MOBILE_VIEW_IDS.includes(view.id));
   const mobileTaskViews = PRIMARY_VIEWS.filter(view => view.position === "task");

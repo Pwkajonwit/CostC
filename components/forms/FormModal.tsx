@@ -1615,7 +1615,7 @@ export function FormModal({
     if (isPettyCashForm && (field.name === "ID Project" || field.name === "ชื่อ Project")) {
       return showPCProject;
     }
-    return isFieldVisible(field, values);
+    return isFieldVisible(field, values, activeForm);
   });
 
   useEffect(() => {
