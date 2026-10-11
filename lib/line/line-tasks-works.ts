@@ -1476,35 +1476,35 @@ export function createWorkSummaryFlex(
         contents: [
           ...(groupPwUrl
             ? [
-                {
-                  type: "box",
-                  layout: "horizontal",
-                  backgroundColor: "#06C755",
-                  cornerRadius: "4px",
-                  paddingStart: "8px",
-                  paddingEnd: "8px",
-                  paddingTop: "4px",
-                  paddingBottom: "4px",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  action: {
-                    type: "uri",
-                    label: "กลุ่ม",
-                    uri: groupPwUrl
-                  },
-                  contents: [
-                    {
-                      type: "text",
-                      text: "กลุ่ม",
-                      size: "xxs",
-                      weight: "bold",
-                      color: "#FFFFFF",
-                      align: "center",
-                      wrap: false
-                    }
-                  ]
-                }
-              ]
+              {
+                type: "box",
+                layout: "horizontal",
+                backgroundColor: "#06C755",
+                cornerRadius: "4px",
+                paddingStart: "8px",
+                paddingEnd: "8px",
+                paddingTop: "4px",
+                paddingBottom: "4px",
+                alignItems: "center",
+                justifyContent: "center",
+                action: {
+                  type: "uri",
+                  label: "กลุ่ม",
+                  uri: groupPwUrl
+                },
+                contents: [
+                  {
+                    type: "text",
+                    text: "กลุ่ม",
+                    size: "xxs",
+                    weight: "bold",
+                    color: "#FFFFFF",
+                    align: "center",
+                    wrap: false
+                  }
+                ]
+              }
+            ]
             : []),
           {
             type: "box",
@@ -1696,13 +1696,13 @@ export function createWorkSummaryFlex(
                   },
                   ...(companyStr && companyStr !== "-"
                     ? [
-                        {
-                          type: "span",
-                          text: ` • ${companyStr}`,
-                          color: "#475569",
-                          weight: "bold"
-                        }
-                      ]
+                      {
+                        type: "span",
+                        text: ` • ${companyStr}`,
+                        color: "#475569",
+                        weight: "bold"
+                      }
+                    ]
                     : [])
                 ]
               },
@@ -1995,12 +1995,12 @@ export function createWorkStatusPickerFlex(workId: number | string): Record<stri
 }
 
 export function getAppBaseUrl(): string {
-  const url = process.env.NEXT_PUBLIC_APP_URL || "https://costcontorl.vercel.app";
+  const url = process.env.NEXT_PUBLIC_APP_URL || "https://cost-c.vercel.app/";
   return url.replace(/\/$/, "");
 }
 
 export function getLiffUrl(path: string): string {
-  const liffId = process.env.NEXT_PUBLIC_LINE_LIFF_ID || process.env.LINE_LIFF_ID || "2011122961-40UXax1L";
+  const liffId = process.env.NEXT_PUBLIC_LINE_LIFF_ID || process.env.LINE_LIFF_ID || "2011207773-ulIiOhXd";
   const cleanPath = path.startsWith("/") ? path : `/${path}`;
   if (liffId) {
     return `https://liff.line.me/${liffId}${cleanPath}`;
