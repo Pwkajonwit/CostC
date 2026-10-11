@@ -14,10 +14,12 @@ import { getDbTableName, getNextBillSequence, syncContractWorkPaidAmount } from 
 import { extractMemberPermissions, type UserPermissions } from "@/lib/user-permissions";
 import { autoClearPettyCashOnSubBillApproval, isSubBill } from "@/lib/petty-cash/petty-cash-clear";
 import { isLaborCost, isMaterialCost, isStaffCost, isOtherExpense } from "@/lib/cost-codes";
+import { getLineTargetGroup, sendTextMessage } from "@/lib/line/line";
 import type { SheetRow } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
 
 const NO_CACHE_HEADERS = {
   "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
@@ -428,7 +430,7 @@ export async function PATCH(request: NextRequest) {
     const patch = body.values && typeof body.values === "object" ? body.values as SheetRow : {};
     const existingRows = await getRows(tableName);
     const keyCol = TABLE_KEYS[tableName] || "id";
-    const existing = existingRows.find((row: SheetRow) =>
+    let existing = existingRows.find((row: SheetRow) =>
       (row.id !== undefined && String(row.id) === String(targetRowKey)) ||
       (keyCol && String(row[keyCol]) === String(targetRowKey)) ||
       Number(row._sheetRow) === Number(targetRowKey) ||
@@ -441,26 +443,70 @@ export async function PATCH(request: NextRequest) {
       (row.id_car !== undefined && String(row.id_car) === String(targetRowKey)) ||
       (row.id_cus !== undefined && String(row.id_cus) === String(targetRowKey)) ||
       (row.id_Company !== undefined && String(row.id_Company) === String(targetRowKey)) ||
-      (row.id_petty_cash !== undefined && String(row.id_petty_cash) === String(targetRowKey))
+      (row.id_petty_cash !== undefined && String(row.id_petty_cash) === String(targetRowKey)) ||
+      (row["ลำดับ"] !== undefined && String(row["ลำดับ"]) === String(targetRowKey))
     );
+
+    // Fallback: check alternative keys from patch or body
+    if (!existing) {
+      const altCandidates = [
+        patch["id"],
+        patch["ลำดับ"],
+        body.sheetRow,
+        body.rowKey,
+        patch["id_Conwork"],
+        patch["id_store"],
+        patch["id_Contractor"],
+        patch["รหัสพนักงาน"],
+        patch["id_petty_cash"]
+      ].filter(v => v !== undefined && v !== null && String(v).trim() !== "");
+
+      for (const altKey of altCandidates) {
+        existing = existingRows.find((row: SheetRow) =>
+          (row.id !== undefined && String(row.id) === String(altKey)) ||
+          (keyCol && String(row[keyCol]) === String(altKey)) ||
+          (row["ลำดับ"] !== undefined && String(row["ลำดับ"]) === String(altKey)) ||
+          String(row._sheetRow) === String(altKey)
+        );
+        if (existing) break;
+      }
+    }
+
     if (!existing) throw new Error("ไม่พบข้อมูลที่ต้องการแก้ไข");
     const values = { ...existing, ...patch };
-    if (patch["รหัสพนักงาน"] !== undefined && String(patch["รหัสพนักงาน"]).trim() !== "") {
+    const isPeopleTable = tableName === TABLES.PEOPLE || tableName === "people" || tableName === "รายชื่อ" || tableName === "master_members";
+    const isContractorTable = tableName === TABLES.CONTRACTOR || tableName === "contractors" || tableName === "รับเหมา";
+    const isStoreTable = tableName === TABLES.STORE || tableName === "stores" || tableName === "ร้านค้า";
+    const isBankTable = tableName === TABLES.BANK || tableName === "banks" || tableName === "ธนาคาร";
+    const isCarTable = tableName === TABLES.CAR || tableName === "cars" || tableName === "ทะเบียน";
+    const isCusTable = tableName === TABLES.CUSTOMER || tableName === "customers" || tableName === "ลูกค้า";
+    const isCompanyTable = tableName === TABLES.COMPANY || tableName === "companies" || tableName === "บริษัท";
+    const isPettyCashTable = tableName === TABLES.PETTY_CASH || tableName === "petty_cash" || tableName === "เปิดเงินสดย่อย";
+    const isTasksTable = tableName === TABLES.TASKS || tableName === "tasks" || tableName.includes("Tasks") || tableName.includes("จัดการงาน");
+    const isWorksTable = tableName === TABLES.WORKS || tableName === "works" || tableName.includes("Works") || tableName.includes("งานรับเหมา & PW");
+
+    if (isPeopleTable && patch["รหัสพนักงาน"]) {
       values.id = String(patch["รหัสพนักงาน"]).trim();
-    } else if (patch["id_Contractor"] !== undefined && String(patch["id_Contractor"]).trim() !== "") {
+    } else if (isContractorTable && patch["id_Contractor"]) {
       values.id = String(patch["id_Contractor"]).trim();
-    } else if (patch["id_store"] !== undefined && String(patch["id_store"]).trim() !== "") {
+    } else if (isStoreTable && patch["id_store"]) {
       values.id = String(patch["id_store"]).trim();
-    } else if (patch["id_bank"] !== undefined && String(patch["id_bank"]).trim() !== "") {
+    } else if (isBankTable && patch["id_bank"]) {
       values.id = String(patch["id_bank"]).trim();
-    } else if (patch["id_car"] !== undefined && String(patch["id_car"]).trim() !== "") {
+    } else if (isCarTable && patch["id_car"]) {
       values.id = String(patch["id_car"]).trim();
-    } else if (patch["id_cus"] !== undefined && String(patch["id_cus"]).trim() !== "") {
+    } else if (isCusTable && patch["id_cus"]) {
       values.id = String(patch["id_cus"]).trim();
-    } else if (patch["id_Company"] !== undefined && String(patch["id_Company"]).trim() !== "") {
+    } else if (isCompanyTable && patch["id_Company"]) {
       values.id = String(patch["id_Company"]).trim();
-    } else if (patch["id_petty_cash"] !== undefined && String(patch["id_petty_cash"]).trim() !== "") {
+    } else if (isPettyCashTable && patch["id_petty_cash"]) {
       values.id = String(patch["id_petty_cash"]).trim();
+    } else if (isTasksTable) {
+      const parsedId = Number(patch["ลำดับ"] ?? patch["id"] ?? targetRowKey);
+      if (Number.isFinite(parsedId) && parsedId > 0) values.id = parsedId;
+    } else if (isWorksTable) {
+      const parsedId = Number(patch["ลำดับ"] ?? patch["id"] ?? targetRowKey);
+      if (Number.isFinite(parsedId) && parsedId > 0) values.id = parsedId;
     }
 
     if (patch["สิทธิ์การใช้งาน"] !== undefined) {
@@ -598,6 +644,52 @@ export async function PATCH(request: NextRequest) {
     const originalTarget = existing.id || (keyCol && existing[keyCol] ? existing[keyCol] : undefined) || targetRowKey || existing._sheetRow;
     const row = await updateRow(tableName, originalTarget, output);
     console.log(`[PATCH /api/rows SUCCESS] updated "${tableName}" row key: "${originalTarget}"`);
+
+    // 📢 Notification for Tasks updates from web table (/views/tasks)
+    if (isTasksTable) {
+      const prevSt = String(existing["สถานะ"] ?? existing.status ?? "").trim();
+      const nextSt = String(output["สถานะ"] ?? output.status ?? "").trim();
+      const prevAssignee = String(existing["ผู้รับมอบหมาย"] ?? existing.assignee_name ?? "").trim();
+      const nextAssignee = String(output["ผู้รับมอบหมาย"] ?? output.assignee_name ?? "").trim();
+
+      if ((nextSt && prevSt !== nextSt) || (nextAssignee && prevAssignee !== nextAssignee)) {
+        getLineTargetGroup("task").then(async (taskGroup) => {
+          if (taskGroup) {
+            const tId = output.id || existing.id || originalTarget;
+            const tTitle = output["รายการ"] || output.title || existing["รายการ"] || existing.title || "งานประจำวัน";
+            const assignee = nextAssignee || prevAssignee || "ทีมงาน";
+            const statusChange = prevSt !== nextSt ? `${prevSt || "รอดำเนินการ"} ➔ ${nextSt}` : nextSt;
+            await sendTextMessage(
+              taskGroup,
+              `📢 [อัปเดตงาน Task จากระบบเว็บ]\n📌 รหัสงาน: [#${tId}]\nเรื่อง: ${tTitle}\n👤 ผู้รับผิดชอบ: ${assignee}\n⚡ สถานะ: ${statusChange}`
+            );
+          }
+        }).catch((e) => console.warn("Failed to notify task update from web:", e));
+      }
+    } else if (isWorksTable) {
+      // 📢 Notification for Works updates from web table (/views/works)
+      const prevSt = String(existing["สถานะ"] ?? existing.status ?? "").trim();
+      const nextSt = String(output["สถานะ"] ?? output.status ?? "").trim();
+      const prevContact = String(existing["ติดต่อ1"] ?? existing.contact1 ?? "").trim();
+      const nextContact = String(output["ติดต่อ1"] ?? output.contact1 ?? "").trim();
+
+      if ((nextSt && prevSt !== nextSt) || (nextContact && prevContact !== nextContact)) {
+        getLineTargetGroup("pw").then(async (pwGroup) => {
+          if (pwGroup) {
+            const wId = output.id || existing.id || originalTarget;
+            const wTitle = output["เรื่อง"] || output.title || existing["เรื่อง"] || existing.title || "งานรับเหมา";
+            const team = output["ทีม"] || output.team || existing["ทีม"] || existing.team || "PW";
+            const contact = nextContact || prevContact || "-";
+            const statusChange = prevSt !== nextSt ? `${prevSt || "รอดูงาน"} ➔ ${nextSt}` : nextSt;
+            await sendTextMessage(
+              pwGroup,
+              `📢 [อัปเดตงาน PW จากระบบเว็บ]\n📌 รหัสงาน: [PW-${wId}]\nเรื่อง: ${wTitle}\nทีม: ${team} | ผู้ติดต่อ: ${contact}\n⚡ สถานะ: ${statusChange}`
+            );
+          }
+        }).catch((e) => console.warn("Failed to notify work update from web:", e));
+      }
+    }
+
 
     if (isBillTable) {
       const cRef = String(row._rawContractor || row["_rawContractor"] || row.conwork_id || row["สัญญา"] || row.contractor_id || row["ผู้รับเหมา"] || existing._rawContractor || existing.conwork_id || existing["ผู้รับเหมา"] || "").trim();

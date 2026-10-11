@@ -31,6 +31,53 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(result);
     }
 
+    if (body.action === "test_work_summary") {
+      const { targetId } = body;
+      const { createWorkSummaryFlex } = await import("@/lib/line/line-tasks-works");
+      const { sendFlexMessageDetailed, getLineTargetGroup } = await import("@/lib/line/line");
+      const { getAllWorkAttachments } = await import("@/lib/tasks/task-attachments");
+
+      const { data: worksList } = await supabaseAdmin
+        .from("works")
+        .select("*")
+        .order("id", { ascending: false })
+        .limit(10);
+
+      const attachmentsMap = await getAllWorkAttachments();
+      const flex = createWorkSummaryFlex(worksList || [], { teamName: "PW", attachmentsMap });
+
+      const destination = targetId || (await getLineTargetGroup("pw"));
+      const result = await sendFlexMessageDetailed(destination, "ทดสอบรายการงานรับเหมา", flex);
+      return NextResponse.json({ ...result, destination, totalWorks: worksList?.length || 0 });
+    }
+
+    if (body.action === "test_task_summary") {
+      const { targetId } = body;
+      const { createTaskSummaryFlex } = await import("@/lib/line/line-tasks-works");
+      const { sendFlexMessageDetailed, getLineTargetGroup } = await import("@/lib/line/line");
+      const { getAllTaskAttachments } = await import("@/lib/tasks/task-attachments");
+
+      const { data: tasks } = await supabaseAdmin
+        .from("tasks")
+        .select("*")
+        .order("id", { ascending: false })
+        .limit(10);
+
+      const attachmentsMap = await getAllTaskAttachments();
+      const formattedTasks = (tasks || []).map((t: any) => ({
+        id: t.id,
+        details: t.title || "-",
+        status: t.status || "กำลังทำ",
+        project: t.assignee_name ? `ผู้รับ: ${t.assignee_name}` : "งานทั่วไป",
+      }));
+
+      const flex = createTaskSummaryFlex(formattedTasks, { attachmentsMap });
+
+      const destination = targetId || (await getLineTargetGroup("task"));
+      const result = await sendFlexMessageDetailed(destination, "สรุปงานค้างที่ต้องดำเนินการ (Tasks)", flex);
+      return NextResponse.json({ ...result, destination, totalTasks: tasks?.length || 0 });
+    }
+
     // 2. Standard LINE Webhook Event Processing (Concurrent batch processing)
     const events = body.events || [];
 
@@ -78,6 +125,75 @@ export async function POST(req: NextRequest) {
               replyToken,
               `ดำเนินการตามคำสั่ง "${text}" เรียบร้อยแล้วครับ`
             );
+          }
+        }
+
+        // Handle Image & File Messages (Upload evidence/documents/photos directly to active task)
+        if (event.type === "message" && (event.message?.type === "image" || event.message?.type === "file")) {
+          const messageId = event.message.id;
+          const isFile = event.message.type === "file";
+          const originalFileName = isFile
+            ? (event.message.fileName || `file_${Date.now()}`)
+            : `image_${Date.now()}.jpg`;
+          const fileSize = isFile ? event.message.fileSize : undefined;
+
+          const { getActiveTaskUploadSession, appendTaskAttachmentFile, appendTaskAttachmentImage } = await import("@/lib/tasks/task-attachments");
+          const { getDynamicAccessToken } = await import("@/lib/line/line");
+          const { uploadFileToSupabaseStorage } = await import("@/lib/supabase/supabase-db");
+
+          const session = await getActiveTaskUploadSession([
+            `${targetId}_${userId}`,
+            targetId,
+            userId,
+          ]);
+
+          if (session) {
+            try {
+              const accessToken = await getDynamicAccessToken();
+              const contentRes = await fetch(`https://api-data.line.me/v2/bot/message/${messageId}/content`, {
+                headers: {
+                  Authorization: `Bearer ${accessToken}`,
+                },
+              });
+
+              if (contentRes.ok) {
+                const buffer = Buffer.from(await contentRes.arrayBuffer());
+                const cleanExt = originalFileName.includes(".")
+                  ? originalFileName.split(".").pop()
+                  : (isFile ? "bin" : "jpg");
+                const safeName = `task_${session.taskId}_line_${Date.now()}_${messageId}.${cleanExt}`;
+                const contentType = isFile
+                  ? (contentRes.headers.get("content-type") || "application/octet-stream")
+                  : "image/jpeg";
+
+                const url = await uploadFileToSupabaseStorage("repairs", safeName, buffer, contentType);
+
+                if (url) {
+                  if (isFile) {
+                    await appendTaskAttachmentFile(
+                      session.taskId,
+                      {
+                        name: originalFileName,
+                        url,
+                        size: fileSize,
+                        type: contentType
+                      },
+                      session.assignee || "พนักงาน"
+                    );
+                    // บันทึกไฟล์เรียบร้อยแบบเงียบ ไม่ส่งข้อความตอบกลับเพื่อไม่ให้รบกวนในกลุ่ม
+                  } else {
+                    await appendTaskAttachmentImage(
+                      session.taskId,
+                      url,
+                      session.assignee || "พนักงาน"
+                    );
+                    // บันทึกรูปภาพเรียบร้อยแบบเงียบ ไม่ส่งข้อความตอบกลับเพื่อไม่ให้รบกวนในกลุ่ม
+                  }
+                }
+              }
+            } catch (attachErr) {
+              console.error("Error saving LINE attachment (image/file):", attachErr);
+            }
           }
         }
       })

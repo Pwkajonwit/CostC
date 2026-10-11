@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import type { Viewport } from "next";
-import { AppShell } from "@/components/layout/AppShell";
-import { LoginScreen } from "@/components/auth/LoginScreen";
+import { RootContent } from "@/components/layout/RootContent";
 import { PreventZoom } from "@/components/shared/PreventZoom";
 import { APP_NAME, TABLES } from "@/lib/config";
 import { getRows } from "@/lib/db";
@@ -9,9 +8,7 @@ import { cookies } from "next/headers";
 import { ToastProvider } from "@/components/shared/ToastProvider";
 import { LineAuthProvider } from "@/components/auth/LineAuthProvider";
 import { TopProgressBar } from "@/components/shared/TopProgressBar";
-import { UserPermissionSync } from "@/components/auth/UserPermissionSync";
 import { extractMemberPermissions, findMemberInPeopleRows } from "@/lib/user-permissions";
-import { YearFilterProvider } from "@/lib/context/YearFilterContext";
 import { extractYearFromDate } from "@/lib/utils/dates";
 import "./globals.css";
 
@@ -121,16 +118,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <TopProgressBar />
         <LineAuthProvider isAuthenticated={Boolean(currentUser)}>
           <ToastProvider>
-            {!currentUser ? (
-              <LoginScreen />
-            ) : (
-              <YearFilterProvider initialYear={selectedYear} dataYears={dataYears}>
-                <AppShell peopleRows={peopleRows} currentUser={currentUser}>
-                  <UserPermissionSync currentRole={currentUser.role} employeeId={currentUser.id} />
-                  {children}
-                </AppShell>
-              </YearFilterProvider>
-            )}
+            <RootContent
+              currentUser={currentUser}
+              peopleRows={peopleRows}
+              selectedYear={selectedYear}
+              dataYears={dataYears}
+            >
+              {children}
+            </RootContent>
           </ToastProvider>
         </LineAuthProvider>
       </body>

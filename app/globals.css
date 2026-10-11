@@ -1020,8 +1020,10 @@ table td {
   max-width: 100% !important;
 }
 
-/* Fix iOS WebKit date input expanding beyond container */
-input[type="date"] {
+/* Fix iOS WebKit date and time inputs expanding beyond container */
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"] {
   -webkit-appearance: none !important;
   -moz-appearance: none !important;
   appearance: none !important;
@@ -1030,7 +1032,9 @@ input[type="date"] {
   box-sizing: border-box !important;
 }
 
-input[type="date"]::-webkit-date-and-time-value {
+input[type="date"]::-webkit-date-and-time-value,
+input[type="time"]::-webkit-date-and-time-value,
+input[type="datetime-local"]::-webkit-date-and-time-value {
   text-align: left;
 }
 
