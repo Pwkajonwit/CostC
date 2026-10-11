@@ -301,7 +301,13 @@ function SearchableCombobox({
               })
             ) : (
               <div className="py-4 text-center text-[11px] text-slate-400">
-                ไม่พบข้อมูลที่ตรงกับ &quot;{search}&quot;
+                {search ? (
+                  <>ไม่พบข้อมูลที่ตรงกับ &quot;{search}&quot;</>
+                ) : options.length === 0 ? (
+                  <>ไม่มีรายชื่อให้เลือก (กรุณาเลือกบริษัทก่อน)</>
+                ) : (
+                  <>ไม่พบข้อมูล</>
+                )}
               </div>
             )}
 
@@ -584,20 +590,26 @@ function QuickWorkContent() {
     if (!companyStr) return null;
     const str = companyStr.trim().toLowerCase();
     for (const cus of systemCustomers) {
+      const short = (cus.short_name || cus["ชื่อย่อ"] || "").trim().toLowerCase();
+      const cusId = String(cus.id || "").toLowerCase();
+      const cusName = String(cus.name || "").toLowerCase();
+
       if (
-        str.startsWith(cus.id.toLowerCase()) ||
-        str.includes(cus.id.toLowerCase()) ||
-        (cus.name && (str.includes(cus.name.toLowerCase()) || cus.name.toLowerCase().includes(str)))
+        (cusId && (str === cusId || str.startsWith(cusId) || str.includes(cusId))) ||
+        (cusName && (str === cusName || str.includes(cusName) || cusName.includes(str))) ||
+        (short && (str === short || str.includes(short) || short.includes(str)))
       ) {
         return cus.id;
       }
     }
     for (const co of systemCompanies) {
+      const coId = String(co.id || "").toLowerCase();
+      const nameTh = String(co.name_th || "").toLowerCase();
+      const nameEn = String(co.name_en || "").toLowerCase();
       if (
-        str.startsWith(co.id.toLowerCase()) ||
-        str.includes(co.id.toLowerCase()) ||
-        (co.name_th && (str.includes(co.name_th.toLowerCase()) || co.name_th.toLowerCase().includes(str))) ||
-        (co.name_en && (str.includes(co.name_en.toLowerCase()) || co.name_en.toLowerCase().includes(str)))
+        (coId && (str === coId || str.startsWith(coId) || str.includes(coId))) ||
+        (nameTh && (str === nameTh || str.includes(nameTh) || nameTh.includes(str))) ||
+        (nameEn && (str === nameEn || str.includes(nameEn) || nameEn.includes(str)))
       ) {
         return co.id;
       }
@@ -605,12 +617,17 @@ function QuickWorkContent() {
     return null;
   };
 
-  // Combobox options for customer contact persons (filtered by selected company if chosen)
+  // Combobox options for customer contact persons (filtered strictly by selected company only)
   const contactOptions = useMemo<SearchableOption[]>(() => {
+    // ผู้ติดต่อต้องไม่มีหากยังไม่ได้เลือกโครงการ/บริษัท
+    if (!company || !company.trim()) {
+      return [];
+    }
+
     const list: SearchableOption[] = [];
     const matchedCusId = getSelectedCustomerId(company);
 
-    // If a company/customer is selected, and it has contacts in customerContactsMap:
+    // แสดงเฉพาะของผู้ว่าจ้าง/โครงการนั้นๆ เท่านั้น
     if (matchedCusId && customerContactsMap[matchedCusId] && customerContactsMap[matchedCusId].length > 0) {
       const contacts = customerContactsMap[matchedCusId];
       const cusObj = systemCustomers.find((c) => c.id === matchedCusId);
@@ -623,7 +640,8 @@ function QuickWorkContent() {
         list.push({
           key: `ct-${matchedCusId}-${ct.id}`,
           value: trimmedName,
-          label: trimmedName,
+          label: ct.position ? `${trimmedName} (${ct.position})` : trimmedName,
+          subLabel: ct.phone && ct.phone !== "-" ? ct.phone : undefined,
           item: {
             name: trimmedName,
             phone: ct.phone,
@@ -634,34 +652,7 @@ function QuickWorkContent() {
           }
         });
       });
-
-      return list;
     }
-
-    // If no company selected or the selected company has no contacts, show all available contacts
-    Object.entries(customerContactsMap).forEach(([cusId, contacts]) => {
-      const cusObj = systemCustomers.find((c) => c.id === cusId);
-      const cusName = cusObj?.name || cusId;
-
-      contacts.forEach((ct) => {
-        const trimmedName = ct.name?.trim();
-        if (!trimmedName) return;
-
-        list.push({
-          key: `ct-${cusId}-${ct.id}`,
-          value: trimmedName,
-          label: trimmedName,
-          item: {
-            name: trimmedName,
-            phone: ct.phone,
-            company: cusName,
-            customerId: cusId,
-            position: ct.position,
-            is_primary: ct.is_primary,
-          }
-        });
-      });
-    });
 
     return list;
   }, [customerContactsMap, systemCustomers, systemCompanies, company]);
@@ -1152,7 +1143,7 @@ function QuickWorkContent() {
                 <SearchableCombobox
                   label="ชื่อผู้ติดต่อ"
                   value={contact1}
-                  placeholder="เลือกหรือค้นหาชื่อผู้ติดต่อ..."
+                  placeholder={company ? "เลือกหรือค้นหาชื่อผู้ติดต่อ..." : "กรุณาเลือกบริษัทก่อน..."}
                   options={contactOptions}
                   onChange={handleContactChange}
                 />
@@ -1639,7 +1630,7 @@ function QuickWorkContent() {
                 <SearchableCombobox
                   label="ชื่อผู้ติดต่อ"
                   value={contact1}
-                  placeholder="เลือกหรือค้นหาชื่อผู้ติดต่อ..."
+                  placeholder={company ? "เลือกหรือค้นหาชื่อผู้ติดต่อ..." : "กรุณาเลือกบริษัทก่อน..."}
                   options={contactOptions}
                   onChange={handleContactChange}
                 />

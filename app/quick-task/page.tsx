@@ -81,8 +81,8 @@ function createEmptyTask(taskType = 1, isUrgent = false, defaultDo = "", default
 
 export default function QuickTaskPage() {
   const [creator, setCreator] = useState<QuickCreator | null>(null);
-  const [project, setProject] = useState("งานทั่วไป");
-  const [projectId, setProjectId] = useState("0");
+  const [project, setProject] = useState("");
+  const [projectId, setProjectId] = useState("");
 
   const todayIso = getTodayIso();
   const defaultSendIso = addDaysIso(todayIso, 1);
@@ -94,9 +94,7 @@ export default function QuickTaskPage() {
   ]);
 
   // Projects from /views/project-all (Table: Project)
-  const [projects, setProjects] = useState<ProjectOption[]>([
-    { id: "0", name: "งานทั่วไป" }
-  ]);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
   const [projectFilter, setProjectFilter] = useState("");
@@ -126,20 +124,21 @@ export default function QuickTaskPage() {
         const res = await fetch("/api/rows?tableName=Project");
         if (res.ok) {
           const data = await res.json();
-          const list: ProjectOption[] = [
-            { id: "0", name: "งานทั่วไป" }
-          ];
-          const seen = new Set<string>(["งานทั่วไป"]);
+          const list: ProjectOption[] = [];
+          const seen = new Set<string>();
 
           for (const r of data.rows || []) {
             const pName = String(r["ชื่อ Project"] || r.name || "").trim();
             const pId = String(r["ID Project"] || r.id || "").trim();
             const pCus = String(r["ชื่อลูกค้า"] || r.customer_name || "").trim();
-            if (pName && !seen.has(pName.toLowerCase())) {
+            if (pName && !seen.has(pName.toLowerCase()) && pName !== "งานทั่วไป") {
               seen.add(pName.toLowerCase());
               list.push({ id: pId, name: pName, customer: pCus });
             }
           }
+
+          // ใส่ "งานทั่วไป" ไว้ท้ายสุดเป็นตัวเลือกเสริม
+          list.push({ id: "0", name: "งานทั่วไป" });
 
           if (isMounted) {
             setProjects(list);
@@ -248,8 +247,8 @@ export default function QuickTaskPage() {
       const currentToday = getTodayIso();
       const currentTomorrow = addDaysIso(currentToday, 1);
       setTasks([createEmptyTask(1, false, currentToday, currentTomorrow)]);
-      setProject("งานทั่วไป");
-      setProjectId("0");
+      setProject("");
+      setProjectId("");
       setProjectFilter("");
       setNote("");
       setErrorMsg(null);
@@ -322,17 +321,17 @@ export default function QuickTaskPage() {
                 <label className="block text-[11px] font-medium text-slate-700">
                   โครงการ / สังกัด <span className="text-[10px] text-slate-400 font-normal">(ใช้ร่วมกันทุกงานในชุดนี้)</span>
                 </label>
-                {project && project !== "งานทั่วไป" && (
+                {project && (
                   <button
                     type="button"
                     onClick={() => {
-                      setProject("งานทั่วไป");
-                      setProjectId("0");
+                      setProject("");
+                      setProjectId("");
                       setProjectFilter("");
                     }}
                     className="text-[10px] text-slate-400 hover:text-slate-600 transition cursor-pointer"
                   >
-                    รีเซ็ตเป็นงานทั่วไป
+                    ล้างค่า
                   </button>
                 )}
               </div>
@@ -345,7 +344,7 @@ export default function QuickTaskPage() {
                   value={project}
                   onFocus={() => {
                     setIsProjectDropdownOpen(true);
-                    setProjectFilter(project === "งานทั่วไป" ? "" : project);
+                    setProjectFilter(project);
                   }}
                   onChange={(e) => {
                     const val = e.target.value;
