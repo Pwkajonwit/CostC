@@ -487,7 +487,7 @@ export default function TaskFoldersPage() {
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 truncate hidden sm:block">
-                  ผู้รับเหมา &gt; โครงการ &gt; เดือน &gt; ชื่องาน
+                  ผู้รับผิดชอบ &gt; โครงการ &gt; เดือน &gt; ชื่องาน
                 </p>
               </div>
             </div>
@@ -498,7 +498,7 @@ export default function TaskFoldersPage() {
               <div className="hidden lg:flex items-center bg-slate-100/80 border border-slate-200/80 rounded-xl px-2 py-1 text-xs gap-3">
                 <div className="flex items-center gap-1.5 px-1.5 py-0.5">
                   <User className="w-3.5 h-3.5 text-indigo-500" />
-                  <span className="text-slate-500">ผู้รับเหมา:</span>
+                  <span className="text-slate-500">ผู้รับผิดชอบ:</span>
                   <span className="font-bold text-slate-900">{stats.totalContractors}</span>
                 </div>
                 <span className="text-slate-300">|</span>
@@ -811,7 +811,7 @@ export default function TaskFoldersPage() {
            * =================================================== */
           <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden flex flex-col lg:flex-row h-[calc(100vh-190px)] min-h-[620px] divide-y lg:divide-y-0 lg:divide-x divide-slate-200/80 overflow-x-auto">
             {/* ------------------------------------------------
-             * COLUMN 1: ผู้รับเหมา (Contractors)
+             * COLUMN 1: ผู้รับผิดชอบ (Assignees)
              * ------------------------------------------------ */}
             <div className="w-full lg:w-1/4 flex flex-col h-full min-w-[220px] bg-slate-50/40">
               {/* Header */}
@@ -820,7 +820,7 @@ export default function TaskFoldersPage() {
                   <div className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center">
                     <User className="w-3.5 h-3.5" />
                   </div>
-                  <span className="text-xs font-bold text-slate-800">ผู้รับเหมา</span>
+                  <span className="text-xs font-bold text-slate-800">ผู้รับผิดชอบ</span>
                 </div>
                 <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-white text-indigo-700 border border-indigo-200/70 shadow-2xs">
                   {contractorsList.length} คน
@@ -830,7 +830,7 @@ export default function TaskFoldersPage() {
               {/* List */}
               <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
                 {contractorsList.length === 0 ? (
-                  <div className="p-6 text-center text-xs text-slate-400">ไม่พบรายชื่อผู้รับเหมา</div>
+                  <div className="p-6 text-center text-xs text-slate-400">ไม่พบรายชื่อผู้รับผิดชอบ</div>
                 ) : (
                   contractorsList.map((c) => {
                     const isSelected = currentPath.contractor === c.name;
@@ -919,11 +919,11 @@ export default function TaskFoldersPage() {
                     <div className="w-10 h-10 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mb-2">
                       <Building2 className="w-5 h-5" />
                     </div>
-                    <p className="text-xs font-medium text-slate-600">เลือกผู้รับเหมา</p>
+                    <p className="text-xs font-medium text-slate-600">เลือกผู้รับผิดชอบ</p>
                     <p className="text-[11px] text-slate-400 mt-0.5">คลิกรายชื่อในคอลัมน์แรกเพื่อดูโครงการ</p>
                   </div>
                 ) : projectsList.length === 0 ? (
-                  <div className="p-6 text-center text-xs text-slate-400">ไม่พบโครงการของผู้รับเหมานี้</div>
+                  <div className="p-6 text-center text-xs text-slate-400">ไม่พบโครงการของผู้รับผิดชอบนี้</div>
                 ) : (
                   projectsList.map((p) => {
                     const isSelected = currentPath.project === p.name;
@@ -1336,7 +1336,7 @@ export default function TaskFoldersPage() {
                   </div>
 
                   <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
-                    <span>ผู้รับเหมา: <strong className="text-slate-800">{currentTaskItem.contractor}</strong></span>
+                    <span>ผู้รับผิดชอบ: <strong className="text-slate-800">{currentTaskItem.contractor}</strong></span>
                     <span>•</span>
                     <span>โครงการ: <strong className="text-slate-800">{currentTaskItem.project}</strong></span>
                     <span>•</span>
@@ -1429,7 +1429,7 @@ export default function TaskFoldersPage() {
             <div className="flex items-center justify-between mb-3.5">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold text-slate-600">
-                  {currentLevel === "root" && "โฟลเดอร์ผู้รับเหมา"}
+                  {currentLevel === "root" && "โฟลเดอร์ผู้รับผิดชอบ"}
                   {currentLevel === "contractor" && `โครงการของ ${currentPath.contractor}`}
                   {currentLevel === "project" && `เดือนของ ${currentPath.project}`}
                   {currentLevel === "month" && `งานในเดือน ${currentPath.month}`}

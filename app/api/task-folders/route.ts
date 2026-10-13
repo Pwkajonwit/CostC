@@ -64,14 +64,7 @@ export async function GET(req: NextRequest) {
     // 2. Fetch task attachments from system_options
     const taskAttachments = await getAllTaskAttachments();
 
-    // 3. Fetch works and work attachments
-    const { data: works } = await supabaseAdmin
-      .from("works")
-      .select("*")
-      .order("id", { ascending: false });
-    const workAttachments = await getAllWorkAttachments();
-
-    // 4. Assemble items
+    // 3. Assemble items (Task data only)
     const itemsMap: Record<string, any> = {};
 
     // Process Tasks
@@ -82,13 +75,13 @@ export async function GET(req: NextRequest) {
         const imgs = Array.isArray(attach?.images) ? attach.images.filter(Boolean) : [];
         if (t.image_url && !imgs.includes(t.image_url)) imgs.push(t.image_url);
 
-        const contractor = (t.assignee_name || attach?.submittedBy || "ไม่ระบุผู้รับเหมา").trim();
+        const contractor = (t.assignee_name || attach?.submittedBy || "ไม่ระบุผู้รับผิดชอบ").trim();
         const project = (
           attach?.project ||
           t.data?.project ||
           t.data?.project_name ||
           t.data?.Project ||
-          "โครงการทั่วไป"
+          "งานทั่วไป"
         ).trim();
 
         const dateRef = t.send_date || t.do_date || attach?.submittedAt || t.created_at;
@@ -127,56 +120,6 @@ export async function GET(req: NextRequest) {
           submittedAt: attach?.submittedAt,
           submittedBy: attach?.submittedBy || t.assignee_name,
           note: attach?.note,
-          files,
-          fileCount: files.length
-        };
-      }
-    }
-
-    // Process Works (PW)
-    if (works && works.length > 0) {
-      for (const w of works) {
-        const workIdStr = String(w.id);
-        const attach = workAttachments[workIdStr];
-        const imgs = Array.isArray(attach?.images) ? attach.images.filter(Boolean) : [];
-        if (w.image_url && !imgs.includes(w.image_url)) imgs.push(w.image_url);
-
-        const contractor = (w.contact1 || w.company || attach?.submittedBy || `ทีม ${w.team || "PW"}`).trim();
-        const project = (w.location || (attach as any)?.project || "งานโครงการ PW").trim();
-        const dateRef = w.date_inspect || w.date_propose || attach?.submittedAt || w.created_at;
-        const monthInfo = formatThaiMonth(dateRef);
-
-        const files = imgs.map((url: string, idx: number) => ({
-          url,
-          name: extractFileName(url, `ไฟล์_PW_${idx + 1}`),
-          type: getFileType(url),
-          uploadedAt: attach?.submittedAt || w.created_at || new Date().toISOString(),
-          submittedBy: attach?.submittedBy || contractor,
-          note: attach?.note || w.note || "",
-          taskId: `PW-${w.id}`,
-          taskType: "work",
-          taskTitle: w.title || `งาน PW #${w.id}`,
-          contractor,
-          project,
-          month: monthInfo.label,
-          status: w.status || "รอดูงาน"
-        }));
-
-        itemsMap[`work_${w.id}`] = {
-          id: `work_${w.id}`,
-          rawId: `PW-${w.id}`,
-          type: "work",
-          title: w.title || `งาน PW #${w.id}`,
-          displayTitle: `[PW-${w.id}] ${w.title || "งานรับเหมา"}`,
-          contractor,
-          project,
-          month: monthInfo.label,
-          monthKey: monthInfo.key,
-          status: w.status || "รอดูงาน",
-          createdAt: w.created_at,
-          submittedAt: attach?.submittedAt,
-          submittedBy: attach?.submittedBy || contractor,
-          note: attach?.note || w.note,
           files,
           fileCount: files.length
         };

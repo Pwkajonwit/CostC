@@ -19,7 +19,6 @@ import {
   User,
   X,
   Edit3,
-  Share2,
   Eye,
   Users,
   Gavel,
@@ -27,7 +26,8 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
-  Search
+  Search,
+  ExternalLink
 } from "lucide-react";
 import { QuickCreatorBar, type QuickCreator } from "@/components/auth/QuickCreatorBar";
 import { closeToLine } from "@/lib/line/line-close";
@@ -62,7 +62,15 @@ interface CustomerContactItem {
   is_primary?: boolean;
 }
 
-const TEAMS = ["PW", "PW1", "PW2", "PW3", "PW4", "PW5"] as const;
+interface CustomerLocationItem {
+  id: string;
+  name: string;
+  address?: string;
+  note?: string;
+  is_primary?: boolean;
+}
+
+const TEAMS = ["PW", "PW1", "PW2", "PW3", "PW4"] as const;
 const ACTIVITIES = ["รอดูงาน", "ประชุมงาน", "ประมูล"] as const;
 const WORK_STATUSES = ["รอดูงาน", "รอเสนอราคา", "ประชุม", "ประมูล", "เสร็จ"] as const;
 
@@ -304,7 +312,7 @@ function SearchableCombobox({
                 {search ? (
                   <>ไม่พบข้อมูลที่ตรงกับ &quot;{search}&quot;</>
                 ) : options.length === 0 ? (
-                  <>ไม่มีรายชื่อให้เลือก (กรุณาเลือกบริษัทก่อน)</>
+                  <>ไม่มีรายการให้เลือก</>
                 ) : (
                   <>ไม่พบข้อมูล</>
                 )}
@@ -367,6 +375,7 @@ function QuickWorkContent() {
   const [systemCompanies, setSystemCompanies] = useState<SystemCompany[]>([]);
   const [systemCustomers, setSystemCustomers] = useState<SystemCustomer[]>([]);
   const [customerContactsMap, setCustomerContactsMap] = useState<Record<string, CustomerContactItem[]>>({});
+  const [customerLocationsMap, setCustomerLocationsMap] = useState<Record<string, CustomerLocationItem[]>>({});
 
   // Form submission & loading states
   const [loadingWork, setLoadingWork] = useState(isEditMode);
@@ -499,6 +508,9 @@ function QuickWorkContent() {
           if (data.customerContacts && typeof data.customerContacts === "object") {
             setCustomerContactsMap(data.customerContacts);
           }
+          if (data.customerLocations && typeof data.customerLocations === "object") {
+            setCustomerLocationsMap(data.customerLocations);
+          }
 
           if (data.work) {
             const w = data.work;
@@ -585,41 +597,29 @@ function QuickWorkContent() {
     };
   }, [cleanId]);
 
-  // Helper to find customer/company ID from company string
-  const getSelectedCustomerId = (companyStr: string): string | null => {
-    if (!companyStr) return null;
-    const str = companyStr.trim().toLowerCase();
+  // Helper to find customer ID from customer string
+  const getSelectedCustomerId = (customerStr: string): string | null => {
+    if (!customerStr) return null;
+    const str = customerStr.trim().toLowerCase();
     for (const cus of systemCustomers) {
       const short = (cus.short_name || cus["ชื่อย่อ"] || "").trim().toLowerCase();
       const cusId = String(cus.id || "").toLowerCase();
       const cusName = String(cus.name || "").toLowerCase();
 
       if (
-        (cusId && (str === cusId || str.startsWith(cusId) || str.includes(cusId))) ||
         (cusName && (str === cusName || str.includes(cusName) || cusName.includes(str))) ||
+        (cusId && (str === cusId || str.startsWith(cusId) || str.includes(cusId))) ||
         (short && (str === short || str.includes(short) || short.includes(str)))
       ) {
         return cus.id;
       }
     }
-    for (const co of systemCompanies) {
-      const coId = String(co.id || "").toLowerCase();
-      const nameTh = String(co.name_th || "").toLowerCase();
-      const nameEn = String(co.name_en || "").toLowerCase();
-      if (
-        (coId && (str === coId || str.startsWith(coId) || str.includes(coId))) ||
-        (nameTh && (str === nameTh || str.includes(nameTh) || nameTh.includes(str))) ||
-        (nameEn && (str === nameEn || str.includes(nameEn) || nameEn.includes(str)))
-      ) {
-        return co.id;
-      }
-    }
     return null;
   };
 
-  // Combobox options for customer contact persons (filtered strictly by selected company only)
+  // Combobox options for customer contact persons (filtered strictly by selected customer only)
   const contactOptions = useMemo<SearchableOption[]>(() => {
-    // ผู้ติดต่อต้องไม่มีหากยังไม่ได้เลือกโครงการ/บริษัท
+    // ผู้ติดต่อต้องไม่มีหากยังไม่ได้เลือกลูกค้า
     if (!company || !company.trim()) {
       return [];
     }
@@ -627,7 +627,7 @@ function QuickWorkContent() {
     const list: SearchableOption[] = [];
     const matchedCusId = getSelectedCustomerId(company);
 
-    // แสดงเฉพาะของผู้ว่าจ้าง/โครงการนั้นๆ เท่านั้น
+    // แสดงเฉพาะของลูกค้ารายนั้นๆ เท่านั้น
     if (matchedCusId && customerContactsMap[matchedCusId] && customerContactsMap[matchedCusId].length > 0) {
       const contacts = customerContactsMap[matchedCusId];
       const cusObj = systemCustomers.find((c) => c.id === matchedCusId);
@@ -655,34 +655,60 @@ function QuickWorkContent() {
     }
 
     return list;
-  }, [customerContactsMap, systemCustomers, systemCompanies, company]);
+  }, [customerContactsMap, systemCustomers, company]);
 
-  // Combobox options for companies / customers
-  const companyOptions = useMemo<SearchableOption[]>(() => {
+  // Combobox options for customer locations / sites (filtered strictly by selected customer only)
+  const locationOptions = useMemo<SearchableOption[]>(() => {
+    if (!company || !company.trim()) {
+      return [];
+    }
+
     const list: SearchableOption[] = [];
-    systemCompanies.forEach((co) => {
-      const name = co.name_th || co.name_en || co.id;
-      list.push({
-        key: `co-${co.id}`,
-        value: name,
-        label: `${co.id} - ${name}`,
-        subLabel: "บริษัท",
-        item: co,
+    const matchedCusId = getSelectedCustomerId(company);
+
+    if (matchedCusId && customerLocationsMap[matchedCusId] && customerLocationsMap[matchedCusId].length > 0) {
+      const locs = customerLocationsMap[matchedCusId];
+      locs.forEach((loc) => {
+        const trimmedName = loc.name?.trim();
+        if (!trimmedName) return;
+
+        list.push({
+          key: `loc-${matchedCusId}-${loc.id}`,
+          value: trimmedName,
+          label: loc.is_primary ? `${trimmedName} (หลัก)` : trimmedName,
+          subLabel: loc.address && loc.address !== "-" ? loc.address : undefined,
+          item: loc,
+        });
       });
-    });
+    }
+
+    return list;
+  }, [customerLocationsMap, systemCustomers, company]);
+
+  const selectedCustomerId = useMemo(() => {
+    return getSelectedCustomerId(company);
+  }, [company, systemCustomers]);
+
+  // Combobox options for customers (แสดงเฉพาะข้อมูลลูกค้า และไม่แสดงรหัสลูกค้า เหลือแค่ชื่อ)
+  const customerOptions = useMemo<SearchableOption[]>(() => {
+    const list: SearchableOption[] = [];
     systemCustomers.forEach((cus) => {
-      const name = cus.name || cus.id;
-      const short = cus.short_name || cus["ชื่อย่อ"];
+      const name = cus.name?.trim() || "";
+      if (!name) return;
+      const short = cus.short_name?.trim() || cus["ชื่อย่อ"]?.trim();
       list.push({
         key: `cus-${cus.id}`,
         value: name,
-        label: short ? `${cus.id} - [${short}] ${name}` : `${cus.id} - ${name}`,
-        subLabel: short ? `ลูกค้า (${short})` : "ลูกค้า",
+        // แสดงแค่ชื่อลูกค้า และชื่อย่อโดยไม่มีคำว่า "ชื่อย่อ:"
+        label: name,
+        subLabel: short && short !== name ? short : undefined,
         item: cus,
       });
     });
     return list;
-  }, [systemCompanies, systemCustomers]);
+  }, [systemCustomers]);
+
+  const companyOptions = customerOptions;
 
   // Synchronized change handlers for Contact and Company
   const handleContactChange = (val: string, item?: any) => {
@@ -711,6 +737,10 @@ function QuickWorkContent() {
     }
   };
 
+  const handleLocationChange = (val: string, item?: any) => {
+    setLocation(val);
+  };
+
   const handleCompanyChange = (val: string, item?: any) => {
     setCompany(val);
     if (!val) {
@@ -733,6 +763,15 @@ function QuickWorkContent() {
       // The newly selected company has no contacts: clear contact and phone
       setContact1("");
       setPhone1("");
+    }
+
+    // Auto-sync with primary location or first location if location not yet set
+    if (cusId && customerLocationsMap[cusId] && customerLocationsMap[cusId].length > 0) {
+      const locs = customerLocationsMap[cusId];
+      const primaryLoc = locs.find((l) => l.is_primary) || locs[0];
+      if (primaryLoc && !location) {
+        setLocation(primaryLoc.name?.trim() || "");
+      }
     }
   };
 
@@ -1069,7 +1108,7 @@ function QuickWorkContent() {
                 />
               </div>
 
-              {/* ทีมรับผิดชอบ (PW, PW1, PW2, PW3, PW4, PW5) - แถวเต็ม 6 ปุ่ม กดเปลี่ยนได้ทันที 1-Click */}
+              {/* ทีมรับผิดชอบ (PW, PW1, PW2, PW3, PW4) - แถวเต็ม 5 ปุ่ม กดเปลี่ยนได้ทันที 1-Click */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <label className="text-[11px] font-medium text-slate-700">ทีมรับผิดชอบ</label>
@@ -1077,7 +1116,7 @@ function QuickWorkContent() {
                     ทีมที่เลือก: {team}
                   </span>
                 </div>
-                <div className="grid grid-cols-6 gap-1 sm:gap-1.5">
+                <div className="grid grid-cols-5 gap-1 sm:gap-1.5">
                   {TEAMS.map((t) => (
                     <button
                       key={t}
@@ -1095,46 +1134,56 @@ function QuickWorkContent() {
                 </div>
               </div>
 
-              {/* สถานที่ / ไซต์งาน & เลขที่ PR */}
-              <div className="grid grid-cols-2 gap-2 pt-0.5">
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-slate-600">สถานที่ / ไซต์งาน</label>
-                  <input
-                    type="text"
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                    placeholder="เช่น อาคาร A หรือ ไซต์งาน"
-                    className="w-full h-8.5 px-2.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-slate-600">เลขที่ PR (ถ้ามี)</label>
-                  <input
-                    type="text"
-                    value={prNo}
-                    onChange={(e) => setPrNo(e.target.value)}
-                    placeholder="PR-..."
-                    className="w-full h-8.5 px-2.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
-                  />
-                </div>
+              {/* เลขที่ PR (ถ้ามี) */}
+              <div className="space-y-1 pt-0.5">
+                <label className="text-[11px] font-medium text-slate-600">เลขที่ PR (ถ้ามี)</label>
+                <input
+                  type="text"
+                  value={prNo}
+                  onChange={(e) => setPrNo(e.target.value)}
+                  placeholder="PR-..."
+                  className="w-full h-8.5 px-2.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
+                />
               </div>
             </div>
 
-            {/* 3. บริษัท & ข้อมูลผู้ติดต่อ */}
+            {/* 3. ลูกค้า & ข้อมูลผู้ติดต่อ */}
             <div className="bg-white border border-slate-200/90 rounded-xl p-3.5 space-y-2.5 shadow-2xs">
-              <div className="flex items-center gap-1.5 pb-1 border-b border-slate-100">
-                <Building2 size={14} className="text-emerald-600" />
-                <h2 className="text-xs font-semibold text-slate-800">บริษัท & ผู้ติดต่อ</h2>
+              <div className="flex items-center justify-between pb-1 border-b border-slate-100">
+                <div className="flex items-center gap-1.5">
+                  <Building2 size={14} className="text-emerald-600" />
+                  <h2 className="text-xs font-semibold text-slate-800">ลูกค้า & ผู้ติดต่อ</h2>
+                </div>
+                {selectedCustomerId && (
+                  <a
+                    href={`/views/customers/${selectedCustomerId}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[10px] text-teal-600 hover:text-teal-700 hover:underline flex items-center gap-1 transition"
+                    title="ไปที่หน้าจัดการข้อมูลลูกค้า"
+                  >
+                    <span>จัดการข้อมูลลูกค้า</span>
+                    <ExternalLink size={10} />
+                  </a>
+                )}
               </div>
 
-              {/* บริษัท / ผู้ว่าจ้าง */}
-              <div>
+              {/* ลูกค้า / ผู้ว่าจ้าง & สถานที่ / ไซต์งาน */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <SearchableCombobox
-                  label="บริษัท / ผู้ว่าจ้าง"
+                  label="ลูกค้า / ผู้ว่าจ้าง"
                   value={company}
-                  placeholder="เลือกบริษัท หรือ ผู้ว่าจ้าง..."
-                  options={companyOptions}
+                  placeholder="เลือกลูกค้า..."
+                  options={customerOptions}
                   onChange={handleCompanyChange}
+                />
+                <SearchableCombobox
+                  label="สถานที่ / ไซต์งาน"
+                  value={location}
+                  placeholder={company ? "เลือกหรือพิมพ์สถานที่/ไซต์งาน..." : "สถานที่ / ไซต์งาน..."}
+                  options={locationOptions}
+                  onChange={handleLocationChange}
+                  allowCustom={true}
                 />
               </div>
 
@@ -1143,7 +1192,7 @@ function QuickWorkContent() {
                 <SearchableCombobox
                   label="ชื่อผู้ติดต่อ"
                   value={contact1}
-                  placeholder={company ? "เลือกหรือค้นหาชื่อผู้ติดต่อ..." : "กรุณาเลือกบริษัทก่อน..."}
+                  placeholder={company ? "เลือกหรือพิมพ์ชื่อผู้ติดต่อ..." : "ชื่อผู้ติดต่อ..."}
                   options={contactOptions}
                   onChange={handleContactChange}
                 />
@@ -1431,40 +1480,21 @@ function QuickWorkContent() {
                 />
               </div>
 
-              {/* PR & Location */}
-              <div className="grid grid-cols-2 gap-2.5">
-                <div className="space-y-1.5 min-w-0">
-                  <label className="text-[11px] font-medium text-slate-600 block truncate">เลขที่ PR (ถ้ามี)</label>
-                  <div className="relative min-w-0 w-full">
-                    <FileText
-                      size={14}
-                      className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
-                    />
-                    <input
-                      type="text"
-                      value={prNo}
-                      onChange={(e) => setPrNo(e.target.value)}
-                      placeholder="PR-2026-..."
-                      className="w-full min-w-0 max-w-full h-9 pl-8 pr-2.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30 transition"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5 min-w-0">
-                  <label className="text-[11px] font-medium text-slate-600 block truncate">สถานที่ / ไซต์งาน</label>
-                  <div className="relative min-w-0 w-full">
-                    <MapPin
-                      size={14}
-                      className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
-                    />
-                    <input
-                      type="text"
-                      value={location}
-                      onChange={(e) => setLocation(e.target.value)}
-                      placeholder="ไซต์งาน, อาคาร..."
-                      className="w-full min-w-0 max-w-full h-9 pl-8 pr-2.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30 transition"
-                    />
-                  </div>
+              {/* PR */}
+              <div className="space-y-1.5 min-w-0 pt-0.5">
+                <label className="text-[11px] font-medium text-slate-600 block truncate">เลขที่ PR (ถ้ามี)</label>
+                <div className="relative min-w-0 w-full">
+                  <FileText
+                    size={14}
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                  />
+                  <input
+                    type="text"
+                    value={prNo}
+                    onChange={(e) => setPrNo(e.target.value)}
+                    placeholder="PR-2026-..."
+                    className="w-full min-w-0 max-w-full h-9 pl-8 pr-2.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30 transition"
+                  />
                 </div>
               </div>
             </div>
@@ -1607,21 +1637,44 @@ function QuickWorkContent() {
               </div>
             </div>
 
-            {/* 3. Company / Contact */}
+            {/* 3. Customer / Contact */}
             <div className="bg-white border border-slate-200/90 rounded-xl p-4 sm:p-4.5 space-y-3 shadow-2xs">
-              <h2 className="text-xs font-semibold text-slate-800 flex items-center gap-1.5 pb-0.5">
-                <Building2 size={14} className="text-emerald-600" />
-                <span>บริษัท & ผู้ติดต่อ</span>
-              </h2>
+              <div className="flex items-center justify-between pb-0.5">
+                <h2 className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
+                  <Building2 size={14} className="text-emerald-600" />
+                  <span>ลูกค้า & ผู้ติดต่อ</span>
+                </h2>
+                {selectedCustomerId && (
+                  <a
+                    href={`/views/customers/${selectedCustomerId}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[10px] text-teal-600 hover:text-teal-700 hover:underline flex items-center gap-1 transition"
+                    title="ไปที่หน้าจัดการข้อมูลลูกค้า"
+                  >
+                    <span>จัดการข้อมูลลูกค้า</span>
+                    <ExternalLink size={10} />
+                  </a>
+                )}
+              </div>
 
-              {/* บริษัท / ผู้ว่าจ้าง */}
-              <div>
+              {/* ลูกค้า / ผู้ว่าจ้าง & สถานที่ / ไซต์งาน */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <SearchableCombobox
-                  label="บริษัท / ผู้ว่าจ้าง"
+                  label="ลูกค้า / ผู้ว่าจ้าง"
                   value={company}
-                  placeholder="เลือกบริษัท หรือ ผู้ว่าจ้าง..."
-                  options={companyOptions}
+                  placeholder="เลือกลูกค้า..."
+                  options={customerOptions}
                   onChange={handleCompanyChange}
+                />
+
+                <SearchableCombobox
+                  label="สถานที่ / ไซต์งาน"
+                  value={location}
+                  placeholder={company ? "เลือกหรือพิมพ์สถานที่/ไซต์งาน..." : "สถานที่ / ไซต์งาน..."}
+                  options={locationOptions}
+                  onChange={handleLocationChange}
+                  allowCustom={true}
                 />
               </div>
 
@@ -1630,7 +1683,7 @@ function QuickWorkContent() {
                 <SearchableCombobox
                   label="ชื่อผู้ติดต่อ"
                   value={contact1}
-                  placeholder={company ? "เลือกหรือค้นหาชื่อผู้ติดต่อ..." : "กรุณาเลือกบริษัทก่อน..."}
+                  placeholder={company ? "เลือกหรือพิมพ์ชื่อผู้ติดต่อ..." : "ชื่อผู้ติดต่อ..."}
                   options={contactOptions}
                   onChange={handleContactChange}
                 />
@@ -1667,21 +1720,11 @@ function QuickWorkContent() {
 
             {/* Sticky Bottom Buttons */}
             <div className="fixed bottom-0 left-0 right-0 p-3 bg-white/95 backdrop-blur-md border-t border-slate-200 z-20 shadow-md">
-              <div className="max-w-lg mx-auto flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleShareWork}
-                  className="py-2.5 sm:py-3 px-3.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium text-xs sm:text-sm tracking-wide transition border border-slate-200 flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 shrink-0"
-                  title="ส่งต่อข้อมูลงานนี้ไปที่ LINE"
-                >
-                  <Share2 size={16} className="text-emerald-600" />
-                  <span>ส่งต่อ</span>
-                </button>
-
+              <div className="max-w-lg mx-auto flex items-center">
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="flex-1 py-2.5 sm:py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg font-medium text-xs sm:text-sm tracking-wide transition shadow-2xs flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+                  className="w-full py-2.5 sm:py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg font-medium text-xs sm:text-sm tracking-wide transition shadow-2xs flex items-center justify-center gap-2 cursor-pointer active:scale-95"
                 >
                   {submitting ? (
                     <>

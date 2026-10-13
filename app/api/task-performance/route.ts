@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 import { getAllTaskAttachments } from "@/lib/tasks/task-attachments";
+import { clearCache } from "@/lib/utils/cache";
 
 export const dynamic = "force-dynamic";
 
@@ -78,7 +79,7 @@ const DEFAULT_SCORING_CONFIG = {
   hasAttachmentsBonus: 2,   // โบนัสมีรูปแนบหลักฐาน
 };
 
-// Match task to official category types (1. เอกสาร, 2. แผนงาน, 3. PJSA)
+// Match task to official or dynamic category types
 function detectCategory(
   taskTitle: string,
   explicitCategory: string | undefined,
@@ -86,39 +87,44 @@ function detectCategory(
   categories: typeof DEFAULT_SCORING_CONFIG.categories
 ) {
   const typeNum = Number(taskType);
-  const typeStr = String(taskType || "");
+  const typeStr = String(taskType || "").trim();
 
-  // Type 1: เอกสาร
-  if (typeNum === 1 || typeStr.includes("เอกสาร") || explicitCategory?.includes("เอกสาร")) {
-    const docCat = categories.find((c) => c.taskType === 1 || c.name.includes("เอกสาร"));
-    if (docCat) return docCat;
+  // 1. Direct match by taskType number
+  if (typeNum) {
+    const match = categories.find((c: any) => Number(c.taskType) === typeNum);
+    if (match) return match;
   }
 
-  // Type 2: แผนงาน
-  if (typeNum === 2 || typeStr.includes("แผนงาน") || explicitCategory?.includes("แผนงาน")) {
-    const planCat = categories.find((c) => c.taskType === 2 || c.name.includes("แผนงาน"));
-    if (planCat) return planCat;
+  // 2. Direct match by explicitCategory
+  if (explicitCategory) {
+    const cleanExp = explicitCategory.trim().toLowerCase();
+    const match = categories.find((c: any) => {
+      const cName = String(c.name || "").toLowerCase();
+      return cleanExp.includes(cName) || cName.includes(cleanExp);
+    });
+    if (match) return match;
   }
 
-  // Type 3: PJSA
-  if (typeNum === 3 || typeStr.toUpperCase().includes("PJSA") || explicitCategory?.toUpperCase().includes("PJSA")) {
-    const pjsaCat = categories.find((c) => c.taskType === 3 || c.name.toUpperCase().includes("PJSA"));
-    if (pjsaCat) return pjsaCat;
+  // 3. Match by name or keywords against taskTitle
+  const titleUpper = (taskTitle || "").toUpperCase();
+  for (const cat of categories as any[]) {
+    const cName = String(cat.name || "").toUpperCase();
+    const pureName = cName.replace(/^\d+[\.\s\)]*/, "").trim();
+    if (pureName && titleUpper.includes(pureName)) {
+      return cat;
+    }
+    if (Array.isArray(cat.keywords)) {
+      for (const kw of cat.keywords) {
+        const kwStr = String(kw || "").trim().toUpperCase();
+        if (kwStr && titleUpper.includes(kwStr)) {
+          return cat;
+        }
+      }
+    }
   }
 
-  // Keyword check from title
-  const upper = (taskTitle || "").toUpperCase();
-  if (upper.includes("PJSA")) {
-    const pjsaCat = categories.find((c) => c.taskType === 3 || c.name.toUpperCase().includes("PJSA"));
-    if (pjsaCat) return pjsaCat;
-  }
-  if (upper.includes("แผน") || upper.includes("PLAN")) {
-    const planCat = categories.find((c) => c.taskType === 2 || c.name.includes("แผนงาน"));
-    if (planCat) return planCat;
-  }
-
-  // Default to 1. เอกสาร
-  return categories.find((c) => c.taskType === 1) || categories[0];
+  // Default to 1. เอกสาร or first category
+  return categories.find((c: any) => c.taskType === 1) || categories[0];
 }
 
 // Check timing: is task on time, late, or indeterminate
@@ -177,7 +183,7 @@ export async function GET(req: NextRequest) {
     let scoringRules = (scoreOption?.data as typeof DEFAULT_SCORING_CONFIG) || DEFAULT_SCORING_CONFIG;
     if (scoringRules?.categories) {
       scoringRules.categories = scoringRules.categories
-        .filter((c: any) => c.taskType !== 4 && !c.name?.includes("PW"))
+        .filter((c: any) => !String(c.name || "").includes("งาน PW"))
         .map((c: any) => ({
           ...c,
           keywords: Array.isArray(c.keywords) ? c.keywords : [],
@@ -428,6 +434,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: "ข้อมูลเกณฑ์คะแนนไม่ถูกต้อง" }, { status: 400 });
     }
 
+    // Sanitize categories to ensure taskType is present
+    const sanitizedCategories = scoringRules.categories.map((c: any, idx: number) => {
+      const numMatch = String(c.name || "").match(/^(\d+)[\.\s\)]*/);
+      const taskType = Number(c.taskType) || (numMatch ? parseInt(numMatch[1], 10) : idx + 1);
+      return {
+        ...c,
+        taskType
+      };
+    });
+    scoringRules.categories = sanitizedCategories;
+
     // Save into system_options
     const { error } = await supabaseAdmin
       .from("system_options")
@@ -440,6 +457,8 @@ export async function POST(req: NextRequest) {
     if (error) {
       throw error;
     }
+
+    clearCache("task_categories");
 
     return NextResponse.json({
       success: true,

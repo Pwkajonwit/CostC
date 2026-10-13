@@ -398,33 +398,71 @@ export default function TaskPerformancePage() {
     }
   };
 
+  // Dynamic Task Types for filter pills
+  const dynamicTaskTypes = useMemo(() => {
+    if (!scoringRules?.categories || scoringRules.categories.length === 0) {
+      return OFFICIAL_TASK_TYPES;
+    }
+    return scoringRules.categories.map((c, idx) => {
+      const numMatch = String(c.name || "").match(/^(\d+)[\.\s\)]*(.*)/);
+      const num = Number(c.taskType) || (numMatch ? parseInt(numMatch[1], 10) : idx + 1);
+      const label = numMatch && numMatch[2] ? `${num}. ${numMatch[2].trim()}` : (c.name || `${num}. ประเภท ${num}`);
+      const icon = num === 1 ? FileText : num === 2 ? Calendar : num === 3 ? Clock : Sparkles;
+      return {
+        id: c.id || `type_${num}`,
+        taskType: num,
+        label,
+        icon,
+        color: c.color || (num === 1 ? "blue" : num === 2 ? "emerald" : num === 3 ? "purple" : "amber"),
+      };
+    });
+  }, [scoringRules]);
+
   // Add Category Handler in Modal
   const handleAddCategory = () => {
-    if (!tempRules) return;
-    const newId = `cat_${Date.now()}`;
-    const newCat: TaskCategory = {
-      id: newId,
-      name: "ประเภทงานใหม่",
-      keywords: ["ใหม่"],
-      basePoints: 20,
-      description: "คำอธิบายประเภทงาน",
-    };
-    setTempRules({
-      ...tempRules,
-      categories: [...tempRules.categories, newCat],
+    setTempRules((prev) => {
+      const currentCategories = prev?.categories && Array.isArray(prev.categories) ? prev.categories : [];
+      const maxType = currentCategories.reduce((max, c) => Math.max(max, Number(c.taskType) || 0), 0);
+      const nextNum = Math.max(maxType + 1, currentCategories.length + 1);
+      const newId = `type_${nextNum}_${Date.now()}`;
+      const newCat: TaskCategory = {
+        id: newId,
+        taskType: nextNum,
+        name: `${nextNum}. ประเภทงานใหม่`,
+        keywords: ["ใหม่"],
+        basePoints: 1,
+        description: "คำอธิบายประเภทงาน",
+        color: "amber",
+      };
+
+      if (!prev) {
+        return {
+          categories: [newCat],
+          onTimeBonus: 5,
+          latePenalty: 5,
+          hasAttachmentsBonus: 2,
+        };
+      }
+      return {
+        ...prev,
+        categories: [...currentCategories, newCat],
+      };
     });
   };
 
   // Remove Category Handler in Modal
   const handleRemoveCategory = (id: string) => {
-    if (!tempRules) return;
-    if (tempRules.categories.length <= 1) {
-      alert("ต้องมีประเภทงานอย่างน้อย 1 รายการ");
-      return;
-    }
-    setTempRules({
-      ...tempRules,
-      categories: tempRules.categories.filter((c) => c.id !== id),
+    setTempRules((prev) => {
+      if (!prev) return null;
+      const current = prev.categories || [];
+      if (current.length <= 1) {
+        alert("ต้องมีประเภทงานอย่างน้อย 1 รายการ");
+        return prev;
+      }
+      return {
+        ...prev,
+        categories: current.filter((c) => c.id !== id),
+      };
     });
   };
 
@@ -592,8 +630,8 @@ export default function TaskPerformancePage() {
                 </span>
               </button>
 
-              {/* Official Type Pills: 1. เอกสาร, 2. แผนงาน, 3. PJSA, 4. งาน PW */}
-              {OFFICIAL_TASK_TYPES.map((t) => {
+              {/* Dynamic Task Type Pills */}
+              {dynamicTaskTypes.map((t) => {
                 const Icon = t.icon;
                 const isSelected = categoryFilter === t.id;
                 const count = allTasks.filter(
@@ -1287,6 +1325,7 @@ export default function TaskPerformancePage() {
                     รายการประเภทงานและคะแนนพื้นฐาน ({tempRules.categories.length})
                   </span>
                   <button
+                    type="button"
                     onClick={handleAddCategory}
                     className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold text-xs flex items-center gap-1 border border-emerald-200 transition cursor-pointer"
                   >
@@ -1297,15 +1336,20 @@ export default function TaskPerformancePage() {
 
                 <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">
                   {tempRules.categories.map((cat, idx) => (
-                    <div key={cat.id} className="p-3 bg-white hover:bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div key={cat.id || idx} className="p-3 bg-white hover:bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                       <div className="flex-1 space-y-1">
                         <input
                           type="text"
                           value={cat.name}
                           onChange={(e) => {
-                            const newCategories = [...tempRules.categories];
-                            newCategories[idx].name = e.target.value;
-                            setTempRules({ ...tempRules, categories: newCategories });
+                            const val = e.target.value;
+                            setTempRules((prev) => {
+                              if (!prev) return null;
+                              const nextCats = prev.categories.map((c, i) =>
+                                i === idx ? { ...c, name: val } : c
+                              );
+                              return { ...prev, categories: nextCats };
+                            });
                           }}
                           placeholder="ชื่อประเภทงาน"
                           className="font-bold text-slate-900 px-2 py-1 rounded border border-slate-200 w-full text-xs"
@@ -1314,10 +1358,20 @@ export default function TaskPerformancePage() {
                           type="text"
                           value={Array.isArray(cat.keywords) && cat.keywords.length > 0 ? cat.keywords.join(", ") : (cat.description || "")}
                           onChange={(e) => {
-                            const newCategories = [...tempRules.categories];
-                            newCategories[idx].keywords = e.target.value.split(",").map((s) => s.trim()).filter(Boolean);
-                            newCategories[idx].description = e.target.value;
-                            setTempRules({ ...tempRules, categories: newCategories });
+                            const val = e.target.value;
+                            setTempRules((prev) => {
+                              if (!prev) return null;
+                              const nextCats = prev.categories.map((c, i) =>
+                                i === idx
+                                  ? {
+                                      ...c,
+                                      keywords: val.split(",").map((s) => s.trim()).filter(Boolean),
+                                      description: val,
+                                    }
+                                  : c
+                              );
+                              return { ...prev, categories: nextCats };
+                            });
                           }}
                           placeholder="คำสำคัญหรือคำอธิบายประเภทงาน (คั่นด้วยจุลภาค)"
                           className="text-[11px] text-slate-500 px-2 py-0.5 rounded border border-slate-100 w-full"
@@ -1331,14 +1385,20 @@ export default function TaskPerformancePage() {
                             type="number"
                             value={cat.basePoints}
                             onChange={(e) => {
-                              const newCategories = [...tempRules.categories];
-                              newCategories[idx].basePoints = Number(e.target.value) || 0;
-                              setTempRules({ ...tempRules, categories: newCategories });
+                              const val = Number(e.target.value) || 0;
+                              setTempRules((prev) => {
+                                if (!prev) return null;
+                                const nextCats = prev.categories.map((c, i) =>
+                                  i === idx ? { ...c, basePoints: val } : c
+                                );
+                                return { ...prev, categories: nextCats };
+                              });
                             }}
                             className="w-16 px-2 py-1 rounded border border-slate-200 font-bold text-center text-xs"
                           />
                         </div>
                         <button
+                          type="button"
                           onClick={() => handleRemoveCategory(cat.id)}
                           className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 transition cursor-pointer"
                           title="ลบประเภทงานนี้"
@@ -1355,6 +1415,7 @@ export default function TaskPerformancePage() {
             {/* Modal Footer */}
             <div className="p-3.5 border-t border-slate-200 bg-slate-50 flex items-center justify-between shrink-0">
               <button
+                type="button"
                 onClick={() => {
                   if (confirm("คุณต้องการรีเซ็ตเกณฑ์คะแนนกลับเป็นค่าเริ่มต้นของระบบหรือไม่?")) {
                     setTempRules(JSON.parse(JSON.stringify(DEFAULT_SCORING_CONFIG)));
@@ -1368,12 +1429,14 @@ export default function TaskPerformancePage() {
 
               <div className="flex items-center gap-2">
                 <button
+                  type="button"
                   onClick={() => setShowSettingsModal(false)}
                   className="px-3 py-1.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 text-xs font-semibold transition cursor-pointer"
                 >
                   ยกเลิก
                 </button>
                 <button
+                  type="button"
                   onClick={handleSaveScoringRules}
                   disabled={savingSettings}
                   className="px-4 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition cursor-pointer"

@@ -996,9 +996,10 @@ function sanitizeBySchema(row: SheetRow, tableName: string) {
       return;
     }
     if (hasMultiItems && amountCols.includes(field.name) && hasRowValue(row[field.name])) return;
-    // CRITICAL: NEVER wipe out "วันจ่าย" or "เครดิต" if a value was provided
+    // CRITICAL: NEVER wipe out "วันจ่าย" or "เครดิต" or "รายละเอียดงาน" if a value was provided
     if (field.name === "วันจ่าย" && (hasRowValue(row["วันจ่าย"]) || hasRowValue(row.paid_date))) return;
     if (field.name === "เครดิต" && (hasRowValue(row["เครดิต"]) || hasRowValue(row.credit_days))) return;
+    if (field.name === "รายละเอียดงาน") return;
     if (isFieldVisible(field, row)) return;
     row[field.name] = "";
   });

@@ -2,14 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
 import { getLineTargetGroup, sendFlexMessageDetailed } from "@/lib/line/line";
 import { createWorkAssignmentFlex } from "@/lib/line/line-tasks-works";
-import { uploadFileToSupabaseStorage, getCustomerContactsMap, getCustomerShortNamesMap, resolveCustomerShortName } from "@/lib/supabase/supabase-db";
+import { uploadFileToSupabaseStorage, getCustomerContactsMap, getCustomerLocationsMap, getCustomerShortNamesMap, resolveCustomerShortName, getNextWorkSequence } from "@/lib/supabase/supabase-db";
 import { saveWorkAttachment, getWorkAttachment } from "@/lib/tasks/task-attachments";
 
 export const dynamic = "force-dynamic";
 
 /**
  * GET: Fetch work details by ID (e.g. for pre-filling edit form)
- * and system options (contractors, companies, customers, customer contacts) for quick selection
+ * and system options (contractors, companies, customers, customer contacts, customer locations) for quick selection
  */
 export async function GET(request: NextRequest) {
   try {
@@ -17,8 +17,8 @@ export async function GET(request: NextRequest) {
     const rawId = String(searchParams.get("id") || searchParams.get("work_id") || "").trim();
     const cleanId = parseInt(rawId.replace(/\D/g, ""), 10);
 
-    // Fetch system options (contractors, companies, customers, customer contacts, short names) in parallel
-    const [contractorsRes, companiesRes, customersRes, customerContacts, customerShortNames] = await Promise.all([
+    // Fetch system options (contractors, companies, customers, customer contacts, customer locations, short names) in parallel
+    const [contractorsRes, companiesRes, customersRes, customerContacts, customerLocations, customerShortNames] = await Promise.all([
       supabaseAdmin
         .from("contractors")
         .select("id, nickname, full_name, phone")
@@ -32,6 +32,7 @@ export async function GET(request: NextRequest) {
         .select("id, name")
         .order("id", { ascending: true }),
       getCustomerContactsMap(),
+      getCustomerLocationsMap(),
       getCustomerShortNamesMap(),
     ]);
 
@@ -51,6 +52,7 @@ export async function GET(request: NextRequest) {
         companies,
         customers,
         customerContacts,
+        customerLocations,
         customerShortNames,
       });
     }
@@ -75,6 +77,7 @@ export async function GET(request: NextRequest) {
       companies,
       customers,
       customerContacts,
+      customerLocations,
     });
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: err.message || "Failed to load work" }, { status: 500 });
@@ -247,7 +250,9 @@ export async function POST(request: NextRequest) {
       pwId = `PW-${workIdNum}`;
     } else {
       // 2. Insert new work in Supabase
+      const nextWorkId = await getNextWorkSequence();
       const insertPayload: Record<string, any> = {
+        id: nextWorkId,
         team,
         activity_type,
         status: status || "รอดู",

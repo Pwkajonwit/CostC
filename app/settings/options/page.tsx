@@ -43,6 +43,21 @@ type SequenceInfo = {
   nextSequence: number;
 };
 
+type TaskWorkSeqInfo = {
+  tasks: {
+    total: number;
+    maxId: number;
+    configuredStart: number;
+    nextSequence: number;
+  };
+  works: {
+    total: number;
+    maxId: number;
+    configuredStart: number;
+    nextSequence: number;
+  };
+};
+
 const DEFAULT_CATEGORIES: Array<{ key: string; label: string; icon: any; defaultValues: string[] }> = [
   {
     key: "ชื่อเครื่องมือ",
@@ -168,6 +183,13 @@ export default function SystemOptionsSettingsPage() {
     setConfirmText("");
   }
 
+  // Task & Work Sequence state
+  const [taskWorkSeqInfo, setTaskWorkSeqInfo] = useState<TaskWorkSeqInfo | null>(null);
+  const [taskStartInput, setTaskStartInput] = useState<string>("");
+  const [workStartInput, setWorkStartInput] = useState<string>("");
+  const [isUpdatingTaskSeq, setIsUpdatingTaskSeq] = useState<boolean>(false);
+  const [isUpdatingWorkSeq, setIsUpdatingWorkSeq] = useState<boolean>(false);
+
   async function loadSequenceInfo() {
     try {
       const res = await fetch("/api/bills/sequence");
@@ -178,6 +200,20 @@ export default function SystemOptionsSettingsPage() {
       }
     } catch (err) {
       console.warn("Failed fetching bill sequence info:", err);
+    }
+  }
+
+  async function loadTaskWorkSequenceInfo() {
+    try {
+      const res = await fetch("/api/tasks-works/sequence");
+      const json = await res.json();
+      if (json.success) {
+        setTaskWorkSeqInfo(json);
+        setTaskStartInput(String(json.tasks?.configuredStart || 1));
+        setWorkStartInput(String(json.works?.configuredStart || 1));
+      }
+    } catch (err) {
+      console.warn("Failed fetching task/work sequence info:", err);
     }
   }
 
@@ -412,6 +448,7 @@ export default function SystemOptionsSettingsPage() {
         const [res] = await Promise.all([
           fetch("/api/system-options"),
           loadSequenceInfo(),
+          loadTaskWorkSequenceInfo(),
           loadFiscalPeriods()
         ]);
         const json = await res.json();
@@ -512,6 +549,66 @@ export default function SystemOptionsSettingsPage() {
       setErrorMsg(err.message || "เกิดข้อผิดพลาดในการตั้งค่าเลขเริ่มต้น");
     } finally {
       setIsUpdatingSeq(false);
+    }
+  }
+
+  async function handleRefreshAllSequences() {
+    await Promise.all([loadSequenceInfo(), loadTaskWorkSequenceInfo()]);
+  }
+
+  async function handleSaveTaskSequence() {
+    const taskVal = parseInt(taskStartInput.trim(), 10);
+    if (isNaN(taskVal) || taskVal < 1) {
+      setErrorMsg("กรุณาระบุเลขเริ่มต้น Task เป็นตัวเลขตั้งแต่ 1 ขึ้นไป");
+      return;
+    }
+
+    setIsUpdatingTaskSeq(true);
+    setErrorMsg("");
+    try {
+      const res = await fetch("/api/tasks-works/sequence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskStartSequence: taskVal })
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || "บันทึกเลขเริ่มต้น Task ไม่สำเร็จ");
+
+      setSuccessMsg(`บันทึกเลขเริ่มต้น Task เป็น #${taskVal} เรียบร้อยแล้ว`);
+      await loadTaskWorkSequenceInfo();
+      setTimeout(() => setSuccessMsg(""), 3500);
+    } catch (err: any) {
+      setErrorMsg(err.message || "เกิดข้อผิดพลาดในการบันทึกเลขเริ่มต้น Task");
+    } finally {
+      setIsUpdatingTaskSeq(false);
+    }
+  }
+
+  async function handleSaveWorkSequence() {
+    const workVal = parseInt(workStartInput.trim(), 10);
+    if (isNaN(workVal) || workVal < 1) {
+      setErrorMsg("กรุณาระบุเลขเริ่มต้น Work เป็นตัวเลขตั้งแต่ 1 ขึ้นไป");
+      return;
+    }
+
+    setIsUpdatingWorkSeq(true);
+    setErrorMsg("");
+    try {
+      const res = await fetch("/api/tasks-works/sequence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workStartSequence: workVal })
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || "บันทึกเลขเริ่มต้น Work ไม่สำเร็จ");
+
+      setSuccessMsg(`บันทึกเลขเริ่มต้น Work เป็น PW-${workVal} เรียบร้อยแล้ว`);
+      await loadTaskWorkSequenceInfo();
+      setTimeout(() => setSuccessMsg(""), 3500);
+    } catch (err: any) {
+      setErrorMsg(err.message || "เกิดข้อผิดพลาดในการบันทึกเลขเริ่มต้น Work");
+    } finally {
+      setIsUpdatingWorkSeq(false);
     }
   }
 
@@ -619,92 +716,217 @@ export default function SystemOptionsSettingsPage() {
       )}
 
       {/* ========================================================================= */}
-      {/* 3. BILL SEQUENCE & NUMBERING SECTION                                      */}
+      {/* 3. SEQUENCE & NUMBERING SECTION (BILLS, TASKS & WORKS)                    */}
       {/* ========================================================================= */}
-      <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs p-4 sm:p-5 space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+      <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs p-3.5 sm:p-4 space-y-3">
+        {/* Section Header */}
+        <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
           <div className="flex items-center gap-2 min-w-0">
-            <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-800 flex items-center justify-center shrink-0 border border-emerald-200/80 shadow-2xs">
+            <div className="w-7 h-7 rounded-lg bg-[#0b3531] text-[#34d399] flex items-center justify-center shrink-0 border border-emerald-700/50 shadow-2xs">
               <Hash className="w-4 h-4" />
             </div>
             <div>
-              <span className="text-xs font-extrabold text-slate-800 tracking-tight uppercase">
-                จัดการเลขลำดับบิล
+              <span className="text-xs font-black text-slate-800 tracking-tight uppercase">
+                จัดการเลขลำดับ (บิล, Task, Work)
               </span>
-              <span className="text-[11px] font-bold text-slate-400 block">
-                BILL SEQUENCE & NUMBERING
+              <span className="text-[10px] font-bold text-slate-400 block tracking-tight">
+                SEQUENCE & NUMBERING CONFIGURATION
               </span>
             </div>
           </div>
           <button
             type="button"
-            onClick={loadSequenceInfo}
-            className="text-slate-500 hover:text-slate-800 p-1.5 rounded-lg hover:bg-slate-100 transition cursor-pointer"
-            title="รีเฟรชข้อมูลเลขบิล"
+            onClick={handleRefreshAllSequences}
+            className="text-slate-500 hover:text-slate-800 p-1.5 rounded-lg hover:bg-slate-100 transition cursor-pointer flex items-center gap-1 text-xs"
+            title="รีเฟรชข้อมูลเลขทั้งหมด"
           >
-            <RefreshCw size={13} />
+            <RefreshCw size={13} className={isUpdatingSeq || isUpdatingTaskSeq || isUpdatingWorkSeq ? "animate-spin" : ""} />
+            <span className="hidden sm:inline text-[11px] font-bold text-slate-500">รีเฟรช</span>
           </button>
         </div>
 
-        {/* Status Indicators */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="bg-slate-50/70 border border-slate-200/80 rounded-xl p-3 shadow-2xs">
-            <div className="text-[11px] font-bold text-slate-500">เลขบิลสูงสุดในระบบปัจจุบัน</div>
-            <div className="text-sm font-black text-slate-900 mt-1 font-mono">
-              {seqInfo ? (seqInfo.maxBillId > 0 ? `#${seqInfo.maxBillId}` : "ไม่มีรายการบิล (0)") : "-"}
+        {/* 3-Card Compact Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* 1. BILL CARD */}
+          <div className="bg-slate-50/70 border border-slate-200/80 rounded-xl p-3 flex flex-col justify-between gap-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <span className="w-5 h-5 rounded-md bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-xs">
+                  #
+                </span>
+                <span className="text-xs font-bold text-slate-800">บิลค่าใช้จ่าย</span>
+              </div>
+              <span className="text-[11px] font-mono text-slate-500 bg-white px-2 py-0.5 rounded-md border border-slate-200/60 font-medium">
+                {seqInfo ? `${seqInfo.totalBills} บิล` : "-"}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="bg-white border border-slate-200/70 rounded-lg p-2">
+                <div className="text-[10px] text-slate-400 font-bold">ล่าสุดในระบบ</div>
+                <div className="text-sm font-black text-slate-800 font-mono mt-0.5">
+                  {seqInfo ? (seqInfo.maxBillId > 0 ? `#${seqInfo.maxBillId}` : "0") : "-"}
+                </div>
+              </div>
+              <div className="bg-emerald-50 border border-emerald-200/80 rounded-lg p-2">
+                <div className="text-[10px] text-emerald-700 font-bold">ถัดไปที่จะได้</div>
+                <div className="text-sm font-black text-emerald-900 font-mono mt-0.5">
+                  {seqInfo ? `#${seqInfo.nextSequence}` : "-"}
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-1.5 border-t border-slate-200/60 flex items-center justify-between gap-1.5">
+              <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">เริ่มที่:</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={startSeqInput}
+                  onChange={(e) => setStartSeqInput(e.target.value)}
+                  className="w-16 sm:w-20 px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-mono font-bold text-slate-800 focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 text-center shadow-2xs"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveStartSequence}
+                  disabled={isUpdatingSeq}
+                  className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-md flex items-center gap-1 transition cursor-pointer disabled:opacity-50 shrink-0 shadow-2xs"
+                  title="บันทึกเลขเริ่มต้นบิล"
+                >
+                  {isUpdatingSeq ? <RefreshCw size={11} className="animate-spin" /> : <Save size={11} />}
+                  <span>บันทึก</span>
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={openResetModal}
+                className="text-[10px] text-rose-600 hover:text-rose-800 font-bold hover:underline transition cursor-pointer shrink-0"
+                title="ล้างบิลทดสอบ"
+              >
+                ล้างบิล
+              </button>
             </div>
           </div>
-          <div className="bg-slate-50/70 border border-slate-200/80 rounded-xl p-3 shadow-2xs">
-            <div className="text-[11px] font-bold text-slate-500">จำนวนบิลทั้งหมดในระบบ</div>
-            <div className="text-sm font-black text-slate-900 mt-1 font-mono">
-              {seqInfo ? `${seqInfo.totalBills} รายการ` : "-"}
+
+          {/* 2. TASK CARD */}
+          <div className="bg-slate-50/70 border border-slate-200/80 rounded-xl p-3 flex flex-col justify-between gap-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <span className="w-5 h-5 rounded-md bg-blue-100 text-blue-800 flex items-center justify-center font-bold text-[10px]">
+                  TK
+                </span>
+                <span className="text-xs font-bold text-slate-800">งานประจำวัน (Task)</span>
+              </div>
+              <span className="text-[11px] font-mono text-slate-500 bg-white px-2 py-0.5 rounded-md border border-slate-200/60 font-medium">
+                {taskWorkSeqInfo ? `${taskWorkSeqInfo.tasks.total} งาน` : "-"}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="bg-white border border-slate-200/70 rounded-lg p-2">
+                <div className="text-[10px] text-slate-400 font-bold">ล่าสุดในระบบ</div>
+                <div className="text-sm font-black text-slate-800 font-mono mt-0.5">
+                  {taskWorkSeqInfo ? (taskWorkSeqInfo.tasks.maxId > 0 ? `#${taskWorkSeqInfo.tasks.maxId}` : "0") : "-"}
+                </div>
+              </div>
+              <div className="bg-blue-50 border border-blue-200/80 rounded-lg p-2">
+                <div className="text-[10px] text-blue-700 font-bold">ถัดไปที่จะได้</div>
+                <div className="text-sm font-black text-blue-900 font-mono mt-0.5">
+                  {taskWorkSeqInfo ? `#${taskWorkSeqInfo.tasks.nextSequence}` : "-"}
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-1.5 border-t border-slate-200/60 flex items-center justify-between gap-1.5">
+              <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">เริ่มที่:</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={taskStartInput}
+                  onChange={(e) => setTaskStartInput(e.target.value)}
+                  className="w-16 sm:w-20 px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-mono font-bold text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 text-center shadow-2xs"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveTaskSequence}
+                  disabled={isUpdatingTaskSeq}
+                  className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-md flex items-center gap-1 transition cursor-pointer disabled:opacity-50 shrink-0 shadow-2xs"
+                  title="บันทึกเลขเริ่มต้น Task"
+                >
+                  {isUpdatingTaskSeq ? <RefreshCw size={11} className="animate-spin" /> : <Save size={11} />}
+                  <span>บันทึก</span>
+                </button>
+              </div>
+              <span className="text-[10px] font-bold text-slate-400 shrink-0">
+                Quick Task
+              </span>
             </div>
           </div>
-          <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-xl p-3 shadow-2xs">
-            <div className="text-[11px] font-bold text-emerald-800">เลขบิลที่จะถูกสร้างถัดไป</div>
-            <div className="text-sm font-black text-emerald-900 mt-1 font-mono">
-              {seqInfo ? `#${seqInfo.nextSequence}` : "-"}
+
+          {/* 3. WORK CARD */}
+          <div className="bg-slate-50/70 border border-slate-200/80 rounded-xl p-3 flex flex-col justify-between gap-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <span className="w-5 h-5 rounded-md bg-amber-100 text-amber-800 flex items-center justify-center font-bold text-[10px]">
+                  PW
+                </span>
+                <span className="text-xs font-bold text-slate-800">งานรับเหมา (Work)</span>
+              </div>
+              <span className="text-[11px] font-mono text-slate-500 bg-white px-2 py-0.5 rounded-md border border-slate-200/60 font-medium">
+                {taskWorkSeqInfo ? `${taskWorkSeqInfo.works.total} งาน` : "-"}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="bg-white border border-slate-200/70 rounded-lg p-2">
+                <div className="text-[10px] text-slate-400 font-bold">ล่าสุดในระบบ</div>
+                <div className="text-sm font-black text-slate-800 font-mono mt-0.5">
+                  {taskWorkSeqInfo ? (taskWorkSeqInfo.works.maxId > 0 ? `PW-${taskWorkSeqInfo.works.maxId}` : "0") : "-"}
+                </div>
+              </div>
+              <div className="bg-amber-50 border border-amber-200/80 rounded-lg p-2">
+                <div className="text-[10px] text-amber-800 font-bold">ถัดไปที่จะได้</div>
+                <div className="text-sm font-black text-amber-950 font-mono mt-0.5">
+                  {taskWorkSeqInfo ? `PW-${taskWorkSeqInfo.works.nextSequence}` : "-"}
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-1.5 border-t border-slate-200/60 flex items-center justify-between gap-1.5">
+              <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">เริ่มที่:</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={workStartInput}
+                  onChange={(e) => setWorkStartInput(e.target.value)}
+                  className="w-16 sm:w-20 px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-mono font-bold text-slate-800 focus:outline-none focus:border-amber-600 focus:ring-1 focus:ring-amber-600 text-center shadow-2xs"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveWorkSequence}
+                  disabled={isUpdatingWorkSeq}
+                  className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-md flex items-center gap-1 transition cursor-pointer disabled:opacity-50 shrink-0 shadow-2xs"
+                  title="บันทึกเลขเริ่มต้น Work"
+                >
+                  {isUpdatingWorkSeq ? <RefreshCw size={11} className="animate-spin" /> : <Save size={11} />}
+                  <span>บันทึก</span>
+                </button>
+              </div>
+              <span className="text-[10px] font-bold text-slate-400 shrink-0">
+                PW-1, PW-2...
+              </span>
             </div>
           </div>
         </div>
 
-        {/* Setting Controls */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-1">
-          <div className="flex items-center gap-2.5 flex-1 flex-wrap">
-            <label className="text-xs font-bold text-slate-700 whitespace-nowrap">
-              เลขเริ่มต้นบิลถัดไป:
-            </label>
-            <input
-              type="number"
-              min="1"
-              value={startSeqInput}
-              onChange={(e) => setStartSeqInput(e.target.value)}
-              placeholder="เช่น 1, 1001, 3000"
-              className="w-36 px-3 py-1.5 bg-slate-50/50 hover:bg-white focus:bg-white border border-slate-200 rounded-lg text-slate-900 text-xs font-mono font-medium focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 shadow-2xs"
-            />
-            <button
-              type="button"
-              onClick={handleSaveStartSequence}
-              disabled={isUpdatingSeq}
-              className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg flex items-center gap-1.5 transition cursor-pointer text-xs shadow-2xs disabled:opacity-50"
-            >
-              {isUpdatingSeq ? <RefreshCw size={12} className="animate-spin" /> : <Save size={12} />}
-              <span>บันทึกเลขเริ่มต้น</span>
-            </button>
-          </div>
-
-          <div>
-            <button
-              type="button"
-              onClick={openResetModal}
-              className="w-full sm:w-auto px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold rounded-lg flex items-center justify-center gap-1.5 transition cursor-pointer text-xs shadow-2xs"
-            >
-              <RotateCcw size={12} />
-              <span>ล้างบิลทดสอบทั้งหมด & เริ่มที่เลข {startSeqInput || 1}</span>
-            </button>
-          </div>
+        {/* Subtle tip footer */}
+        <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2 text-[11px] text-slate-400">
+          <span>💡 ระบบจะรันเลขถัดไปต่อจากเลขสูงสุดที่มีอยู่ในระบบ หรือรันจากเลขเริ่มต้นที่ตั้งค่าหากเลขในระบบยังไม่ถึง</span>
         </div>
       </div>
+
 
       {/* 3-Step Security Confirmation Modal for Resetting Bills */}
       {showResetModal && (

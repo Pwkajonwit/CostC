@@ -236,8 +236,7 @@ function TaskUploadContent() {
             const liffModule = await import("@line/liff");
             liff = liffModule.default || (window as any).liff;
           }
-          const activeLiffId =
-            process.env.NEXT_PUBLIC_LINE_LIFF_ID || "2011122961-40UXax1L";
+          const activeLiffId = process.env.NEXT_PUBLIC_LINE_LIFF_ID || "";
           if (liff && typeof liff.init === "function") {
             try {
               await liff.init({ liffId: activeLiffId });

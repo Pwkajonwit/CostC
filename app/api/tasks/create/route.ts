@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/supabase-admin";
-import { uploadFileToSupabaseStorage } from "@/lib/supabase/supabase-db";
+import { uploadFileToSupabaseStorage, getNextTaskSequence } from "@/lib/supabase/supabase-db";
 import { saveBatchTaskAttachments, TaskAttachmentRecord } from "@/lib/tasks/task-attachments";
 import { getTodayDateIso, normalizeDateToIso } from "@/lib/utils/dates";
 import { sendFlexMessageDetailed, getLineTargetGroup } from "@/lib/line/line";
@@ -142,15 +142,8 @@ export async function POST(req: NextRequest) {
     const todayIso = getTodayDateIso();
     const finalAssigneeName = assigneeName || creatorName || "ทีมงาน";
 
-    // Query max id to prevent duplicate key sequence violation
-    const { data: maxRow } = await supabaseAdmin
-      .from("tasks")
-      .select("id")
-      .order("id", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    const startId = (maxRow?.id ? Number(maxRow.id) : 0) + 1;
+    // Resolve starting task ID respecting configured sequence
+    const startId = await getNextTaskSequence();
 
     // Prepare rows for batch insert
     const rowsToInsert = validItems.map((item, idx) => {

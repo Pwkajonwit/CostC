@@ -36,7 +36,7 @@ interface TaskItemInput {
   sendDate: string;
 }
 
-const TASK_TYPES = [
+const DEFAULT_TASK_TYPES = [
   { id: 1, label: "เอกสาร", icon: FileText, color: "text-blue-600 bg-blue-50 border-blue-200" },
   { id: 2, label: "แผนงาน", icon: Calendar, color: "text-emerald-600 bg-emerald-50 border-emerald-200" },
   { id: 3, label: "PJSA", icon: Clock, color: "text-purple-600 bg-purple-50 border-purple-200" }
@@ -92,6 +92,26 @@ export default function QuickTaskPage() {
   const [tasks, setTasks] = useState<TaskItemInput[]>([
     createEmptyTask(1, false, todayIso, defaultSendIso)
   ]);
+
+  // Dynamic Task Types from /api/task-categories (task-performance)
+  const [taskTypes, setTaskTypes] = useState<Array<{ id: number; label: string; icon?: any }>>(DEFAULT_TASK_TYPES);
+
+  useEffect(() => {
+    fetch("/api/task-categories")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.success && Array.isArray(data.categories) && data.categories.length > 0) {
+          setTaskTypes(
+            data.categories.map((c: any) => ({
+              id: c.id,
+              label: c.label || c.name,
+              icon: c.id === 1 ? FileText : c.id === 2 ? Calendar : c.id === 3 ? Clock : Sparkles
+            }))
+          );
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Projects from /views/project-all (Table: Project)
   const [projects, setProjects] = useState<ProjectOption[]>([]);
@@ -561,8 +581,8 @@ export default function QuickTaskPage() {
                       {/* Task Type selector pills */}
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-[10px] text-slate-400 mr-0.5">ประเภท:</span>
-                        {TASK_TYPES.map((t) => {
-                          const Icon = t.icon;
+                        {taskTypes.map((t) => {
+                          const Icon = t.icon || Sparkles;
                           const isSelected = task.taskType === t.id;
                           return (
                             <button
