@@ -164,7 +164,7 @@ export function QuickCreatorBar({
         if (!activeLiffId) {
           const cfgRes = await fetch("/api/line/config");
           const cfgData = await cfgRes.json();
-          activeLiffId = cfgData?.liffId || "2011122961-40UXax1L";
+          activeLiffId = cfgData?.liffId || "";
         }
         if (!activeLiffId) return;
 
@@ -248,7 +248,7 @@ export function QuickCreatorBar({
         if (!activeLiffId) {
           const cfgRes = await fetch("/api/line/config");
           const cfgData = await cfgRes.json();
-          activeLiffId = cfgData?.liffId || "2011122961-40UXax1L";
+          activeLiffId = cfgData?.liffId || "";
         }
         const liffModule = await import("@line/liff");
         liff = liffModule.default || (window as any).liff;

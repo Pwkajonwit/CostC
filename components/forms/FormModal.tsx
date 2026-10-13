@@ -1028,7 +1028,7 @@ export function FormModal({
           storeGroup: initialStore,
           category: isContractor ? (primaryType || "201 เตรียมงาน") : (values["สินค้า"] || ""),
           categoryType: primaryType,
-          detail: isContractor ? "" : (values["รายละเอียดงาน"] || ""),
+          detail: values["รายละเอียดงาน"] || "",
           vehiclePlate: values["ทะเบียน"] || "",
           toolName: values["ชื่อเครื่องมือ"] || "",
           subItem: values["รายการ"] || "",
@@ -1064,11 +1064,21 @@ export function FormModal({
 
   function disableMultiItemMode() {
     setIsMultiItemMode(false);
+    if (multiLineItems.length > 0) {
+      setValues(current => ({
+        ...current,
+        "รายละเอียดงาน": current["รายละเอียดงาน"] || multiLineItems[0]?.detail || "",
+        "สินค้า": current["สินค้า"] || multiLineItems[0]?.category || "",
+        "ยอดเงิน": multiLineItems[0]?.amount || current["ยอดเงิน"] || "",
+        has_fuel_or_repair: ""
+      }));
+    } else {
+      setValues(current => ({
+        ...current,
+        has_fuel_or_repair: ""
+      }));
+    }
     setMultiLineItems([]);
-    setValues(current => ({
-      ...current,
-      has_fuel_or_repair: ""
-    }));
   }
 
   function handleAddLineItem(defaultStore?: string) {
@@ -1515,12 +1525,16 @@ export function FormModal({
         } catch {}
       }
 
-      if (parsedItems.length > 0) {
+      const isExplicitMulti = detail.row._is_multi_item === "true" || (detail.row.data as any)?._is_multi_item === "true";
+      if (parsedItems.length > 1 || (parsedItems.length === 1 && isExplicitMulti)) {
         setMultiLineItems(parsedItems);
         setIsMultiItemMode(true);
       } else {
         setMultiLineItems([]);
         setIsMultiItemMode(false);
+        if (parsedItems.length === 1 && !nextValues["รายละเอียดงาน"] && parsedItems[0].detail) {
+          nextValues["รายละเอียดงาน"] = parsedItems[0].detail;
+        }
       }
     } else {
       setMultiLineItems([]);
@@ -1878,6 +1892,33 @@ export function FormModal({
       body.set("สินค้า", submitValues["สินค้า"]);
       body.set("items", JSON.stringify(multiLineItems));
       body.delete("rows");
+    } else if (isDataForm && !isMultiItemMode) {
+      const detailText = (submitValues["รายละเอียดงาน"] || "").trim();
+      const catOrProd = submitValues["สินค้า"] || submitValues["ประเภท"] || "";
+      if (!submitValues["สินค้า/ทำงาน"] || submitValues["สินค้า/ทำงาน"] === catOrProd) {
+        if (catOrProd && detailText) {
+          submitValues["สินค้า/ทำงาน"] = `${catOrProd} / ${detailText}`;
+        } else {
+          submitValues["สินค้า/ทำงาน"] = catOrProd || detailText;
+        }
+      }
+      body.set("สินค้า/ทำงาน", submitValues["สินค้า/ทำงาน"]);
+      if (detailText) {
+        body.set("รายละเอียดงาน", detailText);
+      }
+      const singleItem: MultiLineItem[] = [{
+        id: "1",
+        storeGroup: submitValues["ร้านค้า"] || "",
+        category: catOrProd,
+        categoryType: submitValues["ประเภท"] || "",
+        detail: detailText,
+        vehiclePlate: submitValues["ทะเบียน"] || "",
+        toolName: submitValues["ชื่อเครื่องมือ"] || "",
+        subItem: submitValues["รายการ"] || "",
+        amount: submitValues["ยอดเงิน"] || submitValues["ค่าของ"] || submitValues["ค่าแรง"] || submitValues["น้ำมัน"] || submitValues["ซ่อมรถ"] || submitValues["เครื่องจักร"] || submitValues["เครื่องมือ"] || submitValues["อื่นๆ"] || "",
+      }];
+      submitValues["items"] = JSON.stringify(singleItem);
+      body.set("items", JSON.stringify(singleItem));
     }
 
     let hasFiles = false;
@@ -2176,6 +2217,7 @@ export function FormModal({
 
                           const sectionFields = visibleFields.filter(f => {
                             if (f.name === "ประเภท") return false;
+                            if (f.name === "รายละเอียดงาน") return false;
                             if (isMultiItemMode && isStoreVendor && (
                               f.name === "สินค้า" ||
                               f.name === "รายละเอียดงาน" ||
@@ -2348,6 +2390,29 @@ export function FormModal({
                                         <span className="whitespace-nowrap">หลายรายการ</span>
                                       </button>
                                     </div>
+                                  </div>
+                                ) : null}
+
+                                {section.id === "vendor" && !isMultiItemMode ? (
+                                  <div className="col-span-1 sm:col-span-3 space-y-1 min-w-0 w-full">
+                                    <label className="text-xs font-medium text-slate-700 block">
+                                      {values["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา" ? "รายละเอียดงาน / งวดงาน (ถ้ามี)" : "รายละเอียดเพิ่มเติม (ถ้ามี)"}
+                                    </label>
+                                    <input
+                                      type="text"
+                                      name="รายละเอียดงาน"
+                                      value={values["รายละเอียดงาน"] || ""}
+                                      onChange={e => {
+                                        const val = e.target.value;
+                                        setValues(prev => {
+                                          const next = { ...prev, "รายละเอียดงาน": val };
+                                          applyLocalFormulas(next, resolvedTableName);
+                                          return next;
+                                        });
+                                      }}
+                                      placeholder={values["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา" ? "รายละเอียดงาน / งวดงาน (เช่น งวดที่ 1 เทเสาเข็ม)..." : "รายละเอียดเพิ่มเติม (ถ้ามี)..."}
+                                      className="w-full h-10 sm:h-9.5 bg-slate-50 border border-slate-300 text-xs sm:text-sm text-slate-800 px-3 rounded-lg focus:outline-none focus:bg-white focus:border-slate-800 transition"
+                                    />
                                   </div>
                                 ) : null}
 

@@ -1326,7 +1326,7 @@ export function isFieldVisible(field: FieldSchema, values: Record<string, string
 
 export function pruneHiddenConditionalValues(values: Record<string, string>, form: FormPayload) {
   form.schema.forEach(field => {
-    if (field.type === "Hidden" || field.name === "ประเภท" || field.name.startsWith("งบไม่เกิน") || field.name === "คุมงบประเภทงาน") return;
+    if (field.type === "Hidden" || field.name === "ประเภท" || field.name === "รายละเอียดงาน" || field.name.startsWith("งบไม่เกิน") || field.name === "คุมงบประเภทงาน") return;
     if (field.name === "วันจ่าย" && hasValue(values["วันจ่าย"])) return;
     if (field.name === "เครดิต" && hasValue(values["เครดิต"])) return;
     if (isFieldVisible(field, values, form)) return;
@@ -1438,6 +1438,10 @@ export function getFieldLabel(field: FieldSchema, values?: Record<string, string
   if (field.name === "วันออก 3%") return "วันออก";
   if (field.name === "id_Contractor" || field.name === "id_contractor") return "ผู้รับเหมา";
   if (field.name === "id_Conwork" || field.name === "id_conwork") return "รหัสสัญญา";
+  if (field.name === "รายละเอียดงาน") {
+    const vType = values?.["ร้านค้า/ผู้รับเหมา"];
+    return vType === "ผู้รับเหมา" ? "รายละเอียดงาน / งวดงาน (ถ้ามี)" : "รายละเอียดเพิ่มเติม (ถ้ามี)";
+  }
   if (field.name === "color" || field.name === "COLOR") return "color (ประเภทงาน)";
   return field.name;
 }
@@ -1459,7 +1463,7 @@ export function getFieldClassName(field: FieldSchema, values?: Record<string, st
     return "col-span-1";
   }
   if (field.name === "รายละเอียดงาน") {
-    return "hidden";
+    return "col-span-full";
   }
   if (
     field.type === "LongText" ||

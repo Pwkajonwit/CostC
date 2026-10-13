@@ -40,6 +40,12 @@ type LineConfig = {
   LINE_GROUP_ID_PLAN?: string;
   LINE_GROUP_ID_FINANCE?: string;
   LINE_GROUP_ID_PAID?: string;
+  LINE_NOTIFY_TASK?: boolean;
+  LINE_NOTIFY_SUMMARY?: boolean;
+  LINE_NOTIFY_PW?: boolean;
+  LINE_NOTIFY_PLAN?: boolean;
+  LINE_NOTIFY_FINANCE?: boolean;
+  LINE_NOTIFY_PAID?: boolean;
   CRON_TIME_MORNING?: string;
   CRON_TIME_EVENING?: string;
 };
@@ -1013,74 +1019,231 @@ export function LineSystemDashboardClient() {
               </div>
 
               {/* Group IDs Section */}
-              <div className="sm:col-span-2 border-b border-slate-100 pb-1 mt-1">
-                <span className="text-xs text-slate-500 uppercase">👥 Group IDs กลุ่ม LINE สำหรับยิงการ์ด Flex</span>
+              <div className="sm:col-span-2 border-b border-slate-100 pb-1 mt-1 flex items-center justify-between">
+                <span className="text-xs text-slate-500 uppercase font-medium">👥 Group IDs กลุ่ม LINE สำหรับยิงการ์ด Flex</span>
+                <span className="text-[11px] text-slate-400">เว้นว่างหรือไม่เปิดสวิตช์ = ไม่ส่งแจ้งเตือน</span>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-slate-700 block text-xs">กลุ่มงานประจำวัน (TASK Group ID)</label>
+              {/* 1. TASK Group ID */}
+              <div className="p-2.5 rounded-lg border border-slate-200 bg-slate-50/50 space-y-1.5 transition">
+                <div className="flex items-center justify-between">
+                  <label className="text-slate-800 font-medium block text-xs">กลุ่มงานประจำวัน (TASK Group ID)</label>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <span className={`text-[11px] font-medium transition-colors ${formConfig.LINE_NOTIFY_TASK !== false ? "text-emerald-700" : "text-slate-400"}`}>
+                      {formConfig.LINE_NOTIFY_TASK !== false ? "เปิดแจ้งเตือน" : "ปิดแจ้งเตือน"}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={formConfig.LINE_NOTIFY_TASK !== false}
+                      onChange={(e) => setFormConfig({ ...formConfig, LINE_NOTIFY_TASK: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-8 h-4.5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-emerald-600 relative transition-colors" />
+                  </label>
+                </div>
                 <input
                   type="text"
                   value={formConfig.LINE_GROUP_ID_TASK || ""}
                   onChange={(e) => setFormConfig({ ...formConfig, LINE_GROUP_ID_TASK: e.target.value })}
-                  placeholder="เช่น C1234567890..."
-                  className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 font-mono text-slate-900 text-xs focus:outline-none focus:border-slate-500"
+                  placeholder="เช่น C1234567890... (เว้นว่าง = ไม่ส่ง)"
+                  className={`w-full bg-white border rounded px-2.5 py-1.5 font-mono text-xs focus:outline-none transition ${
+                    formConfig.LINE_NOTIFY_TASK === false
+                      ? "border-slate-200 text-slate-400 bg-slate-100/60"
+                      : "border-slate-300 text-slate-900 focus:border-emerald-600"
+                  }`}
                 />
+                <div className="text-[10px] text-slate-400">
+                  {formConfig.LINE_NOTIFY_TASK === false
+                    ? "🚫 ปิดการแจ้งเตือนไว้ (ไม่ส่งข้อความ)"
+                    : formConfig.LINE_GROUP_ID_TASK?.trim()
+                    ? "✅ กำหนดกลุ่มแล้ว พร้อมส่งแจ้งเตือน"
+                    : "⚪ ยังไม่ระบุกลุ่มไลน์ (ไม่ส่งข้อความ)"}
+                </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-slate-700 block text-xs">กลุ่มสรุปผลงาน & การเงิน (SUMMARY Group ID)</label>
+              {/* 2. SUMMARY Group ID */}
+              <div className="p-2.5 rounded-lg border border-slate-200 bg-slate-50/50 space-y-1.5 transition">
+                <div className="flex items-center justify-between">
+                  <label className="text-slate-800 font-medium block text-xs">กลุ่มสรุปผลงาน & การเงิน (SUMMARY Group ID)</label>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <span className={`text-[11px] font-medium transition-colors ${formConfig.LINE_NOTIFY_SUMMARY !== false ? "text-emerald-700" : "text-slate-400"}`}>
+                      {formConfig.LINE_NOTIFY_SUMMARY !== false ? "เปิดแจ้งเตือน" : "ปิดแจ้งเตือน"}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={formConfig.LINE_NOTIFY_SUMMARY !== false}
+                      onChange={(e) => setFormConfig({ ...formConfig, LINE_NOTIFY_SUMMARY: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-8 h-4.5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-emerald-600 relative transition-colors" />
+                  </label>
+                </div>
                 <input
                   type="text"
                   value={formConfig.LINE_GROUP_ID_SUMMARY || ""}
                   onChange={(e) => setFormConfig({ ...formConfig, LINE_GROUP_ID_SUMMARY: e.target.value })}
-                  placeholder="เช่น C1234567890..."
-                  className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 font-mono text-slate-900 text-xs focus:outline-none focus:border-slate-500"
+                  placeholder="เช่น C1234567890... (เว้นว่าง = ไม่ส่ง)"
+                  className={`w-full bg-white border rounded px-2.5 py-1.5 font-mono text-xs focus:outline-none transition ${
+                    formConfig.LINE_NOTIFY_SUMMARY === false
+                      ? "border-slate-200 text-slate-400 bg-slate-100/60"
+                      : "border-slate-300 text-slate-900 focus:border-emerald-600"
+                  }`}
                 />
+                <div className="text-[10px] text-slate-400">
+                  {formConfig.LINE_NOTIFY_SUMMARY === false
+                    ? "🚫 ปิดการแจ้งเตือนไว้ (ไม่ส่งข้อความ)"
+                    : formConfig.LINE_GROUP_ID_SUMMARY?.trim()
+                    ? "✅ กำหนดกลุ่มแล้ว พร้อมส่งแจ้งเตือน"
+                    : "⚪ ยังไม่ระบุกลุ่มไลน์ (ไม่ส่งข้อความ)"}
+                </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-slate-700 block text-xs">กลุ่มงานจ้าง PW (PW Group ID)</label>
+              {/* 3. PW Group ID */}
+              <div className="p-2.5 rounded-lg border border-slate-200 bg-slate-50/50 space-y-1.5 transition">
+                <div className="flex items-center justify-between">
+                  <label className="text-slate-800 font-medium block text-xs">กลุ่มงานจ้าง PW (PW Group ID)</label>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <span className={`text-[11px] font-medium transition-colors ${formConfig.LINE_NOTIFY_PW !== false ? "text-emerald-700" : "text-slate-400"}`}>
+                      {formConfig.LINE_NOTIFY_PW !== false ? "เปิดแจ้งเตือน" : "ปิดแจ้งเตือน"}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={formConfig.LINE_NOTIFY_PW !== false}
+                      onChange={(e) => setFormConfig({ ...formConfig, LINE_NOTIFY_PW: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-8 h-4.5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-emerald-600 relative transition-colors" />
+                  </label>
+                </div>
                 <input
                   type="text"
                   value={formConfig.LINE_GROUP_ID_PW || ""}
                   onChange={(e) => setFormConfig({ ...formConfig, LINE_GROUP_ID_PW: e.target.value })}
-                  placeholder="เช่น C1234567890..."
-                  className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 font-mono text-slate-900 text-xs focus:outline-none focus:border-slate-500"
+                  placeholder="เช่น C1234567890... (เว้นว่าง = ไม่ส่ง)"
+                  className={`w-full bg-white border rounded px-2.5 py-1.5 font-mono text-xs focus:outline-none transition ${
+                    formConfig.LINE_NOTIFY_PW === false
+                      ? "border-slate-200 text-slate-400 bg-slate-100/60"
+                      : "border-slate-300 text-slate-900 focus:border-emerald-600"
+                  }`}
                 />
+                <div className="text-[10px] text-slate-400">
+                  {formConfig.LINE_NOTIFY_PW === false
+                    ? "🚫 ปิดการแจ้งเตือนไว้ (ไม่ส่งข้อความ)"
+                    : formConfig.LINE_GROUP_ID_PW?.trim()
+                    ? "✅ กำหนดกลุ่มแล้ว พร้อมส่งแจ้งเตือน"
+                    : "⚪ ยังไม่ระบุกลุ่มไลน์ (ไม่ส่งข้อความ)"}
+                </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-slate-700 block text-xs">กลุ่มแผนงาน (PLAN Group ID)</label>
+              {/* 4. PLAN Group ID */}
+              <div className="p-2.5 rounded-lg border border-slate-200 bg-slate-50/50 space-y-1.5 transition">
+                <div className="flex items-center justify-between">
+                  <label className="text-slate-800 font-medium block text-xs">กลุ่มแผนงาน (PLAN Group ID)</label>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <span className={`text-[11px] font-medium transition-colors ${formConfig.LINE_NOTIFY_PLAN !== false ? "text-emerald-700" : "text-slate-400"}`}>
+                      {formConfig.LINE_NOTIFY_PLAN !== false ? "เปิดแจ้งเตือน" : "ปิดแจ้งเตือน"}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={formConfig.LINE_NOTIFY_PLAN !== false}
+                      onChange={(e) => setFormConfig({ ...formConfig, LINE_NOTIFY_PLAN: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-8 h-4.5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-emerald-600 relative transition-colors" />
+                  </label>
+                </div>
                 <input
                   type="text"
                   value={formConfig.LINE_GROUP_ID_PLAN || ""}
                   onChange={(e) => setFormConfig({ ...formConfig, LINE_GROUP_ID_PLAN: e.target.value })}
-                  placeholder="เช่น C1234567890..."
-                  className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 font-mono text-slate-900 text-xs focus:outline-none focus:border-slate-500"
+                  placeholder="เช่น C1234567890... (เว้นว่าง = ไม่ส่ง)"
+                  className={`w-full bg-white border rounded px-2.5 py-1.5 font-mono text-xs focus:outline-none transition ${
+                    formConfig.LINE_NOTIFY_PLAN === false
+                      ? "border-slate-200 text-slate-400 bg-slate-100/60"
+                      : "border-slate-300 text-slate-900 focus:border-emerald-600"
+                  }`}
                 />
+                <div className="text-[10px] text-slate-400">
+                  {formConfig.LINE_NOTIFY_PLAN === false
+                    ? "🚫 ปิดการแจ้งเตือนไว้ (ไม่ส่งข้อความ)"
+                    : formConfig.LINE_GROUP_ID_PLAN?.trim()
+                    ? "✅ กำหนดกลุ่มแล้ว พร้อมส่งแจ้งเตือน"
+                    : "⚪ ยังไม่ระบุกลุ่มไลน์ (ไม่ส่งข้อความ)"}
+                </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-slate-700 block text-xs">กลุ่มการเงิน & ตั้งเบิก (FINANCE Group ID)</label>
+              {/* 5. FINANCE Group ID */}
+              <div className="p-2.5 rounded-lg border border-slate-200 bg-slate-50/50 space-y-1.5 transition">
+                <div className="flex items-center justify-between">
+                  <label className="text-slate-800 font-medium block text-xs">กลุ่มการเงิน & ตั้งเบิก (FINANCE Group ID)</label>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <span className={`text-[11px] font-medium transition-colors ${formConfig.LINE_NOTIFY_FINANCE !== false ? "text-emerald-700" : "text-slate-400"}`}>
+                      {formConfig.LINE_NOTIFY_FINANCE !== false ? "เปิดแจ้งเตือน" : "ปิดแจ้งเตือน"}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={formConfig.LINE_NOTIFY_FINANCE !== false}
+                      onChange={(e) => setFormConfig({ ...formConfig, LINE_NOTIFY_FINANCE: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-8 h-4.5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-emerald-600 relative transition-colors" />
+                  </label>
+                </div>
                 <input
                   type="text"
                   value={formConfig.LINE_GROUP_ID_FINANCE || ""}
                   onChange={(e) => setFormConfig({ ...formConfig, LINE_GROUP_ID_FINANCE: e.target.value })}
-                  placeholder="เช่น C1234567890..."
-                  className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 font-mono text-slate-900 text-xs focus:outline-none focus:border-slate-500"
+                  placeholder="เช่น C1234567890... (เว้นว่าง = ไม่ส่ง)"
+                  className={`w-full bg-white border rounded px-2.5 py-1.5 font-mono text-xs focus:outline-none transition ${
+                    formConfig.LINE_NOTIFY_FINANCE === false
+                      ? "border-slate-200 text-slate-400 bg-slate-100/60"
+                      : "border-slate-300 text-slate-900 focus:border-emerald-600"
+                  }`}
                 />
+                <div className="text-[10px] text-slate-400">
+                  {formConfig.LINE_NOTIFY_FINANCE === false
+                    ? "🚫 ปิดการแจ้งเตือนไว้ (ไม่ส่งข้อความ)"
+                    : formConfig.LINE_GROUP_ID_FINANCE?.trim()
+                    ? "✅ กำหนดกลุ่มแล้ว พร้อมส่งแจ้งเตือน"
+                    : "⚪ ยังไม่ระบุกลุ่มไลน์ (ไม่ส่งข้อความ)"}
+                </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-slate-700 block text-xs">กลุ่มจ่ายเงินแล้ว (PAID Group ID)</label>
+              {/* 6. PAID Group ID */}
+              <div className="p-2.5 rounded-lg border border-slate-200 bg-slate-50/50 space-y-1.5 transition">
+                <div className="flex items-center justify-between">
+                  <label className="text-slate-800 font-medium block text-xs">กลุ่มจ่ายเงินแล้ว (PAID Group ID)</label>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <span className={`text-[11px] font-medium transition-colors ${formConfig.LINE_NOTIFY_PAID !== false ? "text-emerald-700" : "text-slate-400"}`}>
+                      {formConfig.LINE_NOTIFY_PAID !== false ? "เปิดแจ้งเตือน" : "ปิดแจ้งเตือน"}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={formConfig.LINE_NOTIFY_PAID !== false}
+                      onChange={(e) => setFormConfig({ ...formConfig, LINE_NOTIFY_PAID: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-8 h-4.5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-emerald-600 relative transition-colors" />
+                  </label>
+                </div>
                 <input
                   type="text"
                   value={formConfig.LINE_GROUP_ID_PAID || ""}
                   onChange={(e) => setFormConfig({ ...formConfig, LINE_GROUP_ID_PAID: e.target.value })}
-                  placeholder="เช่น C1234567890..."
-                  className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 font-mono text-slate-900 text-xs focus:outline-none focus:border-slate-500"
+                  placeholder="เช่น C1234567890... (เว้นว่าง = ไม่ส่ง)"
+                  className={`w-full bg-white border rounded px-2.5 py-1.5 font-mono text-xs focus:outline-none transition ${
+                    formConfig.LINE_NOTIFY_PAID === false
+                      ? "border-slate-200 text-slate-400 bg-slate-100/60"
+                      : "border-slate-300 text-slate-900 focus:border-emerald-600"
+                  }`}
                 />
+                <div className="text-[10px] text-slate-400">
+                  {formConfig.LINE_NOTIFY_PAID === false
+                    ? "🚫 ปิดการแจ้งเตือนไว้ (ไม่ส่งข้อความ)"
+                    : formConfig.LINE_GROUP_ID_PAID?.trim()
+                    ? "✅ กำหนดกลุ่มแล้ว พร้อมส่งแจ้งเตือน"
+                    : "⚪ ยังไม่ระบุกลุ่มไลน์ (ไม่ส่งข้อความ)"}
+                </div>
               </div>
             </div>
 
