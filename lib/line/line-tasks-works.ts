@@ -123,7 +123,7 @@ export function createWorkAssignmentFlex(work: {
   const rawId = work.id ? String(work.id) : "-";
   const cleanId = rawId.replace(/\D/g, "") || rawId;
 
-  // Format team label strictly from work.team (PW, PW1, PW2, PW3, PW4, PW5)
+  // Format team label strictly from work.team (PW, PW1, PW2, PW3, PW4)
   const teamLabel = work.team
     ? (work.team.toUpperCase().startsWith("PW") ? work.team.toUpperCase() : `PW${work.team}`)
     : "PW";
@@ -310,7 +310,7 @@ export function createWorkAssignmentFlex(work: {
     });
   }
 
-  const idText = cleanId && cleanId !== "-" ? `ลำดับ: ${cleanId}` : `งาน ${rawId}`;
+  const idText = cleanId && cleanId !== "-" ? `PW-${cleanId}` : `งาน ${rawId}`;
 
   const bodyContents: any[] = [
     // 1. Top Badges Row (Team, Activity/Status, Update badge on left, ID on right)
@@ -1432,8 +1432,29 @@ export function createWorkSummaryFlex(
 
   const bodyContents: any[] = [];
 
-  const rawGroupUrl = options?.groupUrl || process.env.GROUP_PW || "line://ti/g/-vtaBD82Mz";
-  const groupPwUrl = rawGroupUrl.replace(/^https?:\/\/line\.me\/(?:R\/)?/i, "line://");
+  // Resolve team-specific LINE group link from process.env:
+  // PW -> GROUP_PW
+  // PW1 / PM1 -> GROUP_PW1
+  // PW2 / PM2 -> GROUP_PW2
+  // PW3 / PM3 -> GROUP_PW3
+  // PW4 / PM4 -> GROUP_PW4
+  const resolveGroupUrl = (team?: string, explicitUrl?: string): string => {
+    if (explicitUrl) return explicitUrl;
+    const t = String(team || "").trim().toUpperCase();
+    const numMatch = t.match(/[1-4]/);
+    const num = numMatch ? numMatch[0] : "";
+    if (num === "1") return process.env.GROUP_PW1 || "";
+    if (num === "2") return process.env.GROUP_PW2 || "";
+    if (num === "3") return process.env.GROUP_PW3 || "";
+    if (num === "4") return process.env.GROUP_PW4 || "";
+    return process.env.GROUP_PW || "";
+  };
+
+  const rawGroupUrl = resolveGroupUrl(options?.teamName, options?.groupUrl);
+  let groupPwUrl = rawGroupUrl ? rawGroupUrl.trim() : "";
+  if (groupPwUrl.startsWith("http://line.me/") || groupPwUrl.startsWith("https://line.me/")) {
+    groupPwUrl = groupPwUrl.replace(/^https?:\/\/line\.me\/(?:R\/)?/i, "line://");
+  }
 
   // 1. Top Card Header (Title on left, small buttons in top-right corner)
   bodyContents.push({
@@ -1995,17 +2016,18 @@ export function createWorkStatusPickerFlex(workId: number | string): Record<stri
 }
 
 export function getAppBaseUrl(): string {
-  const url = process.env.NEXT_PUBLIC_APP_URL || "https://cost-c.vercel.app/";
-  return url.replace(/\/$/, "");
+  const url = process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+  return url ? url.replace(/\/$/, "") : "";
 }
 
 export function getLiffUrl(path: string): string {
-  const liffId = process.env.NEXT_PUBLIC_LINE_LIFF_ID || process.env.LINE_LIFF_ID || "2011207773-ulIiOhXd";
+  const liffId = process.env.NEXT_PUBLIC_LINE_LIFF_ID || process.env.LINE_LIFF_ID || "";
   const cleanPath = path.startsWith("/") ? path : `/${path}`;
   if (liffId) {
     return `https://liff.line.me/${liffId}${cleanPath}`;
   }
-  return `${getAppBaseUrl()}${cleanPath}`;
+  const baseUrl = getAppBaseUrl();
+  return baseUrl ? `${baseUrl}${cleanPath}` : cleanPath;
 }
 
 /**
@@ -3413,58 +3435,6 @@ export async function handleTaskCommands(
     return true;
   }
 
-  // 6. Multi-line Task Edit / Creation Parser ("ลำดับ:", "รายการ:", "ดู/ทำ:")
-  if (rawText.includes("รายการ:") && (rawText.includes("ดู/ทำ:") || rawText.includes("ส่งงาน:") || rawText.includes("ลำดับ:"))) {
-    const getVal = (key: string) => {
-      const regex = new RegExp(`${key}[:\\s]*(.*?)(?=\\n[a-zA-Zก-๙]+:|$)`, "s");
-      const match = rawText.match(regex);
-      return match ? match[1].trim() : "";
-    };
-
-    const rawTaskId = getVal("ลำดับ");
-    const numTaskId = rawTaskId ? parseInt(rawTaskId.replace(/\D/g, ""), 10) : 0;
-    const listName = getVal("รายการ");
-    const doWork = getVal("ดู/ทำ") || getVal("ทำ");
-    const sendWork = getVal("ส่งงาน") || getVal("ส่ง");
-    const typeNumStr = getVal("ประเภท");
-    const typeNum = typeNumStr === "2" ? 2 : typeNumStr === "3" ? 3 : 1;
-    const receiver = getVal("ผู้รับ") || getVal("ผู้รับมอบหมาย") || "ทีมงาน";
-
-    const typeLabel = typeNum === 2 ? "แผนงาน" : typeNum === 3 ? "PJSA" : "เอกสาร";
-
-    if (numTaskId > 0) {
-      await supabaseAdmin
-        .from("tasks")
-        .update({
-          title: listName,
-          assignee_name: receiver,
-          task_type: typeNum,
-          do_date: doWork && doWork !== "-" ? normalizeDateToIso(doWork) : null,
-          send_date: sendWork && sendWork !== "-" ? normalizeDateToIso(sendWork) : null,
-        })
-        .eq("id", numTaskId);
-
-      await replyTextMessage(replyToken, `อัปเดตงานลำดับ [#${numTaskId}] เรียบร้อยแล้ว! (${typeLabel})`);
-    } else {
-      const { data: insTask } = await supabaseAdmin
-        .from("tasks")
-        .insert({
-          title: listName,
-          assignee_name: receiver,
-          task_type: typeNum,
-          status: "ดำเนินการ",
-          do_date: doWork && doWork !== "-" ? normalizeDateToIso(doWork) : getTodayDateIso(),
-          send_date: sendWork && sendWork !== "-" ? normalizeDateToIso(sendWork) : null,
-        })
-        .select()
-        .single();
-
-      const newId = insTask?.id ? `#${insTask.id}` : "ใหม่";
-      await replyTextMessage(replyToken, `สร้างงานใหม่ [${newId}] เรียบร้อยแล้ว! (${typeLabel})`);
-    }
-    return true;
-  }
-
   return false;
 }
 
@@ -3595,7 +3565,7 @@ export async function handleWorkCommands(
     return true;
   }
 
-  // 3. Query Works / PW & PM ("pwall", "pw1", "pw2", "pw3", "pw4", "pw5", "pw", "work", etc.)
+  // 3. Query Works / PW & PM ("pwall", "pw1", "pw2", "pw3", "pw4", "pw", "work", etc.)
   const cleanTrimmed = rawText.trim().toLowerCase();
   const norm = normalizedCmd.trim().toLowerCase();
 
@@ -3624,12 +3594,12 @@ export async function handleWorkCommands(
     cleanTrimmed === "งานรับเหมา";
 
   const isSpecificPwTeamQuery =
-    /^(?:pw|pm)[1-5]$/i.test(norm) ||
-    /^(?:pw|pm)[1-5]$/i.test(cleanTrimmed) ||
-    /^(?:pw|pm)[1-5]:work$/i.test(cleanTrimmed) ||
-    /^(?:pw|pm)\s*[1-5]$/i.test(cleanTrimmed) ||
-    /^งาน(?:pw|pm)[1-5]$/i.test(cleanTrimmed) ||
-    /^งาน\s*(?:pw|pm)[1-5]$/i.test(cleanTrimmed);
+    /^(?:pw|pm)[1-4]$/i.test(norm) ||
+    /^(?:pw|pm)[1-4]$/i.test(cleanTrimmed) ||
+    /^(?:pw|pm)[1-4]:work$/i.test(cleanTrimmed) ||
+    /^(?:pw|pm)\s*[1-4]$/i.test(cleanTrimmed) ||
+    /^งาน(?:pw|pm)[1-4]$/i.test(cleanTrimmed) ||
+    /^งาน\s*(?:pw|pm)[1-4]$/i.test(cleanTrimmed);
 
   const isBasePwQuery =
     /^(?:pw|pm)$/i.test(norm) ||
@@ -3645,7 +3615,7 @@ export async function handleWorkCommands(
     cleanTrimmed === "งานpw" ||
     cleanTrimmed === "งานpm";
 
-  // CASE A: PWALL -> แสดงแยกทุกทีม (PW, PW1, PW2, PW3, PW4, PW5) ไม่ปนกันใน Flex เดียว
+  // CASE A: PWALL -> แสดงแยกทุกทีม (PW, PW1, PW2, PW3, PW4) ไม่ปนกันใน Flex เดียว
   if (isPwAllQuery) {
     const { data: allActiveWorks, error: fetchErr } = await supabaseAdmin
       .from("works")
@@ -3658,8 +3628,8 @@ export async function handleWorkCommands(
     }
 
     const attachmentsMap = await getAllWorkAttachments();
-    // เพิ่มทีม "PW" เฉยๆ เข้าไปด้วย รวมเป็น 6 ทีม (PW, PW1, PW2, PW3, PW4, PW5)
-    const pwTeams = ["PW", "PW1", "PW2", "PW3", "PW4", "PW5"] as const;
+    // เพิ่มทีม "PW" เฉยๆ เข้าไปด้วย รวมเป็น 5 ทีม (PW, PW1, PW2, PW3, PW4)
+    const pwTeams = ["PW", "PW1", "PW2", "PW3", "PW4"] as const;
 
     const flexList: Array<{ altText: string; contents: Record<string, any> }> = [];
 
@@ -3668,10 +3638,10 @@ export async function handleWorkCommands(
       if (teamName === "PW") {
         teamWorks = (allActiveWorks || []).filter((w) => {
           const t = String(w.team || "").trim().toUpperCase();
-          return t === "PW" || t === "PM" || !t || (!/^(?:PW|PM)[1-5]$/i.test(t) && !/^[1-5]$/.test(t));
+          return t === "PW" || t === "PM" || !t || (!/^(?:PW|PM)[1-4]$/i.test(t) && !/^[1-4]$/.test(t));
         });
       } else {
-        const teamNum = teamName.replace(/\D/g, ""); // "1", "2", "3", "4", "5"
+        const teamNum = teamName.replace(/\D/g, ""); // "1", "2", "3", "4"
         const pmName = `PM${teamNum}`;
 
         // Filter works strictly for this team - no mixing!
@@ -3716,9 +3686,9 @@ export async function handleWorkCommands(
     return true;
   }
 
-  // CASE B: Specific PW team (PW1, PW2, PW3, PW4, PW5) -> แยกเฉพาะทีมนั้น 1 Flex ไม่ปนทีมอื่น
+  // CASE B: Specific PW team (PW1, PW2, PW3, PW4) -> แยกเฉพาะทีมนั้น 1 Flex ไม่ปนทีมอื่น
   if (isSpecificPwTeamQuery) {
-    const match = (cleanTrimmed + " " + norm).match(/(?:pw|pm)\s*([1-5])/i);
+    const match = (cleanTrimmed + " " + norm).match(/(?:pw|pm)\s*([1-4])/i);
     const num = match ? match[1] : "1";
     const teamFilter = `PW${num}`;
     const pmFilter = `PM${num}`;
@@ -3751,7 +3721,7 @@ export async function handleWorkCommands(
     return true;
   }
 
-  // CASE C: Base PW (งานทีม PW กลาง ไม่รวม PW1..PW5) -> แยกเฉพาะ 1 Flex
+  // CASE C: Base PW (งานทีม PW กลาง ไม่รวม PW1..PW4) -> แยกเฉพาะ 1 Flex
   if (isBasePwQuery) {
     const teamFilter = "PW";
 

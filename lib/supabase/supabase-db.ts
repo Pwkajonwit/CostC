@@ -5,6 +5,7 @@ import { cached, clearCache } from "@/lib/utils/cache";
 import { isVatActive, isDeductActive, parseDeductPercent, parseCreditDays } from "@/lib/project-summary";
 import { MATERIAL_100_CODES, EQUIPMENT_500_CODES, ALL_STORE_CATEGORIES, ALL_CONTRACTOR_CATEGORIES } from "@/lib/cost-codes";
 import { getAllTaskAttachments, getAllWorkAttachments, saveTaskAttachment, saveWorkAttachment } from "@/lib/tasks/task-attachments";
+import { formatTaskTypeLabel, parseTaskTypeNumber } from "@/lib/tasks/task-categories";
 
 export type SheetRow = Record<string, any>;
 
@@ -338,7 +339,7 @@ export function mapSupabaseRowToSheetRow(dbTable: string, row: Record<string, an
       res["ร้านค้า"] = row.store_id ?? dataObj["ร้านค้า"] ?? row.vendor_or_person ?? dataObj["ร้าน/บุคคล"] ?? "";
       res["ผู้รับเหมา"] = "";
       res["สินค้า"] = row.product ?? row.description ?? dataObj["สินค้า"] ?? dataObj["สินค้า/ทำงาน"] ?? "";
-      res["รายละเอียดงาน"] = "";
+      res["รายละเอียดงาน"] = row.work_details ?? row.description ?? dataObj["รายละเอียดงาน"] ?? "";
     }
     res["รายการ"] = row.sub_category ?? row.item_name ?? row["รายการ"] ?? dataObj["รายการ"] ?? "";
     res["ชื่อเครื่องมือ"] = row.tool_name ?? row["ชื่อเครื่องมือ"] ?? dataObj["ชื่อเครื่องมือ"] ?? "";
@@ -550,9 +551,11 @@ export function mapSupabaseRowToSheetRow(dbTable: string, row: Record<string, an
     res["ผู้รับมอบหมาย"] = row.assignee_name ?? row["ผู้รับมอบหมาย"] ?? row["ผู้รับผิดชอบ"] ?? "";
     res["ผู้รับผิดชอบ"] = row.assignee_name ?? row["ผู้รับผิดชอบ"] ?? row["ผู้รับมอบหมาย"] ?? "";
     res["สถานะ"] = row.status ?? row["สถานะ"] ?? "ดำเนินการ";
-    const typeNum = Number(row.task_type ?? row["ประเภท"] ?? 1);
-    res["ประเภท"] = typeNum === 2 ? "2 (แผนงาน)" : typeNum === 3 ? "3 (PJSA)" : "1 (เอกสาร)";
+    const typeNum = parseTaskTypeNumber(row.task_type ?? row["ประเภท"] ?? 1);
+    res["ประเภท"] = formatTaskTypeLabel(typeNum);
     res["task_type"] = typeNum;
+    res["โครงการ"] = row.project ?? row["โครงการ"] ?? dataObj["โครงการ"] ?? dataObj["project"] ?? "";
+    res["หมายเหตุ"] = row.note ?? row["หมายเหตุ"] ?? dataObj["หมายเหตุ"] ?? dataObj["note"] ?? "";
     const taskImg = row.image_url ?? row.image ?? row["เอกสาร"] ?? row["รูปภาพ"] ?? row["รูปถ่าย"] ?? row["ไฟล์แนบ"] ?? dataObj["เอกสาร"] ?? dataObj["รูปภาพ"] ?? dataObj["image_url"] ?? dataObj["attachments"] ?? "";
     res["รูปภาพ"] = taskImg;
     res["เอกสาร"] = taskImg;
@@ -1026,9 +1029,7 @@ export function mapSheetRowToSupabaseRow(tableName: string, row: Record<string, 
       dbRow.assignee_name = String(row["ผู้รับมอบหมาย"] ?? row["ผู้รับผิดชอบ"] ?? row["assignee_name"] ?? row["ชื่อเล่น"] ?? "").trim();
     }
     if (row["ประเภท"] !== undefined || row["task_type"] !== undefined) {
-      const rawType = String(row["ประเภท"] ?? row["task_type"] ?? "1").trim();
-      const typeNum = parseInt(rawType.replace(/\D/g, "") || "1", 10);
-      dbRow.task_type = (typeNum === 2 || typeNum === 3) ? typeNum : 1;
+      dbRow.task_type = parseTaskTypeNumber(row["ประเภท"] ?? row["task_type"]);
     }
     if (row["สถานะ"] !== undefined || row["status"] !== undefined) {
       dbRow.status = String(row["สถานะ"] ?? row["status"] ?? "ดำเนินการ").trim();
@@ -1257,6 +1258,89 @@ export async function deleteCustomerContact(customerId: string, contactId: strin
   }
 }
 
+export interface CustomerLocation {
+  id: string;
+  name: string;
+  address?: string;
+  note?: string;
+  is_primary?: boolean;
+  created_at?: string;
+}
+
+export async function getCustomerLocationsMap(): Promise<Record<string, CustomerLocation[]>> {
+  if (!isSupabaseConfigured()) return {};
+  return cached("sys_opt:customer_locations", 60_000, async () => {
+    try {
+      const { data } = await supabaseAdmin.from("system_options").select("*").eq("id", "customer_locations").maybeSingle();
+      return (data?.data && typeof data.data === "object") ? data.data : {};
+    } catch (e) {
+      return {};
+    }
+  });
+}
+
+export async function saveCustomerLocation(customerId: string, location: CustomerLocation) {
+  if (!isSupabaseConfigured() || !customerId || !location.name) return [];
+  try {
+    const { data } = await supabaseAdmin.from("system_options").select("*").eq("id", "customer_locations").maybeSingle();
+    const existingMap = (data?.data && typeof data.data === "object") ? { ...data.data } : {};
+    const cusKey = String(customerId).trim();
+    const list: CustomerLocation[] = Array.isArray(existingMap[cusKey]) ? [...existingMap[cusKey]] : [];
+
+    // If new location is set as primary, un-primary others
+    if (location.is_primary) {
+      list.forEach((l) => { l.is_primary = false; });
+    }
+
+    const existingIndex = list.findIndex(l => l.id === location.id);
+    if (existingIndex >= 0) {
+      list[existingIndex] = { ...list[existingIndex], ...location };
+    } else {
+      list.push({
+        ...location,
+        id: location.id || `loc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        created_at: location.created_at || new Date().toISOString()
+      });
+    }
+
+    existingMap[cusKey] = list;
+    await supabaseAdmin.from("system_options").upsert({
+      id: "customer_locations",
+      data: existingMap,
+      updated_at: new Date().toISOString()
+    });
+    clearCache("sys_opt:customer_locations");
+    clearCache("sys_opt:all");
+    return list;
+  } catch (e) {
+    console.warn("Failed to persist customer location in system_options:", e);
+    throw e;
+  }
+}
+
+export async function deleteCustomerLocation(customerId: string, locationId: string) {
+  if (!isSupabaseConfigured() || !customerId || !locationId) return [];
+  try {
+    const { data } = await supabaseAdmin.from("system_options").select("*").eq("id", "customer_locations").maybeSingle();
+    const existingMap = (data?.data && typeof data.data === "object") ? { ...data.data } : {};
+    const cusKey = String(customerId).trim();
+    if (Array.isArray(existingMap[cusKey])) {
+      existingMap[cusKey] = existingMap[cusKey].filter((l: any) => l.id !== locationId);
+    }
+    await supabaseAdmin.from("system_options").upsert({
+      id: "customer_locations",
+      data: existingMap,
+      updated_at: new Date().toISOString()
+    });
+    clearCache("sys_opt:customer_locations");
+    clearCache("sys_opt:all");
+    return existingMap[cusKey] || [];
+  } catch (e) {
+    console.warn("Failed to delete customer location in system_options:", e);
+    throw e;
+  }
+}
+
 export const DEFAULT_CUSTOMER_SHORT_NAMES: Record<string, string> = {
   "ON101": "CPF",
   "ON102": "อินเตอร์เพ็ท",
@@ -1434,6 +1518,66 @@ export async function getNextBillSequence(customStart?: number): Promise<number>
     return candidate;
   } catch (e) {
     console.warn("Error calculating next bill sequence:", e);
+    return startSeq || 1;
+  }
+}
+
+export async function getNextTaskSequence(customStart?: number): Promise<number> {
+  if (!isSupabaseConfigured()) return 1;
+
+  let startSeq = customStart;
+  if (startSeq === undefined || startSeq <= 0) {
+    try {
+      const options = await getSystemOptionsFromSupabase();
+      startSeq = Number((options as any)?.task_start_sequence || (options as any)?.["ลำดับงานเริ่มต้น"] || 1);
+    } catch {
+      startSeq = 1;
+    }
+  }
+  if (!Number.isFinite(startSeq) || startSeq < 1) startSeq = 1;
+
+  try {
+    const { data: maxRow } = await supabaseAdmin
+      .from("tasks")
+      .select("id")
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const currentMax = maxRow?.id ? Number(maxRow.id) : 0;
+    return Math.max(currentMax, startSeq - 1) + 1;
+  } catch (err) {
+    console.warn("Error calculating next task sequence:", err);
+    return startSeq || 1;
+  }
+}
+
+export async function getNextWorkSequence(customStart?: number): Promise<number> {
+  if (!isSupabaseConfigured()) return 1;
+
+  let startSeq = customStart;
+  if (startSeq === undefined || startSeq <= 0) {
+    try {
+      const options = await getSystemOptionsFromSupabase();
+      startSeq = Number((options as any)?.work_start_sequence || (options as any)?.["ลำดับงานรับเหมาเริ่มต้น"] || 1);
+    } catch {
+      startSeq = 1;
+    }
+  }
+  if (!Number.isFinite(startSeq) || startSeq < 1) startSeq = 1;
+
+  try {
+    const { data: maxRow } = await supabaseAdmin
+      .from("works")
+      .select("id")
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const currentMax = maxRow?.id ? Number(maxRow.id) : 0;
+    return Math.max(currentMax, startSeq - 1) + 1;
+  } catch (err) {
+    console.warn("Error calculating next work sequence:", err);
     return startSeq || 1;
   }
 }
@@ -1637,10 +1781,17 @@ export async function updateRowInSupabase(tableName: string, keyColumn: string, 
     if (dbTable === "tasks" || tableName === "tasks" || tableName === "1. จัดการงาน (Tasks)" || tableName === "11. จัดการงาน (Tasks)") {
       const targetTaskId = String(patch["ลำดับ"] ?? patch.id ?? primaryVal ?? keyValue);
       const imgVal = patch["เอกสาร"] ?? patch["รูปภาพ"] ?? patch["image_url"] ?? patch["ไฟล์แนบ"];
-      if (imgVal !== undefined && targetTaskId) {
+      const projectVal = patch["โครงการ"] ?? patch["project"];
+      const noteVal = patch["หมายเหตุ"] ?? patch["note"];
+      if ((imgVal !== undefined || projectVal !== undefined || noteVal !== undefined) && targetTaskId) {
         const rawStr = String(imgVal || "").trim();
-        const imgs = rawStr ? rawStr.split(/\s*,\s*|\s*;\s*|\n+/).filter(Boolean) : [];
-        sideTasks.push(saveTaskAttachment({ taskId: targetTaskId, images: imgs }));
+        const imgs = rawStr ? rawStr.split(/\s*,\s*|\s*;\s*|\n+/).filter(Boolean) : (imgVal !== undefined ? [] : undefined);
+        sideTasks.push(saveTaskAttachment({
+          taskId: targetTaskId,
+          images: imgs as any,
+          project: projectVal !== undefined ? String(projectVal || "").trim() : undefined,
+          note: noteVal !== undefined ? String(noteVal || "").trim() : undefined
+        }));
       }
     }
 
@@ -2737,10 +2888,17 @@ export async function insertRowToSupabase(tableName: string, rowData: Record<str
   if (dbTable === "tasks" || tableName === "tasks" || tableName === "1. จัดการงาน (Tasks)" || tableName === "11. จัดการงาน (Tasks)") {
     const targetTaskId = String(rowData["ลำดับ"] ?? rowData.id ?? dbRow.id);
     const imgVal = rowData["เอกสาร"] ?? rowData["รูปภาพ"] ?? rowData["image_url"] ?? rowData["ไฟล์แนบ"];
-    if (imgVal && targetTaskId) {
+    const projectVal = rowData["โครงการ"] ?? rowData["project"];
+    const noteVal = rowData["หมายเหตุ"] ?? rowData["note"];
+    if (targetTaskId && (imgVal || projectVal || noteVal)) {
       const rawStr = String(imgVal || "").trim();
-      const imgs = rawStr.split(/\s*,\s*|\s*;\s*|\n+/).filter(Boolean);
-      sideTasks.push(saveTaskAttachment({ taskId: targetTaskId, images: imgs }));
+      const imgs = rawStr ? rawStr.split(/\s*,\s*|\s*;\s*|\n+/).filter(Boolean) : [];
+      sideTasks.push(saveTaskAttachment({
+        taskId: targetTaskId,
+        images: imgs,
+        project: projectVal ? String(projectVal).trim() : undefined,
+        note: noteVal ? String(noteVal).trim() : undefined
+      }));
     }
   }
 

@@ -13,12 +13,14 @@ import { money, toNumber } from "@/lib/utils/numbers";
 import { getHeaders, getRows } from "@/lib/db";
 import { getViewById, getViewColumns } from "@/lib/views";
 import { CategoryTableView } from "@/components/views/CategoryTableView";
-import { getSystemOptionsFromSupabase, getCustomerContactsMap, getCustomerShortNamesMap, resolveCustomerShortName } from "@/lib/supabase/supabase-db";
+import { getSystemOptionsFromSupabase, getCustomerContactsMap, getCustomerLocationsMap, getCustomerShortNamesMap, resolveCustomerShortName } from "@/lib/supabase/supabase-db";
 import { CustomerContactsManager } from "@/components/customers/CustomerContactsManager";
+import { CustomerLocationsManager } from "@/components/customers/CustomerLocationsManager";
 import { hydrateProjectRowsForList } from "@/lib/project-summary";
 import { DetailEditTrigger } from "@/components/forms/DetailEditTrigger";
 import { getFormPayload } from "@/lib/form";
 import { formatDateDisplay } from "@/lib/utils/dates";
+import { getAllTaskAttachments, getTaskAttachment } from "@/lib/tasks/task-attachments";
 import type { SheetRow } from "@/lib/types";
 
 export async function renderViewForId(id: string, query?: Record<string, string | string[] | undefined>) {
@@ -87,11 +89,33 @@ export async function renderRowDetailPage(id: string, rowKey: string) {
   const initialForm = isSchemaForm ? await getFormPayload(view.table).catch(() => null) : null;
 
   let customerContacts: any[] = [];
+  let customerLocations: any[] = [];
   if (id === "customers") {
-    const contactsMap = await getCustomerContactsMap();
-    const shortNamesMap = await getCustomerShortNamesMap();
+    const [contactsMap, locationsMap, shortNamesMap] = await Promise.all([
+      getCustomerContactsMap(),
+      getCustomerLocationsMap(),
+      getCustomerShortNamesMap()
+    ]);
     customerContacts = contactsMap[primaryCode] || contactsMap[decodedKey] || contactsMap[String(row.id || "")] || [];
+    customerLocations = locationsMap[primaryCode] || locationsMap[decodedKey] || locationsMap[String(row.id || "")] || [];
     row["ชื่อย่อ"] = row["ชื่อย่อ"] || shortNamesMap[primaryCode] || shortNamesMap[decodedKey] || shortNamesMap[String(row["ชื่อลูกค้า"] || "")] || resolveCustomerShortName(String(row["ชื่อลูกค้า"] || ""), shortNamesMap) || "-";
+  }
+
+  if (id === "tasks") {
+    const taskAttach = await getTaskAttachment(primaryCode || decodedKey).catch(() => null);
+    if (taskAttach) {
+      if (taskAttach.project && (!row["โครงการ"] || row["โครงการ"] === "-")) {
+        row["โครงการ"] = taskAttach.project;
+      }
+      if (taskAttach.note && (!row["หมายเหตุ"] || row["หมายเหตุ"] === "-")) {
+        row["หมายเหตุ"] = taskAttach.note;
+      }
+      if (taskAttach.images && taskAttach.images.length > 0 && (!row["เอกสาร"] || row["เอกสาร"] === "-")) {
+        const imgs = taskAttach.images.join(", ");
+        row["เอกสาร"] = imgs;
+        row["รูปภาพ"] = imgs;
+      }
+    }
   }
 
   const isStoreDetail = id === "stores";
@@ -234,14 +258,21 @@ export async function renderRowDetailPage(id: string, rowKey: string) {
           </div>
         </article>
 
-        {/* CUSTOMER CONTACTS SECTION */}
+        {/* CUSTOMER CONTACTS & LOCATIONS SECTION */}
         {id === "customers" && (
-          <CustomerContactsManager
-            customerId={primaryCode || decodedKey}
-            customerName={String(row["ชื่อลูกค้า"] || title)}
-            initialShortName={String(row["ชื่อย่อ"] && row["ชื่อย่อ"] !== "-" ? row["ชื่อย่อ"] : "")}
-            initialContacts={customerContacts}
-          />
+          <div className="space-y-4">
+            <CustomerContactsManager
+              customerId={primaryCode || decodedKey}
+              customerName={String(row["ชื่อลูกค้า"] || title)}
+              initialShortName={String(row["ชื่อย่อ"] && row["ชื่อย่อ"] !== "-" ? row["ชื่อย่อ"] : "")}
+              initialContacts={customerContacts}
+            />
+            <CustomerLocationsManager
+              customerId={primaryCode || decodedKey}
+              customerName={String(row["ชื่อลูกค้า"] || title)}
+              initialLocations={customerLocations}
+            />
+          </div>
         )}
 
         {/* RELATED TRANSACTION SECTIONS */}
@@ -469,14 +500,15 @@ async function renderView(
     const page = parsePositiveInt(firstSearchParam(query?.page), 1);
     const pageSize = parsePositiveInt(firstSearchParam(query?.pageSize), 80);
     const sort = parseSort(firstSearchParam(query?.sort));
-    const [rawRows, projectDataRows, companyRows, bankRows, projectRows, contractorRows, customerRows] = await Promise.all([
+    const [rawRows, projectDataRows, companyRows, bankRows, projectRows, contractorRows, customerRows, taskAttachments] = await Promise.all([
       safeRows(view.table),
       (view.id === "project-all" || view.id === "contract-open" || view.id === "contractors") ? safeRows(TABLES.DATA) : Promise.resolve([]),
       view.id === "project-all" ? safeRows(TABLES.COMPANY) : Promise.resolve([]),
       (view.id === "stores" || view.id === "contractors" || view.id === "people" || view.id === "bill-entry") ? safeRows(TABLES.BANK) : Promise.resolve([]),
       view.id === "contract-open" ? safeRows(TABLES.PROJECT) : Promise.resolve([]),
       view.id === "contract-open" ? safeRows(TABLES.CONTRACTOR) : Promise.resolve([]),
-      view.id === "project-all" ? safeRows(TABLES.CUSTOMER) : Promise.resolve([])
+      view.id === "project-all" ? safeRows(TABLES.CUSTOMER) : Promise.resolve([]),
+      view.id === "tasks" ? getAllTaskAttachments().catch(() => ({})) : Promise.resolve({})
     ]);
 
     const headers = rawRows.length > 0 ? Object.keys(rawRows[0]).filter(col => !col.startsWith("_")) : [];
@@ -508,7 +540,21 @@ async function renderView(
                   "ผู้ติดต่อ": summary || "-"
                 };
               })
-            : rawRows;
+            : view.id === "tasks"
+              ? rawRows.map(r => {
+                  const tId = String(r["ลำดับ"] ?? r.id ?? "").trim();
+                  const attach = (taskAttachments as any)[tId];
+                  const imgs = attach?.images || [];
+                  const imgStr = imgs.join(", ");
+                  return {
+                    ...r,
+                    "โครงการ": r["โครงการ"] || attach?.project || "-",
+                    "หมายเหตุ": r["หมายเหตุ"] || attach?.note || "-",
+                    "เอกสาร": r["เอกสาร"] || imgStr || "",
+                    "รูปภาพ": r["รูปภาพ"] || imgStr || "",
+                  };
+                })
+              : rawRows;
     if (view.id === "contract-open") {
       hydratedRows.sort((a, b) => compareContractRows(a, b, sort === "latest"));
     }

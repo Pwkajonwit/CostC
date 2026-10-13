@@ -40,8 +40,7 @@ export async function closeToLine(fallbackUrl?: string): Promise<void> {
       }
 
       // If not yet initialized, try initializing with default or env LIFF ID
-      const activeLiffId =
-        process.env.NEXT_PUBLIC_LINE_LIFF_ID || "2011122961-40UXax1L";
+      const activeLiffId = process.env.NEXT_PUBLIC_LINE_LIFF_ID || "";
 
       if (typeof liff.init === "function" && activeLiffId) {
         try {

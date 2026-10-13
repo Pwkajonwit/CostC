@@ -7,6 +7,7 @@ import { getNextBillSequence } from "@/lib/supabase/supabase-db";
 import type { FieldSchema, RefOption, SheetRow } from "@/lib/types";
 import { getTodayDateIso } from "@/lib/utils/dates";
 import { ALL_STORE_CATEGORIES, ALL_CONTRACTOR_CATEGORIES } from "@/lib/cost-codes";
+import { getTaskCategoryLabels } from "@/lib/tasks/task-categories";
 
 export async function getFormPayload(tableName: string, preloadedRows?: Record<string, SheetRow[]>) {
   const schema = await getFormSchemaWithSheetOptions(tableName);
@@ -103,11 +104,19 @@ async function getFormSchemaWithSheetOptions(tableName: string): Promise<FieldSc
   const schema = getFormSchema(tableName);
   const enumListFields = schema.filter(field => field.type === "EnumList");
   const hasBillTypeOptions = schema.some(field => field.dynamicValues === "billTypeOptions");
+  const isTasksTable =
+    tableName === TABLES.TASKS ||
+    tableName === "tasks" ||
+    tableName === "1. จัดการงาน (Tasks)" ||
+    tableName === "11. จัดการงาน (Tasks)" ||
+    tableName.toLowerCase().includes("tasks") ||
+    tableName.includes("จัดการงาน");
 
-  const [rows, categoryRows, systemOptions] = await Promise.all([
+  const [rows, categoryRows, systemOptions, taskCategoryLabels] = await Promise.all([
     enumListFields.length ? getRows(tableName, 120_000).catch(() => []) : Promise.resolve([]),
     hasBillTypeOptions ? getRows(TABLES.CATEGORY, 120_000).catch(() => []) : Promise.resolve([]),
-    getSystemOptions().catch(() => ({} as Record<string, string[]>))
+    getSystemOptions().catch(() => ({} as Record<string, string[]>)),
+    isTasksTable ? getTaskCategoryLabels().catch(() => []) : Promise.resolve([])
   ]);
 
   const billTypeOptionSets = hasBillTypeOptions ? getBillTypeOptionSets(categoryRows, systemOptions) : undefined;
@@ -139,6 +148,14 @@ async function getFormSchemaWithSheetOptions(tableName: string): Promise<FieldSc
   };
 
   return schema.map(field => {
+    if (isTasksTable && field.name === "ประเภท" && taskCategoryLabels && taskCategoryLabels.length > 0) {
+      return {
+        ...field,
+        values: taskCategoryLabels,
+        initialValue: taskCategoryLabels[0]
+      };
+    }
+
     let fieldValues = field.values ? [...field.values] : [];
 
     // Inject dynamic options from system_options database first, fallback to default
@@ -313,6 +330,22 @@ export async function getInitialValues(tableName: string): Promise<SheetRow> {
     if (column.initialValue === "nextWorkId") values[column.name] = String(await nextWorkId());
     if (!values[column.name]) values[column.name] = column.initialValue;
   }
+
+  const isTasksTable =
+    tableName === TABLES.TASKS ||
+    tableName === "tasks" ||
+    tableName === "1. จัดการงาน (Tasks)" ||
+    tableName === "11. จัดการงาน (Tasks)" ||
+    tableName.toLowerCase().includes("tasks") ||
+    tableName.includes("จัดการงาน");
+
+  if (isTasksTable) {
+    const taskCategories = await getTaskCategoryLabels().catch(() => []);
+    if (taskCategories.length > 0 && !values["ประเภท"]) {
+      values["ประเภท"] = taskCategories[0];
+    }
+  }
+
   return values;
 }
 

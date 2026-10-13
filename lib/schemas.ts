@@ -19,7 +19,7 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
     { name: "ร้านค้า/ผู้รับเหมา", type: "Enum", values: ["ร้านค้า", "ผู้รับเหมา"], inputMode: "buttons", initialValue: "ร้านค้า", required: true, description: "ร้านค้า บริษัท และ หจก. : ผู้รับเหมา และนิติบุคคล" },
     { name: "ร้านค้า", type: "Ref", refTable: TABLES.STORE, refKey: "id_store", refLabel: "ชื่อร้านค้า", required: true, showIf: { column: "ร้านค้า/ผู้รับเหมา", equals: "ร้านค้า" } },
     { name: "ผู้รับเหมา", type: "Ref", refTable: TABLES.CONTRACT_WORK, refKey: "id_Conwork", refLabel: "ชื่อเล่น", required: true, showIf: { column: "ร้านค้า/ผู้รับเหมา", equals: "ผู้รับเหมา" }, filterBy: { field: "ID Project", column: "ID Project", openContract: true }, refFill: { "รายละเอียดงาน": "รายละเอียดงาน", "ค่าแรงคงเหลือ": "{ค่าแรงคงเหลือ} จาก {ยอดเงินจ้าง}" } },
-    { name: "รายละเอียดงาน", type: "Text", readonly: true, showIf: { column: "ร้านค้า/ผู้รับเหมา", equals: "ผู้รับเหมา" } },
+    { name: "รายละเอียดงาน", label: "รายละเอียดงาน / งวดงาน", type: "Text", description: "รายละเอียดงาน หรือ รายละเอียดเพิ่มเติม (ถ้ามี)" },
     { name: "สินค้า", type: "Enum", values: [], dynamicValues: "productCategoryOptions", required: true, description: "ดึงจากตั้งค่าหมวดหมู่สินค้า", showIf: { column: "ร้านค้า/ผู้รับเหมา", in: ["ร้านค้า", "ผู้รับเหมา"] } },
     { name: "ประเภท", type: "Enum", values: [], inputMode: "buttons", required: true, dynamicValues: "billTypeOptions" },
     { name: "รูปถ่ายบิล", type: "Image" },
@@ -335,32 +335,38 @@ export const FORM_SCHEMAS: Record<string, FieldSchema[]> = {
   ],
   [TABLES.TASKS]: [
     { name: "ลำดับ", type: "Number", key: true, initialValue: "nextTaskId", readonlyOnEdit: true },
+    { name: "โครงการ", type: "Ref", refTable: TABLES.PROJECT, refKey: "ชื่อ Project", refLabel: "ชื่อ Project", description: "โครงการ หรือสังกัดของงาน (ใช้ร่วมกันทุกงานในชุดนี้)" },
     { name: "รายการ", type: "Text", required: true, description: "ชื่องาน หรือ รายละเอียดงาน" },
     { name: "ผู้รับมอบหมาย", type: "Ref", refTable: TABLES.PEOPLE, refKey: "ชื่อเล่น", refLabel: "ชื่อเล่น", required: true },
     { name: "ดู/ทำ", type: "Date", initialValue: "today" },
     { name: "ส่งงาน", type: "Date" },
     { name: "ประเภท", type: "Enum", values: ["1 (เอกสาร)", "2 (แผนงาน)", "3 (PJSA)"], initialValue: "1 (เอกสาร)", inputMode: "buttons" },
     { name: "สถานะ", type: "Enum", values: ["ดำเนินการ", "ส่งงานแล้ว", "สำเร็จ"], initialValue: "ดำเนินการ", inputMode: "buttons" },
+    { name: "หมายเหตุ", type: "Text", description: "หมายเหตุเพิ่มเติม" },
     { name: "เอกสาร", label: "เอกสาร / รูปภาพ", type: "Image", description: "รูปถ่ายหน้างาน / เอกสารแนบ" }
   ],
   "1. จัดการงาน (Tasks)": [
     { name: "ลำดับ", type: "Number", key: true, initialValue: "nextTaskId", readonlyOnEdit: true },
+    { name: "โครงการ", type: "Ref", refTable: TABLES.PROJECT, refKey: "ชื่อ Project", refLabel: "ชื่อ Project", description: "โครงการ หรือสังกัดของงาน (ใช้ร่วมกันทุกงานในชุดนี้)" },
     { name: "รายการ", type: "Text", required: true, description: "ชื่องาน หรือ รายละเอียดงาน" },
     { name: "ผู้รับมอบหมาย", type: "Ref", refTable: TABLES.PEOPLE, refKey: "ชื่อเล่น", refLabel: "ชื่อเล่น", required: true },
     { name: "ดู/ทำ", type: "Date", initialValue: "today" },
     { name: "ส่งงาน", type: "Date" },
     { name: "ประเภท", type: "Enum", values: ["1 (เอกสาร)", "2 (แผนงาน)", "3 (PJSA)"], initialValue: "1 (เอกสาร)", inputMode: "buttons" },
     { name: "สถานะ", type: "Enum", values: ["ดำเนินการ", "ส่งงานแล้ว", "สำเร็จ"], initialValue: "ดำเนินการ", inputMode: "buttons" },
+    { name: "หมายเหตุ", type: "Text", description: "หมายเหตุเพิ่มเติม" },
     { name: "เอกสาร", label: "เอกสาร / รูปภาพ", type: "Image", description: "รูปถ่ายหน้างาน / เอกสารแนบ" }
   ],
   "tasks": [
     { name: "ลำดับ", type: "Number", key: true, initialValue: "nextTaskId", readonlyOnEdit: true },
+    { name: "โครงการ", type: "Ref", refTable: TABLES.PROJECT, refKey: "ชื่อ Project", refLabel: "ชื่อ Project", description: "โครงการ หรือสังกัดของงาน (ใช้ร่วมกันทุกงานในชุดนี้)" },
     { name: "รายการ", type: "Text", required: true, description: "ชื่องาน หรือ รายละเอียดงาน" },
     { name: "ผู้รับมอบหมาย", type: "Ref", refTable: TABLES.PEOPLE, refKey: "ชื่อเล่น", refLabel: "ชื่อเล่น", required: true },
     { name: "ดู/ทำ", type: "Date", initialValue: "today" },
     { name: "ส่งงาน", type: "Date" },
     { name: "ประเภท", type: "Enum", values: ["1 (เอกสาร)", "2 (แผนงาน)", "3 (PJSA)"], initialValue: "1 (เอกสาร)", inputMode: "buttons" },
     { name: "สถานะ", type: "Enum", values: ["ดำเนินการ", "ส่งงานแล้ว", "สำเร็จ", "ยกเลิก"], initialValue: "ดำเนินการ", inputMode: "buttons" },
+    { name: "หมายเหตุ", type: "Text", description: "หมายเหตุเพิ่มเติม" },
     { name: "เอกสาร", label: "เอกสาร / รูปภาพ", type: "Image", description: "รูปถ่ายหน้างาน / เอกสารแนบ" }
   ],
   [TABLES.WORKS]: [

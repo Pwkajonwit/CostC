@@ -74,6 +74,14 @@ export async function getLineTargetGroup(
 
     const cfg = configRow?.data || {};
 
+    // 1. ตรวจสอบว่าผู้ใช้เปิดหรือปิดสวิตช์การแจ้งเตือน (Switch toggle) ไว้หรือไม่
+    const catKey = (category === "work" ? "PW" : category).toUpperCase();
+    const isNotifyEnabled = cfg[`LINE_NOTIFY_${catKey}`] !== false;
+    if (!isNotifyEnabled) {
+      return ""; // ปิดการแจ้งเตือนไว้ -> ไม่ต้องส่ง
+    }
+
+    // 2. ดึงรหัสกลุ่ม LINE สำหรับหมวดนี้
     let target = "";
     switch (category) {
       case "task":
@@ -99,13 +107,8 @@ export async function getLineTargetGroup(
 
     if (target && String(target).trim()) return String(target).trim();
 
-    return (
-      cfg.LINE_USER_ID_OWN ||
-      cfg.LINE_USER_ID_APPROVER ||
-      process.env.LINE_USER_ID_OWN ||
-      process.env.LINE_USER_ID_APPROVER ||
-      ""
-    );
+    // หากไม่มีการระบุกลุ่มไลน์ -> ไม่ต้องส่ง (ไม่ fallback ไปยังแชทส่วนตัวของ Owner)
+    return "";
   } catch (e) {
     console.error("Failed resolving target LINE group:", e);
     return "";

@@ -54,9 +54,14 @@ export async function getTaskAttachment(taskId: number | string): Promise<TaskAt
 export async function saveTaskAttachment(record: TaskAttachmentRecord): Promise<boolean> {
   try {
     const all = await getAllTaskAttachments();
+    const existing = all[String(record.taskId)] || {};
     all[String(record.taskId)] = {
+      ...existing,
       ...record,
-      submittedAt: record.submittedAt || new Date().toISOString()
+      images: record.images !== undefined ? record.images : (existing.images || []),
+      project: record.project !== undefined ? record.project : existing.project,
+      note: record.note !== undefined ? record.note : existing.note,
+      submittedAt: record.submittedAt || existing.submittedAt || new Date().toISOString()
     };
 
     const { error } = await supabaseAdmin
