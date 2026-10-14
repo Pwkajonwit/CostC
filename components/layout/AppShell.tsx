@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
+  Award,
   BriefcaseBusiness,
   Building2,
   Car,
@@ -54,7 +55,8 @@ const ICONS: Record<string, ComponentType<{ size?: number; strokeWidth?: number 
   loans: HandCoins,
   tasks: ClipboardList,
   works: BriefcaseBusiness,
-  "task-folders": FolderOpen
+  "task-folders": FolderOpen,
+  "task-performance": Award
 };
 
 const MOBILE_VIEW_IDS = ["dashboard-main", "bill-entry", "withdraw-request", "contract-open", "bill-follow", "work-status"];
@@ -70,6 +72,7 @@ function hrefFor(view: (typeof PRIMARY_VIEWS)[number]) {
   if (view.id === "reports") return "/reports";
   if (view.id === "project-analytics") return "/project-analytics";
   if (view.id === "task-folders") return "/task-folders";
+  if (view.id === "task-performance") return "/task-performance";
   return `/views/${view.id}`;
 }
 

@@ -133,7 +133,16 @@ export function DualSidebar({ collapsed, onToggleCollapse, currentUser }: DualSi
     if (path.startsWith("/settings") || path.startsWith("/line-system") || path.startsWith("/users")) {
       return "system";
     }
-    if (path.startsWith("/views/tasks") || path.startsWith("/views/works") || path === "/tasks" || path === "/works" || path.startsWith("/task-folders")) {
+    if (
+      path.startsWith("/views/tasks") ||
+      path.startsWith("/views/works") ||
+      path === "/tasks" ||
+      path === "/works" ||
+      path.startsWith("/task-folders") ||
+      path.startsWith("/task-performance") ||
+      path.startsWith("/quick-task") ||
+      path.startsWith("/quick-work")
+    ) {
       return "task";
     }
     if (path.startsWith("/views/")) {
@@ -161,7 +170,15 @@ export function DualSidebar({ collapsed, onToggleCollapse, currentUser }: DualSi
   const isSettingsActive = pathname.startsWith("/settings");
   const isGeneralSettingsActive = pathname === "/settings/general";
 
-  const isTaskPath = pathname.startsWith("/views/tasks") || pathname.startsWith("/views/works") || pathname.startsWith("/task-folders");
+  const isTaskPath =
+    pathname.startsWith("/views/tasks") ||
+    pathname.startsWith("/views/works") ||
+    pathname === "/tasks" ||
+    pathname === "/works" ||
+    pathname.startsWith("/task-folders") ||
+    pathname.startsWith("/task-performance") ||
+    pathname.startsWith("/quick-task") ||
+    pathname.startsWith("/quick-work");
   const isMasterPath = pathname.startsWith("/views/") && !isTaskPath;
 
   const currentTab = filterText ? "all" : activeCategory;
