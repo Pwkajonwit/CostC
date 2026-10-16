@@ -22,6 +22,7 @@ import {
   getProjectBudgetMap,
   getCarsMap,
   createDailyTransferSummaryFlex,
+  createDailyApprovalSummaryFlex,
   createDailySummaryFlex,
   isSubBillRecord,
   replyMultipleFlexMessages
@@ -101,7 +102,7 @@ export async function handleLineCommand(
       cleanCmd === "คำสั่ง" ||
       cleanCmd === "help"
     ) {
-      const menuText = `🤖 ระบบ LINE Bot ประจำ CostCode Supabase\n\n📌 คำสั่งที่รองรับทั้งหมด:\n\n1. 📊 หมวดสรุปการเงิน/เบิกเงิน:\n   - พิมพ์ "ยอดโอนวันนี้" / "โอนวันนี้" (สรุปยอดโอนที่ปิดงานแล้ว รวมบัญชีเดียวกัน)\n   - พิมพ์ "สรุป" / "สรุปบิล" / "สรุปวันนี้"\n   - พิมพ์ "รออนุมัติ" (ดูบิลที่รอพิจารณาอนุมัติ)\n   - พิมพ์ "รอปิดงาน" / "รอจ่าย" / "อนุมัติแล้ว" (ดูบิลที่อนุมัติแล้ว รอการเงินปิดงาน)\n   - พิมพ์ "บิลหลัก: [ชื่อ]" หรือ "บิลย่อย: [ชื่อ]"\n   - พิมพ์ "ส่งไปเพื่ออนุมัติ" (ส่งแจ้งเตือนหาผู้อนุมัติ)\n   - พิมพ์ "อนุมัติบิลหลักของ:" / "อนุมัติเงินสดบิลย่อยของ:"\n   - พิมพ์ "ปิดงานบิลหลักลำดับที่:" / "ปิดงานเงินสดบิลย่อยลำดับที่:"\n\n2. 🎯 หมวดงาน & PW/PM มอบหมาย:\n   - พิมพ์ "งาน2: [ชื่อพนักงาน]" (ดูตารางงานแผนงาน)\n   - พิมพ์ "งาน: [รายละเอียดงาน]" (สร้างงานใหม่)\n   - พิมพ์ "งานด่วน:" / "ส่งงาน:" / "ปิดงาน:" / "s:" (ค้นหา)\n   - พิมพ์ "PW" / "PW1" / "PW2" / "PW3" / "PW4" (ดูงานแยกแต่ละทีม ไม่ปนกัน)\n   - พิมพ์ "PWALL" หรือ "work" (แสดง Flex แยกทุกทีม PW1-PW4)\n   - พิมพ์ "มอบหมาย:" / "กิจกรรม:" / "PW:" / "addp" (เปิดงานใหม่)\n\n3. ⚡ หมวดคำสั่งลัด (Shortcuts):\n   - พิมพ์ "copy" / "add1" / "add3" / "addp" / "doo"\n\n4. ⚙️ หมวดตรวจสอบระบบ:\n   - พิมพ์ "testbot" / "check" / "getid"`;
+      const menuText = `🤖 ระบบ LINE Bot ประจำ CostCode Supabase\n\n📌 คำสั่งที่รองรับทั้งหมด:\n\n1. 📊 หมวดสรุปการเงิน/เบิกเงิน:\n   - พิมพ์ "ยอดอนุมัติวันนี้" / "อนุมัติวันนี้" (สรุปยอดอนุมัติ รวมบัญชีเดียวกัน ไม่รวมบิลปิดงาน)\n   - พิมพ์ "ยอดโอนวันนี้" / "โอนวันนี้" (สรุปยอดโอนที่ปิดงานแล้ว รวมบัญชีเดียวกัน)\n   - พิมพ์ "สรุป" / "สรุปบิล" / "สรุปวันนี้"\n   - พิมพ์ "รออนุมัติ" (ดูบิลที่รอพิจารณาอนุมัติ)\n   - พิมพ์ "รอปิดงาน" / "รอจ่าย" / "อนุมัติแล้ว" (ดูบิลที่อนุมัติแล้ว รอการเงินปิดงาน)\n   - พิมพ์ "บิลหลัก: [ชื่อ]" หรือ "บิลย่อย: [ชื่อ]"\n   - พิมพ์ "ส่งไปเพื่ออนุมัติ" (ส่งแจ้งเตือนหาผู้อนุมัติ)\n   - พิมพ์ "อนุมัติบิลหลักของ:" / "อนุมัติเงินสดบิลย่อยของ:"\n   - พิมพ์ "ปิดงานบิลหลักลำดับที่:" / "ปิดงานเงินสดบิลย่อยลำดับที่:"\n\n2. 🎯 หมวดงาน & PW/PM มอบหมาย:\n   - พิมพ์ "งาน2: [ชื่อพนักงาน]" (ดูตารางงานแผนงาน)\n   - พิมพ์ "งาน: [รายละเอียดงาน]" (สร้างงานใหม่)\n   - พิมพ์ "งานด่วน:" / "ส่งงาน:" / "ปิดงาน:" / "s:" (ค้นหา)\n   - พิมพ์ "PW" / "PW1" / "PW2" / "PW3" / "PW4" (ดูงานแยกแต่ละทีม ไม่ปนกัน)\n   - พิมพ์ "PWALL" หรือ "work" (แสดง Flex แยกทุกทีม PW1-PW4)\n   - พิมพ์ "มอบหมาย:" / "กิจกรรม:" / "PW:" / "addp" (เปิดงานใหม่)\n\n3. ⚡ หมวดคำสั่งลัด (Shortcuts):\n   - พิมพ์ "copy" / "add1" / "add3" / "addp" / "doo"\n\n4. ⚙️ หมวดตรวจสอบระบบ:\n   - พิมพ์ "testbot" / "check" / "getid"`;
       await replyTextMessage(replyToken, menuText);
       return true;
     }
@@ -293,7 +294,206 @@ export async function handleLineCommand(
       return true;
     }
 
-    // 2.1 Template Shortcut Commands (copy, add1, add3, addp, doo, doo2)
+    // 2.2 Daily Approval Summary Commands (Flex ยอดอนุมัติวันนี้ - รวมบิลตามผู้รับ/บัญชีเดียวกัน และไม่รวมบิลที่ปิดงานแล้ว)
+    const isDailyApprovalCmd =
+      cleanCmd === "อนุมัติวันนี้" ||
+      cleanCmd === "ยอดอนุมัติวันนี้" ||
+      cleanCmd === "อนุมัติ วันนี้" ||
+      cleanCmd === "ยอด อนุมัติ วันนี้" ||
+      cleanCmd === "ยอดอนุมัติ" ||
+      cleanCmd === "สรุปยอดอนุมัติ" ||
+      cleanCmd === "สรุปอนุมัติ" ||
+      cleanCmd === "สรุปยอดอนุมัติวันนี้" ||
+      cleanCmd === "สรุปอนุมัติวันนี้" ||
+      cleanCmd === "ยอดอนุมัติทั้งหมด" ||
+      cleanCmd === "อนุมัติทั้งหมด" ||
+      cleanCmd === "ยอดอนุมัติ all" ||
+      cleanCmd.startsWith("ยอดอนุมัติ:") ||
+      cleanCmd.startsWith("ยอดอนุมัติ ") ||
+      (cleanCmd.startsWith("อนุมัติ:") && !rawText.startsWith("อนุมัติบิล") && !rawText.startsWith("อนุมัติเงินสด") && !rawText.startsWith("อนุมัติทั้งหมด:")) ||
+      (cleanCmd.startsWith("อนุมัติ ") && !rawText.startsWith("อนุมัติบิล") && !rawText.startsWith("อนุมัติเงินสด") && !rawText.startsWith("อนุมัติทั้งหมด:")) ||
+      cleanCmd.includes("ยอดอนุมัติวันนี้") ||
+      cleanCmd.includes("อนุมัติวันนี้");
+
+    if (isDailyApprovalCmd) {
+      const isColonCommand = rawText.startsWith("ยอดอนุมัติ:") || rawText.startsWith("อนุมัติ:");
+      const isSpaceCommand = rawText.startsWith("ยอดอนุมัติ ") || rawText.startsWith("อนุมัติ ");
+      const isAll =
+        cleanCmd === "ยอดอนุมัติทั้งหมด" ||
+        cleanCmd === "อนุมัติทั้งหมด" ||
+        cleanCmd === "ยอดอนุมัติ all" ||
+        cleanCmd.endsWith(":ทั้งหมด") ||
+        cleanCmd.endsWith(" ทั้งหมด");
+
+      let customFilter = "";
+      if (isColonCommand) {
+        customFilter = rawText.replace(/^ยอดอนุมัติ:|^อนุมัติ:/, "").trim();
+      } else if (isSpaceCommand) {
+        customFilter = rawText.replace(/^ยอดอนุมัติ\s+|^อนุมัติ\s+/, "").trim();
+      }
+
+      if (
+        customFilter === "วันนี้" ||
+        customFilter === "ทั้งหมด" ||
+        customFilter === "all" ||
+        customFilter === "ยอดอนุมัติ" ||
+        customFilter === "อนุมัติวันนี้"
+      ) {
+        customFilter = "";
+      }
+
+      const [rawBills, peopleMap, bankInfoMap] = await Promise.all([
+        getRows(TABLES.DATA, 0, 5000),
+        getPeopleMap(),
+        getBankInfoMap()
+      ]);
+
+      // Filter only approved bills that are NOT closed/paid (บิลที่ปิดงานแล้ว ไม่ต้องนำมารวม)
+      const approvedBills = rawBills.filter(b => {
+        const rawSt = String(b["สถานะ"] || b.status || "").trim();
+        const normSt = normalizeBillStatus(rawSt);
+        if (normSt !== "อนุมัติ") return false;
+        if (isPaidBill(b)) return false;
+        const low = rawSt.toLowerCase();
+        if (low.includes("ปิดงาน") || low.includes("จ่ายแล้ว") || low.includes("เบิกแล้ว") || low === "paid" || low === "withdrawn") {
+          return false;
+        }
+        return true;
+      });
+
+      // Today in Bangkok timezone (YYYY-MM-DD and DD/MM/YYYY)
+      const nowBangkok = new Date();
+      let todayYmd = "";
+      let todayDisplay = "";
+      try {
+        todayYmd = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Asia/Bangkok",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit"
+        }).format(nowBangkok);
+
+        todayDisplay = nowBangkok.toLocaleDateString("th-TH", {
+          timeZone: "Asia/Bangkok",
+          day: "numeric",
+          month: "short",
+          year: "numeric"
+        });
+      } catch {
+        todayYmd = nowBangkok.toISOString().split("T")[0];
+        todayDisplay = nowBangkok.toLocaleDateString("th-TH");
+      }
+
+      let targetBills = approvedBills;
+
+      if (customFilter) {
+        const q = customFilter.toLowerCase();
+        targetBills = targetBills.filter(b => {
+          const req = String(b["ผู้เบิก"] || b.requester || "").toLowerCase();
+          const reqName = (peopleMap.get(String(b["ผู้เบิก"] || b.requester || "").trim()) || "").toLowerCase();
+          const vendor = String(b["ร้าน/บุคคล"] || b["ผู้รับเหมา"] || b["ร้านค้า"] || b.vendor_or_person || "").toLowerCase();
+          const pName = String(b["ชื่อ Project"] || b.project_name || "").toLowerCase();
+          const bId = String(b.id || b["ลำดับ"] || b._sheetRow || "");
+          const appDate = String(b.approved_at || b["วันที่อนุมัติ"] || "").toLowerCase();
+
+          return req.includes(q) || reqName.includes(q) || vendor.includes(q) || pName.includes(q) || bId === q || appDate.includes(q);
+        });
+      } else if (!isAll) {
+        // Filter by bills approved today in Bangkok timezone
+        const todayBills = targetBills.filter(b => {
+          const d = (b.data && typeof b.data === "object") ? b.data : {};
+          const rawApprovedAt = b.approved_at || d.approved_at;
+          if (rawApprovedAt) {
+            try {
+              const approvedBangkokYmd = new Intl.DateTimeFormat("en-CA", {
+                timeZone: "Asia/Bangkok",
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit"
+              }).format(new Date(rawApprovedAt));
+              if (approvedBangkokYmd === todayYmd) return true;
+            } catch {
+              // ignore
+            }
+          }
+          const pCandidates = [
+            b["วันที่อนุมัติ"], d["วันที่อนุมัติ"],
+            b["ว/ด/ป"], d["ว/ด/ป"],
+            b["วันที่"], d["วันที่"],
+            b.bill_date, d.bill_date
+          ];
+          for (const cand of pCandidates) {
+            if (cand && normalizeDateToIso(cand) === todayYmd) return true;
+          }
+          const rawUpdatedAt = b.updated_at || d.updated_at;
+          if (rawUpdatedAt) {
+            try {
+              const updatedBangkokYmd = new Intl.DateTimeFormat("en-CA", {
+                timeZone: "Asia/Bangkok",
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit"
+              }).format(new Date(rawUpdatedAt));
+              if (updatedBangkokYmd === todayYmd) return true;
+            } catch {
+              // ignore
+            }
+          }
+          return false;
+        });
+
+        if (todayBills.length === 0) {
+          await replyTextMessage(
+            replyToken,
+            `ℹ️ วันนี้ (${todayDisplay}) ยังไม่มีรายการบิลที่อนุมัติในระบบครับ\n(หรือพิมพ์ "ยอดอนุมัติทั้งหมด" เพื่อดูบิลรอโอนทั้งหมด ${approvedBills.length} รายการ)`
+          );
+          return true;
+        }
+
+        targetBills = todayBills;
+      }
+
+      if (targetBills.length === 0) {
+        await replyTextMessage(
+          replyToken,
+          `ℹ️ ไม่พบรายการบิลที่อนุมัติ${customFilter ? ` สำหรับ "${customFilter}"` : ` ในวันนี้ (${todayDisplay})`} ครับ`
+        );
+        return true;
+      }
+
+      const approvalFlex = createDailyApprovalSummaryFlex(
+        targetBills,
+        {
+          title: isAll ? "📑 ยอดอนุมัติทั้งหมด" : "📑 ยอดอนุมัติวันนี้",
+          dateStr: isAll ? `ทั้งหมด (${targetBills.length} บิล)` : todayDisplay
+        },
+        peopleMap,
+        bankInfoMap
+      );
+
+      const altText = `📑 ยอดอนุมัติประจำวัน (${targetBills.length} บิล)`;
+      const sent = await replyFlexMessage(replyToken, altText, approvalFlex);
+      if (!sent && replyToken) {
+        const mainBills = targetBills.filter(b => !isSubBillRecord(b));
+        const subBills = targetBills.filter(b => isSubBillRecord(b));
+        const mainTotal = mainBills.reduce((s, b) => s + Number(b["ยอดเงิน"] || b.amount || 0), 0);
+        const subTotal = subBills.reduce((s, b) => s + Number(b["ยอดเงิน"] || b.amount || 0), 0);
+        const grandTotal = mainTotal + subTotal;
+
+        let textFallback = `📑 สรุปยอดอนุมัติประจำวัน (ทั้งหมด ${targetBills.length} รายการ):\n\n`;
+        if (mainBills.length > 0) {
+          textFallback += `🏛️ หมวดบิลหลัก (${mainBills.length} บิล): ฿${mainTotal.toLocaleString("th-TH")}\n`;
+        }
+        if (subBills.length > 0) {
+          textFallback += `👤 หมวดบิลย่อย (${subBills.length} บิล): ฿${subTotal.toLocaleString("th-TH")}\n`;
+        }
+        textFallback += `\n💰 ยอดอนุมัติรวมทั้งหมด: ฿${grandTotal.toLocaleString("th-TH")}`;
+        await replyTextMessage(replyToken, textFallback.trim());
+      }
+      return true;
+    }
+
+    // 2.3 Template Shortcut Commands (copy, add1, add3, addp, doo, doo2)
     if (lowerText === "copy" || lowerText === "add1" || lowerText === "add3" || lowerText === "addp" || lowerText === "doo" || lowerText === "doo2") {
       if (lowerText === "copy") {
         const copyTemplate = `📋 แม่แบบสำหรับสร้างงานทั่วไป (คัดลอกข้อความด้านล่าง):\n\nงาน: [รายละเอียดงาน] - [ชื่อผู้รับผิดชอบ]`;

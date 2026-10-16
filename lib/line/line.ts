@@ -5956,6 +5956,140 @@ export interface DailyTransferGroup {
   }>;
 }
 
+export function groupDailyBills(
+  bills: Array<Record<string, any>>,
+  category: "main" | "sub",
+  bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>,
+  peopleMap?: Map<string, string> | Record<string, string>
+): DailyTransferGroup[] {
+  const map = new Map<string, DailyTransferGroup>();
+
+  for (const b of bills) {
+    const grossAmt = getBillFlexGrossAmount(b);
+    const dInfo = resolveBillDeductionInfo(b);
+    const lineItems = extractBillLineItems(b);
+    const rawNet = Number(b["ยอดโอน"] || b.net_amount || b.data?.["ยอดโอน"] || b.data?.net_amount || 0);
+    const netTransferAmt = dInfo.hasDeduct
+      ? (dInfo.deductAmt > 0 ? grossAmt - dInfo.deductAmt : (rawNet > 0 ? rawNet : grossAmt))
+      : (lineItems.length > 0 || !rawNet ? grossAmt : (rawNet > 0 ? rawNet : grossAmt));
+
+    let payeeName = "";
+    let bankName = "";
+    let accountNo = "";
+    let accountName = "";
+    let payeeNickname = "";
+
+    if (category === "sub") {
+      // Sub-bill: transfer goes to the requester (ผู้เบิก) - prioritize nickname (ชื่อเล่น)
+      const reqBank = resolveRequesterBankInfo(b, bankInfoMap, peopleMap);
+      payeeNickname = String(reqBank.nickname || resolveRequesterNameFromMap(String(b["ผู้เบิก"] || b.requester || ""), peopleMap) || "").trim();
+      payeeName = payeeNickname || reqBank.requesterName || String(b["ผู้เบิก"] || b.requester || "ผู้เบิก").trim();
+      bankName = reqBank.bankName || String(b["ธนาคาร"] || b.bank_name || "").trim();
+      accountNo = reqBank.accountNo || String(b["เลขบัญชี"] || b.bank_account || "").trim();
+      accountName = String(reqBank.accountName || reqBank.fullName || b["ชื่อบัญชี"] || b.account_name || b["ชื่อ-นามสกุล"] || b.full_name || "").trim();
+    } else {
+      // Main bill: transfer goes to store / contractor - prioritize nickname (ชื่อเล่น)
+      const rawVendorType = String(b["ร้านค้า/ผู้รับเหมา"] || b.vendor_type || "").trim();
+      const isContractor = rawVendorType === "ผู้รับเหมา" || Boolean(b["ผู้รับเหมา"]) || Boolean(b.contractor_id);
+      let rawVendorCandidate = "";
+      if (isContractor) {
+        rawVendorCandidate = b["ชื่อผู้รับเหมา"] || b.contractor_name || b["ผู้รับเหมา"] || b.contractor_id || b["ร้าน/บุคคล"] || b.vendor_or_person || "-";
+      } else {
+        const namedVendor = String(b["ชื่อร้านค้า"] || b.store_name || b["ร้าน/บุคคล"] || b.vendor_or_person || b.data?.["ร้าน/บุคคล"] || b.data?.vendor_or_person || "").trim();
+        const idStore = String(b["ร้านค้า"] || b.store_id || b.data?.["ร้านค้า"] || "").trim();
+        if (namedVendor && namedVendor !== "-" && namedVendor !== "non") {
+          rawVendorCandidate = namedVendor;
+        } else if (idStore) {
+          rawVendorCandidate = idStore;
+        } else {
+          rawVendorCandidate = "-";
+        }
+      }
+
+      const bankInfo = resolveBankInfo(b, bankInfoMap);
+
+      // Prioritize nickname (ชื่อเล่น) for contractor / store / payee
+      let candidateNickname = String(bankInfo?.nickname || "").trim();
+      if (!candidateNickname && rawVendorCandidate) {
+        const rawInfo = bankInfoMap instanceof Map
+          ? (bankInfoMap.get(rawVendorCandidate) || bankInfoMap.get(rawVendorCandidate.toLowerCase()))
+          : (bankInfoMap ? (bankInfoMap as any)[rawVendorCandidate] : undefined);
+        if (rawInfo?.nickname) {
+          candidateNickname = String(rawInfo.nickname).trim();
+        }
+      }
+      if (!candidateNickname) {
+        candidateNickname = String(
+          b["ชื่อเล่น"] || b.nickname ||
+          b.data?.["ชื่อเล่น"] || b.data?.nickname ||
+          b.data?.data?.["ชื่อเล่น"] || ""
+        ).trim();
+      }
+
+      // Resolved payee name: uses nickname if available, otherwise resolved vendor/store name
+      let resolvedPayee = candidateNickname || resolveVendorName(rawVendorCandidate, bankInfoMap, b, peopleMap);
+      if ((!resolvedPayee || resolvedPayee === "-" || /^[a-zA-Z]{1,3}[-_]?\d+$/i.test(resolvedPayee) || /^[a-zA-Z]{1,3}[-_]?\d+(\s*,\s*[a-zA-Z]{1,3}[-_]?\d+)+$/i.test(resolvedPayee)) && bankInfo) {
+        resolvedPayee = candidateNickname || bankInfo.nickname || bankInfo.storeName || bankInfo.vendorName || bankInfo.accountName || bankInfo.fullName || resolvedPayee;
+      }
+      if (!resolvedPayee || resolvedPayee === "-") {
+        resolvedPayee = String(b["ผู้เบิก"] || b.requester || "ผู้รับเงิน").trim();
+      }
+      resolvedPayee = resolvedPayee.replace(/^\d+[\.\s\-]+/, "").trim() || resolvedPayee;
+
+      payeeName = resolvedPayee;
+      bankName = String(bankInfo?.bankName || b["ธนาคาร"] || b.bank_name || "").trim();
+      accountNo = String(bankInfo?.accountNo || b["เลขบัญชี"] || b.bank_account || "").trim();
+      accountName = String(bankInfo?.accountName || bankInfo?.fullName || b["ชื่อบัญชี"] || b.account_name || b["ชื่อ-นามสกุล"] || b.full_name || "").trim();
+      payeeNickname = candidateNickname || String(bankInfo?.nickname || "").trim();
+    }
+
+    const cleanAccDigits = accountNo.replace(/\D/g, "");
+    const groupKey = cleanAccDigits.length >= 6
+      ? `${category.toUpperCase()}_ACC_${cleanAccDigits}`
+      : (accountNo && accountNo !== "-" ? `${category.toUpperCase()}_ACC_${accountNo}_${bankName}` : `${category.toUpperCase()}_NAME_${payeeName.toLowerCase()}`);
+
+    const bId = String(b.id || b["ลำดับ"] || b._sheetRow || "-").trim();
+    const pName = String(b["ชื่อ Project"] || b.project_name || "").trim();
+    const bDesc = String(b["สินค้า/ทำงาน"] || b.description || "").trim();
+
+    const billItem = {
+      id: bId,
+      billNo: bId,
+      projectName: pName,
+      amount: netTransferAmt,
+      description: bDesc,
+      isSubBill: category === "sub"
+    };
+
+    if (map.has(groupKey)) {
+      const existing = map.get(groupKey)!;
+      existing.totalAmount += netTransferAmt;
+      existing.bills.push(billItem);
+      if (!existing.accountNo && accountNo) existing.accountNo = accountNo;
+      if (!existing.bankName && bankName) existing.bankName = bankName;
+      if (!existing.accountName && accountName) existing.accountName = accountName;
+      if (!existing.nickname && payeeNickname) existing.nickname = payeeNickname;
+      if (payeeNickname && existing.payeeName !== payeeNickname) {
+        existing.payeeName = payeeNickname;
+      }
+    } else {
+      map.set(groupKey, {
+        groupKey,
+        payeeName,
+        bankName,
+        accountNo,
+        accountName,
+        nickname: payeeNickname,
+        totalAmount: netTransferAmt,
+        category,
+        bills: [billItem]
+      });
+    }
+  }
+
+  return Array.from(map.values()).sort((a, b) => b.totalAmount - a.totalAmount);
+}
+
 export function createDailyTransferSummaryFlex(
   billsInput: Record<string, any> | Array<Record<string, any>>,
   options?: {
@@ -6013,137 +6147,8 @@ export function createDailyTransferSummaryFlex(
   const mainBills = rawBills.filter(b => !isSubBillRecord(b));
   const subBills = rawBills.filter(b => isSubBillRecord(b));
 
-  function groupBills(bills: Array<Record<string, any>>, category: "main" | "sub"): DailyTransferGroup[] {
-    const map = new Map<string, DailyTransferGroup>();
-
-    for (const b of bills) {
-      const grossAmt = getBillFlexGrossAmount(b);
-      const dInfo = resolveBillDeductionInfo(b);
-      const lineItems = extractBillLineItems(b);
-      const rawNet = Number(b["ยอดโอน"] || b.net_amount || b.data?.["ยอดโอน"] || b.data?.net_amount || 0);
-      const netTransferAmt = dInfo.hasDeduct
-        ? (dInfo.deductAmt > 0 ? grossAmt - dInfo.deductAmt : (rawNet > 0 ? rawNet : grossAmt))
-        : (lineItems.length > 0 || !rawNet ? grossAmt : (rawNet > 0 ? rawNet : grossAmt));
-
-      let payeeName = "";
-      let bankName = "";
-      let accountNo = "";
-      let accountName = "";
-      let payeeNickname = "";
-
-      if (category === "sub") {
-        // Sub-bill: transfer goes to the requester (ผู้เบิก) - prioritize nickname (ชื่อเล่น)
-        const reqBank = resolveRequesterBankInfo(b, bankInfoMap, peopleMap);
-        payeeNickname = String(reqBank.nickname || resolveRequesterNameFromMap(String(b["ผู้เบิก"] || b.requester || ""), peopleMap) || "").trim();
-        payeeName = payeeNickname || reqBank.requesterName || String(b["ผู้เบิก"] || b.requester || "ผู้เบิก").trim();
-        bankName = reqBank.bankName || String(b["ธนาคาร"] || b.bank_name || "").trim();
-        accountNo = reqBank.accountNo || String(b["เลขบัญชี"] || b.bank_account || "").trim();
-        accountName = String(reqBank.accountName || reqBank.fullName || b["ชื่อบัญชี"] || b.account_name || b["ชื่อ-นามสกุล"] || b.full_name || "").trim();
-      } else {
-        // Main bill: transfer goes to store / contractor - prioritize nickname (ชื่อเล่น)
-        const rawVendorType = String(b["ร้านค้า/ผู้รับเหมา"] || b.vendor_type || "").trim();
-        const isContractor = rawVendorType === "ผู้รับเหมา" || Boolean(b["ผู้รับเหมา"]) || Boolean(b.contractor_id);
-        let rawVendorCandidate = "";
-        if (isContractor) {
-          rawVendorCandidate = b["ชื่อผู้รับเหมา"] || b.contractor_name || b["ผู้รับเหมา"] || b.contractor_id || b["ร้าน/บุคคล"] || b.vendor_or_person || "-";
-        } else {
-          const namedVendor = String(b["ชื่อร้านค้า"] || b.store_name || b["ร้าน/บุคคล"] || b.vendor_or_person || b.data?.["ร้าน/บุคคล"] || b.data?.vendor_or_person || "").trim();
-          const idStore = String(b["ร้านค้า"] || b.store_id || b.data?.["ร้านค้า"] || "").trim();
-          if (namedVendor && namedVendor !== "-" && namedVendor !== "non") {
-            rawVendorCandidate = namedVendor;
-          } else if (idStore) {
-            rawVendorCandidate = idStore;
-          } else {
-            rawVendorCandidate = "-";
-          }
-        }
-
-        const bankInfo = resolveBankInfo(b, bankInfoMap);
-
-        // Prioritize nickname (ชื่อเล่น) for contractor / store / payee
-        let candidateNickname = String(bankInfo?.nickname || "").trim();
-        if (!candidateNickname && rawVendorCandidate) {
-          const rawInfo = bankInfoMap instanceof Map
-            ? (bankInfoMap.get(rawVendorCandidate) || bankInfoMap.get(rawVendorCandidate.toLowerCase()))
-            : (bankInfoMap ? (bankInfoMap as any)[rawVendorCandidate] : undefined);
-          if (rawInfo?.nickname) {
-            candidateNickname = String(rawInfo.nickname).trim();
-          }
-        }
-        if (!candidateNickname) {
-          candidateNickname = String(
-            b["ชื่อเล่น"] || b.nickname ||
-            b.data?.["ชื่อเล่น"] || b.data?.nickname ||
-            b.data?.data?.["ชื่อเล่น"] || ""
-          ).trim();
-        }
-
-        // Resolved payee name: uses nickname if available, otherwise resolved vendor/store name
-        let resolvedPayee = candidateNickname || resolveVendorName(rawVendorCandidate, bankInfoMap, b, peopleMap);
-        if ((!resolvedPayee || resolvedPayee === "-" || /^[a-zA-Z]{1,3}[-_]?\d+$/i.test(resolvedPayee) || /^[a-zA-Z]{1,3}[-_]?\d+(\s*,\s*[a-zA-Z]{1,3}[-_]?\d+)+$/i.test(resolvedPayee)) && bankInfo) {
-          resolvedPayee = candidateNickname || bankInfo.nickname || bankInfo.storeName || bankInfo.vendorName || bankInfo.accountName || bankInfo.fullName || resolvedPayee;
-        }
-        if (!resolvedPayee || resolvedPayee === "-") {
-          resolvedPayee = String(b["ผู้เบิก"] || b.requester || "ผู้รับเงิน").trim();
-        }
-        resolvedPayee = resolvedPayee.replace(/^\d+[\.\s\-]+/, "").trim() || resolvedPayee;
-
-        payeeName = resolvedPayee;
-        bankName = String(bankInfo?.bankName || b["ธนาคาร"] || b.bank_name || "").trim();
-        accountNo = String(bankInfo?.accountNo || b["เลขบัญชี"] || b.bank_account || "").trim();
-        accountName = String(bankInfo?.accountName || bankInfo?.fullName || b["ชื่อบัญชี"] || b.account_name || b["ชื่อ-นามสกุล"] || b.full_name || "").trim();
-        payeeNickname = candidateNickname || String(bankInfo?.nickname || "").trim();
-      }
-
-      const cleanAccDigits = accountNo.replace(/\D/g, "");
-      const groupKey = cleanAccDigits.length >= 6
-        ? `${category.toUpperCase()}_ACC_${cleanAccDigits}`
-        : (accountNo && accountNo !== "-" ? `${category.toUpperCase()}_ACC_${accountNo}_${bankName}` : `${category.toUpperCase()}_NAME_${payeeName.toLowerCase()}`);
-
-      const bId = String(b.id || b["ลำดับ"] || b._sheetRow || "-").trim();
-      const pName = String(b["ชื่อ Project"] || b.project_name || "").trim();
-      const bDesc = String(b["สินค้า/ทำงาน"] || b.description || "").trim();
-
-      const billItem = {
-        id: bId,
-        billNo: bId,
-        projectName: pName,
-        amount: netTransferAmt,
-        description: bDesc,
-        isSubBill: category === "sub"
-      };
-
-      if (map.has(groupKey)) {
-        const existing = map.get(groupKey)!;
-        existing.totalAmount += netTransferAmt;
-        existing.bills.push(billItem);
-        if (!existing.accountNo && accountNo) existing.accountNo = accountNo;
-        if (!existing.bankName && bankName) existing.bankName = bankName;
-        if (!existing.accountName && accountName) existing.accountName = accountName;
-        if (!existing.nickname && payeeNickname) existing.nickname = payeeNickname;
-        if (payeeNickname && existing.payeeName !== payeeNickname) {
-          existing.payeeName = payeeNickname;
-        }
-      } else {
-        map.set(groupKey, {
-          groupKey,
-          payeeName,
-          bankName,
-          accountNo,
-          accountName,
-          nickname: payeeNickname,
-          totalAmount: netTransferAmt,
-          category,
-          bills: [billItem]
-        });
-      }
-    }
-
-    return Array.from(map.values()).sort((a, b) => b.totalAmount - a.totalAmount);
-  }
-
-  const mainGroups = groupBills(mainBills, "main");
-  const subGroups = groupBills(subBills, "sub");
+  const mainGroups = groupDailyBills(mainBills, "main", bankInfoMap, peopleMap);
+  const subGroups = groupDailyBills(subBills, "sub", bankInfoMap, peopleMap);
 
   const mainTotal = mainGroups.reduce((sum, g) => sum + g.totalAmount, 0);
   const subTotal = subGroups.reduce((sum, g) => sum + g.totalAmount, 0);
@@ -6435,6 +6440,424 @@ export function createDailyTransferSummaryFlex(
     for (let i = 0; i < totalSubPages && bubbles.length < 10; i++) {
       const chunk = subGroups.slice(i * pageSize, (i + 1) * pageSize);
       bubbles.push(buildCategoryBubblePage(
+        chunk,
+        i,
+        totalSubPages,
+        "sub",
+        subTotal,
+        subBills.length
+      ));
+    }
+  }
+
+  if (bubbles.length === 1) {
+    return bubbles[0];
+  }
+
+  return {
+    type: "carousel",
+    contents: bubbles
+  };
+}
+
+export function createDailyApprovalSummaryFlex(
+  billsInput: Record<string, any> | Array<Record<string, any>>,
+  options?: {
+    title?: string;
+    dateStr?: string;
+  },
+  peopleMap?: Map<string, string> | Record<string, string>,
+  bankInfoMap?: Map<string, BankLookupInfo> | Record<string, BankLookupInfo>
+): Record<string, any> {
+  const rawBills = (Array.isArray(billsInput) ? billsInput : [billsInput]).filter(Boolean);
+  const rawTitle = options?.title || "📋 ยอดอนุมัติวันนี้";
+  const title = rawTitle.replace(/\s*\([^)]*อนุมัติ[^)]*\)/g, "").trim();
+
+  let displayDate = options?.dateStr || "";
+  if (!displayDate) {
+    try {
+      displayDate = new Date().toLocaleDateString("th-TH", {
+        timeZone: "Asia/Bangkok",
+        day: "numeric",
+        month: "short",
+        year: "numeric"
+      });
+    } catch {
+      displayDate = new Date().toLocaleDateString("th-TH");
+    }
+  }
+
+  if (rawBills.length === 0) {
+    return {
+      type: "bubble",
+      size: "mega",
+      header: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: "#1E3A8A",
+        paddingAll: "12px",
+        contents: [
+          { type: "text", text: title, weight: "bold", color: "#FFFFFF", size: "sm" },
+          { type: "text", text: `วันที่ ${displayDate}`, color: "#93C5FD", size: "xxs", margin: "xs" }
+        ]
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "16px",
+        contents: [
+          { type: "text", text: "ℹ️ ไม่พบรายการบิลที่อยู่ในสถานะ \"อนุมัติ\" ในวันนี้", size: "xs", color: "#64748B", align: "center" }
+        ]
+      }
+    };
+  }
+
+  const mainBills = rawBills.filter(b => !isSubBillRecord(b));
+  const subBills = rawBills.filter(b => isSubBillRecord(b));
+
+  const mainGroups = groupDailyBills(mainBills, "main", bankInfoMap, peopleMap);
+  const subGroups = groupDailyBills(subBills, "sub", bankInfoMap, peopleMap);
+
+  const mainTotal = mainGroups.reduce((sum, g) => sum + g.totalAmount, 0);
+  const subTotal = subGroups.reduce((sum, g) => sum + g.totalAmount, 0);
+  const grandTotal = mainTotal + subTotal;
+  const totalBillsCount = rawBills.length;
+  const hasBothCategories = mainBills.length > 0 && subBills.length > 0;
+
+  function buildApprovalBubblePage(
+    pageGroups: DailyTransferGroup[],
+    pageIndex: number,
+    totalPages: number,
+    category: "main" | "sub",
+    categoryTotal: number,
+    categoryBillCount: number
+  ): Record<string, any> {
+    const isSub = category === "sub";
+    const catName = isSub ? "หมวดบิลย่อย (เบิกเงินสด)" : "หมวดบิลหลัก (จัดซื้อ/ผู้รับเหมา)";
+    const catColor = isSub ? "#F59E0B" : "#2563EB";
+    const headerBg = isSub ? "#78350F" : "#1E3A8A";
+
+    const groupRows: any[] = [];
+
+    pageGroups.forEach((g, gIdx) => {
+      const isMulti = g.bills.length > 1;
+      const billTags = g.bills
+        .slice(0, 5)
+        .map(b => `#${b.billNo}`)
+        .join(", ") + (g.bills.length > 5 ? ` +${g.bills.length - 5}` : "");
+
+      const formattedAcc = g.accountNo
+        ? (g.accountNo.replace(/\D/g, "").length >= 9
+            ? `${g.accountNo.slice(0, 3)}-${g.accountNo.slice(3, 4)}-${g.accountNo.slice(4, 9)}-${g.accountNo.slice(9)}`.replace(/-+$/, "")
+            : g.accountNo)
+        : "-";
+
+      const confirmText = `ยืนยันการอนุมัติแล้ว: ${g.payeeName} ${g.bankName ? `(${g.bankName})` : ""} ยอด ฿${g.totalAmount.toLocaleString("th-TH")} (บิล: ${billTags})`;
+
+      groupRows.push({
+        type: "box",
+        layout: "vertical",
+        backgroundColor: gIdx % 2 === 0 ? "#F8FAFC" : "#FFFFFF",
+        paddingAll: "8px",
+        cornerRadius: "6px",
+        borderColor: isSub ? "#FEF3C7" : "#E2E8F0",
+        borderWidth: "1px",
+        margin: "sm",
+        contents: [
+          // Row 1: Payee Name + Total Amount
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              {
+                type: "text",
+                text: `${g.nickname || g.payeeName}`,
+                weight: "bold",
+                color: isSub ? "#92400E" : "#1E293B",
+                size: "xs",
+                flex: 6,
+                wrap: true
+              },
+              {
+                type: "text",
+                text: `฿${g.totalAmount.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                weight: "bold",
+                color: isSub ? "#D97706" : "#2563EB",
+                size: "xs",
+                align: "end",
+                flex: 4
+              }
+            ]
+          },
+          // Row 2: Account Number + Bank Name
+          {
+            type: "box",
+            layout: "horizontal",
+            margin: "xs",
+            contents: [
+              {
+                type: "text",
+                text: formattedAcc !== "-" ? `💳 ${formattedAcc}` : "💳 (ไม่มีเลข บ/ช)",
+                color: isSub ? "#78350F" : "#475569",
+                size: "xxs",
+                flex: 5
+              },
+              {
+                type: "text",
+                text: g.bankName ? `ธ.${g.bankName}` : "-",
+                color: isSub ? "#78350F" : "#475569",
+                size: "xxs",
+                align: "end",
+                flex: 5
+              }
+            ]
+          },
+          ...(g.accountName && g.accountName !== g.payeeName ? [
+            {
+              type: "box",
+              layout: "horizontal",
+              margin: "none",
+              contents: [
+                {
+                  type: "text",
+                  text: `ชื่อบัญชี: ${g.accountName}`,
+                  color: isSub ? "#78350F" : "#64748B",
+                  size: "xxs",
+                  wrap: true
+                }
+              ]
+            }
+          ] : []),
+          // Row 3: Combined Bills Tag
+          {
+            type: "box",
+            layout: "horizontal",
+            margin: "xs",
+            contents: [
+              {
+                type: "text",
+                text: isSub
+                  ? `🧾 ${isMulti ? `รวม ${g.bills.length} บิลย่อย:` : "บิลย่อย:"} ${billTags}`
+                  : `🧾 ${isMulti ? `รวม ${g.bills.length} บิล:` : "บิล:"} ${billTags}`,
+                color: isSub ? "#B45309" : "#64748B",
+                size: "xxs",
+                wrap: true,
+                flex: 8
+              }
+            ]
+          },
+          // Row 4: Confirm approval action for this recipient group
+          {
+            type: "box",
+            layout: "horizontal",
+            margin: "xs",
+            contents: [
+              {
+                type: "button",
+                action: {
+                  type: "message",
+                  label: "✅ รับทราบการอนุมัติ",
+                  text: confirmText
+                },
+                style: "secondary",
+                height: "sm",
+                color: isSub ? "#FEF3C7" : "#EFF6FF"
+              }
+            ]
+          }
+        ]
+      });
+    });
+
+    return {
+      type: "bubble",
+      size: "mega",
+      header: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: headerBg,
+        paddingAll: "10px",
+        contents: [
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              {
+                type: "text",
+                text: title,
+                weight: "bold",
+                color: "#FFFFFF",
+                size: "sm",
+                flex: 7
+              },
+              {
+                type: "text",
+                text: totalPages > 1 ? `หน้า ${pageIndex + 1}/${totalPages}` : "",
+                color: "#93C5FD",
+                size: "xxs",
+                align: "end",
+                flex: 3
+              }
+            ]
+          },
+          {
+            type: "text",
+            text: `วันที่ ${displayDate} • ทั้งหมด ${totalBillsCount} บิล`,
+            color: "#CBD5E1",
+            size: "xxs",
+            margin: "xs"
+          },
+          ...(hasBothCategories ? [
+            {
+              type: "box",
+              layout: "horizontal",
+              margin: "xs",
+              contents: [
+                {
+                  type: "text",
+                  text: `🏛️ หลัก: ฿${mainTotal.toLocaleString("th-TH")} (${mainBills.length})`,
+                  color: "#93C5FD",
+                  size: "xxs",
+                  flex: 5
+                },
+                {
+                  type: "text",
+                  text: `👤 ย่อย: ฿${subTotal.toLocaleString("th-TH")} (${subBills.length})`,
+                  color: "#FDE68A",
+                  size: "xxs",
+                  align: "end",
+                  flex: 5
+                }
+              ]
+            }
+          ] : [])
+        ]
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "8px",
+        contents: [
+          // Category Banner
+          {
+            type: "box",
+            layout: "horizontal",
+            paddingBottom: "4px",
+            borderColor: catColor,
+            borderWidth: "none",
+            contents: [
+              {
+                type: "text",
+                text: `📂 ${catName}`,
+                weight: "bold",
+                color: isSub ? "#92400E" : "#1E3A8A",
+                size: "xs",
+                flex: 6
+              },
+              {
+                type: "text",
+                text: `${categoryBillCount} บิล • ฿${categoryTotal.toLocaleString("th-TH")}`,
+                weight: "bold",
+                color: isSub ? "#D97706" : "#2563EB",
+                size: "xs",
+                align: "end",
+                flex: 4
+              }
+            ]
+          },
+          { type: "separator", margin: "xs", color: isSub ? "#FDE68A" : "#DBEAFE" },
+          // Payee Groups
+          ...groupRows
+        ]
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: "#F8FAFC",
+        paddingAll: "8px",
+        contents: [
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              {
+                type: "text",
+                text: "💰 รวมยอดอนุมัติทั้งสิ้น:",
+                weight: "bold",
+                color: "#1E293B",
+                size: "xs",
+                flex: 6
+              },
+              {
+                type: "text",
+                text: `฿${grandTotal.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                weight: "bold",
+                color: "#059669",
+                size: "xs",
+                align: "end",
+                flex: 4
+              }
+            ]
+          },
+          {
+            type: "box",
+            layout: "horizontal",
+            margin: "xs",
+            spacing: "sm",
+            contents: [
+              {
+                type: "button",
+                action: {
+                  type: "message",
+                  label: "💸 เช็คยอดโอนวันนี้",
+                  text: "ยอดโอนวันนี้"
+                },
+                style: "primary",
+                height: "sm",
+                color: "#10B981",
+                flex: 5
+              },
+              {
+                type: "button",
+                action: {
+                  type: "message",
+                  label: "📋 อนุมัติทั้งหมด",
+                  text: "ยอดอนุมัติทั้งหมด"
+                },
+                style: "secondary",
+                height: "sm",
+                flex: 5
+              }
+            ]
+          }
+        ]
+      }
+    };
+  }
+
+  const pageSize = 12;
+  const bubbles: any[] = [];
+
+  if (mainGroups.length > 0) {
+    const totalMainPages = Math.ceil(mainGroups.length / pageSize);
+    for (let i = 0; i < totalMainPages && bubbles.length < 10; i++) {
+      const chunk = mainGroups.slice(i * pageSize, (i + 1) * pageSize);
+      bubbles.push(buildApprovalBubblePage(
+        chunk,
+        i,
+        totalMainPages,
+        "main",
+        mainTotal,
+        mainBills.length
+      ));
+    }
+  }
+
+  if (subGroups.length > 0) {
+    const totalSubPages = Math.ceil(subGroups.length / pageSize);
+    for (let i = 0; i < totalSubPages && bubbles.length < 10; i++) {
+      const chunk = subGroups.slice(i * pageSize, (i + 1) * pageSize);
+      bubbles.push(buildApprovalBubblePage(
         chunk,
         i,
         totalSubPages,
