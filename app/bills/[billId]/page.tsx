@@ -18,7 +18,7 @@ export default async function BillDetailPage({ params }: BillDetailPageProps) {
   const { billId } = await params;
   const decodedBillId = decodeURIComponent(billId).trim();
 
-  const [rawDataRows, rawProjectRows, rawContractRows, peopleRows, storeRows, contractorRows, rawCompanyRows] = await Promise.all([
+  const [rawDataRows, rawProjectRows, rawContractRows, peopleRows, storeRows, contractorRows, rawCompanyRows, carRows] = await Promise.all([
     getRows(TABLES.DATA).catch(() => []),
     getRows(TABLES.PROJECT).catch(() => []),
     getRows(TABLES.CONTRACT_WORK).catch(() => []),
@@ -26,6 +26,7 @@ export default async function BillDetailPage({ params }: BillDetailPageProps) {
     getRows(TABLES.STORE).catch(() => []),
     getRows(TABLES.CONTRACTOR).catch(() => []),
     getRows(TABLES.COMPANY).catch(() => []),
+    getRows(TABLES.CAR).catch(() => []),
   ]);
 
   const rawBill = rawDataRows.find((row) => billKey(row) === decodedBillId || String(row._sheetRow || "") === decodedBillId || String(row.id || "") === decodedBillId);
@@ -37,6 +38,7 @@ export default async function BillDetailPage({ params }: BillDetailPageProps) {
     contracts: rawContractRows,
     contractors: contractorRows,
     people: peopleRows,
+    cars: carRows,
   });
 
   const documentData = await getBillDocumentData(bill, {
@@ -257,6 +259,7 @@ export default async function BillDetailPage({ params }: BillDetailPageProps) {
       vendorLink={vendorLink}
       documentData={documentData}
       userPermissions={userPermissions}
+      cars={carRows}
     />
   );
 }
