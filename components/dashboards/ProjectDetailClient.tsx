@@ -629,6 +629,7 @@ export function ProjectDetailClient({
               title="รายการบิลเบิกจ่ายที่เกี่ยวข้อง"
               subtitle={`ทั้งหมด ${displayedSummaryRows.length} รายการ`}
               showSearch
+              showDateFilter
               detailBasePath="/bills"
               detailKeyColumn="ลำดับ"
               cellFormatters={{

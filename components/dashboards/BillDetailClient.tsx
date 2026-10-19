@@ -63,6 +63,7 @@ type BillDetailClientProps = {
   documentData?: BillDocumentModel | null;
   userPermissions?: UserPermissions | null;
   stores?: SheetRow[];
+  cars?: SheetRow[];
 };
 
 export function BillDetailClient({
@@ -83,6 +84,7 @@ export function BillDetailClient({
   documentData,
   userPermissions,
   stores = [],
+  cars = [],
 }: BillDetailClientProps) {
   const [isDocModalOpen, setIsDocModalOpen] = useState(false);
   const [currentBill, setCurrentBill] = useState(bill);
@@ -92,6 +94,63 @@ export function BillDetailClient({
   }, [bill]);
 
   const billId = billKey(currentBill) || decodedBillId;
+
+  const carMap = useMemo(() => {
+    const map = new Map<string, { plateNo: string; brand: string; displayName: string }>();
+    if (cars && cars.length > 0) {
+      for (const c of cars) {
+        const id = String(c.id || c.id_car || c["id_car"] || "").trim();
+        const plate = String(c["หมายเลขทะเบียน"] || c.plate_no || c["ทะเบียน"] || "").trim();
+        const brand = String(c["ยี่ห้อรถ"] || c.brand || "").trim();
+        const displayName = brand && !plate.includes(brand) ? `${plate} (${brand})` : plate;
+        const info = { plateNo: plate, brand, displayName: displayName || id };
+        if (id) {
+          map.set(id, info);
+          map.set(id.toLowerCase(), info);
+          map.set(id.toUpperCase(), info);
+          const cleanId = id.toLowerCase().replace(/^car[-_]?/i, "").trim();
+          if (cleanId) {
+            map.set(cleanId, info);
+            map.set(`car${cleanId}`, info);
+            map.set(`Car${cleanId}`, info);
+          }
+        }
+        if (plate) {
+          map.set(plate, info);
+          map.set(plate.toLowerCase(), info);
+        }
+      }
+    }
+    return map;
+  }, [cars]);
+
+  const rawProductOrWork = text(currentBill["สินค้า/ทำงาน"] || currentBill["สินค้า"] || currentBill["รายละเอียดงาน"] || currentBill.description) || "-";
+
+  // Helper to resolve car ID (e.g. Car102) to license plate (e.g. 1ฒล3982)
+  const resolvePlate = useCallback((token: unknown): string => {
+    const str = String(token || "").trim();
+    if (!str || str === "-") return "";
+    const matched = carMap.get(str) || carMap.get(str.toLowerCase()) || carMap.get(str.toUpperCase());
+    if (matched && matched.plateNo) {
+      return matched.plateNo;
+    }
+    const clean = str.toLowerCase().replace(/^car[-_]?/i, "").trim();
+    if (clean) {
+      const m2 = carMap.get(clean) || carMap.get(`car${clean}`) || carMap.get(`Car${clean}`);
+      if (m2 && m2.plateNo) return m2.plateNo;
+    }
+    // Fallback: If token looks like a Car ID (e.g. Car102) and productOrWork contains plate in parentheses
+    if (/^car[-_]?\d+$/i.test(str)) {
+      const match = rawProductOrWork.match(/น้ำมัน\s*\(([^()]+)\)/i) || rawProductOrWork.match(/\(([^()]+)\)/);
+      if (match && match[1]) {
+        const plateExtracted = match[1].replace(/\s*\([^)]*\)/g, "").trim();
+        if (plateExtracted && plateExtracted !== str && !/^car[-_]?\d+$/i.test(plateExtracted)) {
+          return plateExtracted;
+        }
+      }
+    }
+    return str;
+  }, [carMap, rawProductOrWork]);
 
   const resolveStoreName = useCallback((token: string): string => {
     const trimmed = (token || "").trim();
@@ -168,7 +227,7 @@ export function BillDetailClient({
   }, [currentBill]);
 
   const getItemSubDetail = (item: any): string => {
-    return String(
+    const rawVal = String(
       item?.subItem ||
       item?.detail ||
       item?.toolName ||
@@ -178,6 +237,11 @@ export function BillDetailClient({
       item?.["sub_category"] ||
       ""
     ).trim();
+    if (rawVal) {
+      const resolved = resolvePlate(rawVal);
+      if (resolved && resolved !== rawVal) return resolved;
+    }
+    return rawVal;
   };
 
   const multiItemsSummary = useMemo(() => {
@@ -196,7 +260,7 @@ export function BillDetailClient({
       fullSummary,
       hasMultipleCats: cats.length > 1,
     };
-  }, [lineItems]);
+  }, [lineItems, getItemSubDetail]);
 
   const lineItemsTotal = useMemo(() => {
     return lineItems.reduce((s, i) => s + toNumber(i.amount ?? i.price ?? i.total), 0);
@@ -252,9 +316,9 @@ export function BillDetailClient({
   const category = text(currentBill["ประเภท"] || currentBill.category) || "-";
   const productOrWork = text(currentBill["สินค้า/ทำงาน"] || currentBill["สินค้า"] || currentBill["รายละเอียดงาน"] || currentBill.description) || "-";
   const laborStatus = text(currentBill["statusค่าแรง"]);
-  const itemName = text(currentBill["รายการ"] || currentBill.sub_category);
+  const itemName = resolvePlate(text(currentBill["รายการ"] || currentBill.sub_category));
   const toolName = text(currentBill["ชื่อเครื่องมือ"] || currentBill.tool_name);
-  const carPlate = text(currentBill["ทะเบียน"] || currentBill.plate_no);
+  const carPlate = resolvePlate(text(currentBill["ทะเบียน"] || currentBill.plate_no));
 
   const billDate = formatDateThai(currentBill["ว/ด/ป"] || currentBill.bill_date);
   const billReceivedDate = formatDateThai(currentBill["วันได้บิล"] || currentBill.bill_received_date);

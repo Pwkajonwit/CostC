@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowDownWideNarrow, ArrowUpWideNarrow, ChevronLeft, ChevronRight, Eye, List, Search, X } from "lucide-react";
+import { ArrowDownWideNarrow, ArrowUpWideNarrow, Calendar, ChevronLeft, ChevronRight, Eye, List, Search, X } from "lucide-react";
 import { useState, useMemo, useEffect, type ReactNode } from "react";
 import { BillImageThumbnail } from "@/components/bills/BillImageThumbnail";
 import type { SheetRow } from "@/lib/types";
-import { formatDateDisplay } from "@/lib/utils/dates";
+import { formatDateDisplay, normalizeDateToIso } from "@/lib/utils/dates";
 
 type DataTableProps = {
   columns: string[];
@@ -31,14 +31,34 @@ type DataTableProps = {
   cellFormatters?: Record<string, (value: unknown, row: SheetRow) => ReactNode>;
   showDetailColumn?: boolean;
   showSearch?: boolean;
+  showDateFilter?: boolean;
   initialSearch?: string;
   actionButton?: ReactNode;
 };
 
 const DEFAULT_PAGE_SIZE_OPTIONS = [20, 50, 100, 200];
 
-export function DataTable({ columns, rows, limit = 80, title = "Data", subtitle, rowLabel = "rows", pagination, sortToggle, detailBasePath, detailKeyColumn, cellFormatters, showDetailColumn = false, showSearch = false, initialSearch = "", actionButton }: DataTableProps) {
+export function DataTable({
+  columns,
+  rows,
+  limit = 80,
+  title = "Data",
+  subtitle,
+  rowLabel = "rows",
+  pagination,
+  sortToggle,
+  detailBasePath,
+  detailKeyColumn,
+  cellFormatters,
+  showDetailColumn = false,
+  showSearch = false,
+  showDateFilter = false,
+  initialSearch = "",
+  actionButton
+}: DataTableProps) {
   const [localSearch, setLocalSearch] = useState(initialSearch);
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [sortDesc, setSortDesc] = useState(sortToggle ? sortToggle.direction === "latest" : true);
   const [page, setPage] = useState(pagination ? pagination.page : 1);
   const [pageSize, setPageSize] = useState(pagination ? pagination.pageSize : limit);
@@ -73,14 +93,39 @@ export function DataTable({ columns, rows, limit = 80, title = "Data", subtitle,
   }, [cleanColumns]);
 
   const filteredRows = useMemo(() => {
-    if (!localSearch.trim()) return rows;
-    const query = localSearch.toLowerCase().trim();
-    return rows.filter(row => {
-      return Object.values(row).some(value =>
-        String(value || "").toLowerCase().includes(query)
-      );
-    });
-  }, [rows, localSearch]);
+    let result = rows;
+
+    if (startDate || endDate) {
+      result = result.filter(row => {
+        const rawDate = row["ว/ด/ป"] || row["วันที่"] || row.bill_date || row["date"] || row["Date"] || row["วันที่บันทึก"];
+        if (!rawDate) return false;
+        const iso = normalizeDateToIso(rawDate);
+        if (!iso) return false;
+        if (startDate && iso < startDate) return false;
+        if (endDate && iso > endDate) return false;
+        return true;
+      });
+    }
+
+    if (localSearch.trim()) {
+      const query = localSearch.toLowerCase().trim();
+      result = result.filter(row => {
+        return Object.values(row).some(value =>
+          String(value || "").toLowerCase().includes(query)
+        );
+      });
+    }
+
+    return result;
+  }, [rows, localSearch, startDate, endDate]);
+
+  const filteredTotalAmount = useMemo(() => {
+    if (!cleanColumns.some(c => c === "ยอดเงิน" || c.includes("ยอดเงิน"))) return null;
+    return filteredRows.reduce((sum, r) => {
+      const val = Number(String(r["ยอดเงิน"] || 0).replace(/,/g, ""));
+      return sum + (isNaN(val) ? 0 : val);
+    }, 0);
+  }, [filteredRows, cleanColumns]);
 
   const totalRows = filteredRows.length;
   const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
@@ -104,9 +149,60 @@ export function DataTable({ columns, rows, limit = 80, title = "Data", subtitle,
           <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 shrink-0">
             {totalRows} {rowLabel}
           </span>
+          {filteredTotalAmount !== null && (startDate || endDate || localSearch) ? (
+            <span className="text-xs px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-mono font-medium shrink-0">
+              รวม: ฿{filteredTotalAmount.toLocaleString("th-TH")}
+            </span>
+          ) : null}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {showDateFilter ? (
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs text-slate-600">
+              <Calendar size={13} className="text-slate-400 shrink-0" />
+              <div className="flex items-center gap-1">
+                <span className="text-2xs text-slate-400 hidden sm:inline">จาก</span>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={e => {
+                    setStartDate(e.target.value);
+                    setPage(1);
+                  }}
+                  className="bg-white border border-slate-200 rounded px-1.5 py-0.5 text-xs text-slate-700 focus:outline-none focus:border-slate-400 w-28 sm:w-32"
+                  title="ตั้งแต่วันที่"
+                />
+              </div>
+              <span className="text-slate-400 text-xs">ถึง</span>
+              <div className="flex items-center gap-1">
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={e => {
+                    setEndDate(e.target.value);
+                    setPage(1);
+                  }}
+                  className="bg-white border border-slate-200 rounded px-1.5 py-0.5 text-xs text-slate-700 focus:outline-none focus:border-slate-400 w-28 sm:w-32"
+                  title="ถึงวันที่"
+                />
+              </div>
+              {(startDate || endDate) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStartDate("");
+                    setEndDate("");
+                    setPage(1);
+                  }}
+                  className="text-slate-400 hover:text-rose-600 p-0.5 transition"
+                  title="ล้างตัวกรองวันที่"
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+          ) : null}
+
           {showSearch ? (
             <div className="relative flex items-center">
               <Search size={13} className="absolute left-2.5 text-slate-400 pointer-events-none" />
