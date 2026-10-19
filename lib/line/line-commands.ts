@@ -273,8 +273,8 @@ export async function handleLineCommand(
       );
 
       const altText = `💸 ยอดโอนประจำวัน (${targetBills.length} บิล)`;
-      const sent = await replyFlexMessage(replyToken, altText, transferFlex);
-      if (!sent && replyToken) {
+      const sent = await replyFlexMessage(replyToken, altText, transferFlex, targetId);
+      if (!sent && (replyToken || targetId)) {
         const mainBills = targetBills.filter(b => !isSubBillRecord(b));
         const subBills = targetBills.filter(b => isSubBillRecord(b));
         const mainTotal = mainBills.reduce((s, b) => s + Number(b["ยอดโอน"] || b["ยอดเงิน"] || b.amount || 0), 0);
@@ -289,7 +289,11 @@ export async function handleLineCommand(
           textFallback += `👤 หมวดบิลย่อย (${subBills.length} บิล): ฿${subTotal.toLocaleString("th-TH")}\n`;
         }
         textFallback += `\n💰 ยอดโอนรวมทั้งหมด: ฿${grandTotal.toLocaleString("th-TH")}`;
-        await replyTextMessage(replyToken, textFallback.trim());
+        if (targetId) {
+          await sendTextMessage(targetId, textFallback.trim());
+        } else if (replyToken) {
+          await replyTextMessage(replyToken, textFallback.trim());
+        }
       }
       return true;
     }
@@ -402,7 +406,7 @@ export async function handleLineCommand(
         // Filter by bills approved today in Bangkok timezone
         const todayBills = targetBills.filter(b => {
           const d = (b.data && typeof b.data === "object") ? b.data : {};
-          const rawApprovedAt = b.approved_at || d.approved_at;
+          const rawApprovedAt = b.approved_at || d.approved_at || b["approved_at"];
           if (rawApprovedAt) {
             try {
               const approvedBangkokYmd = new Intl.DateTimeFormat("en-CA", {
@@ -413,28 +417,27 @@ export async function handleLineCommand(
               }).format(new Date(rawApprovedAt));
               if (approvedBangkokYmd === todayYmd) return true;
             } catch {
-              // ignore
+              // ignore invalid timestamp and fallback to other fields
             }
           }
-          const pCandidates = [
-            b["วันที่อนุมัติ"], d["วันที่อนุมัติ"],
-            b["ว/ด/ป"], d["ว/ด/ป"],
-            b["วันที่"], d["วันที่"],
-            b.bill_date, d.bill_date
-          ];
-          for (const cand of pCandidates) {
-            if (cand && normalizeDateToIso(cand) === todayYmd) return true;
+
+          const rawApprovedDate = b["วันที่อนุมัติ"] || d["วันที่อนุมัติ"];
+          if (rawApprovedDate) {
+            const iso = normalizeDateToIso(rawApprovedDate);
+            if (iso && iso === todayYmd) return true;
           }
-          const rawUpdatedAt = b.updated_at || d.updated_at;
-          if (rawUpdatedAt) {
+
+          // Fallback if bill was created/updated today in Bangkok
+          const rawCreatedAt = b.created_at || d.created_at;
+          if (rawCreatedAt) {
             try {
-              const updatedBangkokYmd = new Intl.DateTimeFormat("en-CA", {
+              const createdBangkokYmd = new Intl.DateTimeFormat("en-CA", {
                 timeZone: "Asia/Bangkok",
                 year: "numeric",
                 month: "2-digit",
                 day: "2-digit"
-              }).format(new Date(rawUpdatedAt));
-              if (updatedBangkokYmd === todayYmd) return true;
+              }).format(new Date(rawCreatedAt));
+              if (createdBangkokYmd === todayYmd) return true;
             } catch {
               // ignore
             }
@@ -472,8 +475,8 @@ export async function handleLineCommand(
       );
 
       const altText = `📑 ยอดอนุมัติประจำวัน (${targetBills.length} บิล)`;
-      const sent = await replyFlexMessage(replyToken, altText, approvalFlex);
-      if (!sent && replyToken) {
+      const sent = await replyFlexMessage(replyToken, altText, approvalFlex, targetId);
+      if (!sent && (replyToken || targetId)) {
         const mainBills = targetBills.filter(b => !isSubBillRecord(b));
         const subBills = targetBills.filter(b => isSubBillRecord(b));
         const mainTotal = mainBills.reduce((s, b) => s + Number(b["ยอดเงิน"] || b.amount || 0), 0);
@@ -488,8 +491,244 @@ export async function handleLineCommand(
           textFallback += `👤 หมวดบิลย่อย (${subBills.length} บิล): ฿${subTotal.toLocaleString("th-TH")}\n`;
         }
         textFallback += `\n💰 ยอดอนุมัติรวมทั้งหมด: ฿${grandTotal.toLocaleString("th-TH")}`;
-        await replyTextMessage(replyToken, textFallback.trim());
+        if (targetId) {
+          await sendTextMessage(targetId, textFallback.trim());
+        } else if (replyToken) {
+          await replyTextMessage(replyToken, textFallback.trim());
+        }
       }
+      return true;
+    }
+
+    // 2.2.1 Check & Verify Approval Notification Command
+    // ("ตรวจสอบการอนุมัติแล้ว", "ตรวจสอบอนุมัติแล้ว", "ตรวจอนุมัติแล้ว", "ตรวจสอบเรียบร้อย")
+    const isApprovalVerifiedCmd = (
+      cleanCmd === "ตรวจสอบการอนุมัติแล้ว" ||
+      cleanCmd === "ตรวจสอบอนุมัติแล้ว" ||
+      cleanCmd === "ตรวจอนุมัติแล้ว" ||
+      cleanCmd === "ตรวจสอบเรียบร้อยแล้ว" ||
+      cleanCmd === "ตรวจสอบเรียบร้อย" ||
+      cleanCmd === "ยืนยันตรวจสอบการอนุมัติ" ||
+      cleanCmd === "ตรวจสอบแล้ว"
+    );
+
+    if (isApprovalVerifiedCmd) {
+      const {
+        getLineConfigIds,
+        createWithdrawApproverFlex,
+        sendFlexMessageDetailed,
+        replyMessages
+      } = await import("@/lib/line/line");
+
+      const [
+        rawBills,
+        { closerIds, financeIds },
+        peopleMap,
+        bankInfoMap,
+        contractsMap,
+        projectBudgetMap,
+        carsMap
+      ] = await Promise.all([
+        getRows(TABLES.DATA, 0, 5000),
+        getLineConfigIds(),
+        getPeopleMap(),
+        getBankInfoMap(),
+        getContractWorkMap(),
+        getProjectBudgetMap(),
+        getCarsMap()
+      ]);
+
+      // Filter bills in status "อนุมัติ" waiting for finance/closer to pay (strict check to avoid "ไม่อนุมัติ")
+      const allApprovedBills = rawBills.filter(b => {
+        const rawSt = String(b["สถานะ"] || b.status || "").trim();
+        return normalizeBillStatus(rawSt) === "อนุมัติ" && !isPaidBill(b) && !rawSt.includes("ปิดงาน") && !rawSt.includes("จ่ายแล้ว");
+      });
+
+      const nowBangkok = new Date();
+      let todayYmd = "";
+      let todayDisplay = "";
+      try {
+        todayYmd = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Asia/Bangkok",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit"
+        }).format(nowBangkok);
+
+        todayDisplay = nowBangkok.toLocaleDateString("th-TH", {
+          timeZone: "Asia/Bangkok",
+          day: "numeric",
+          month: "short",
+          year: "numeric"
+        });
+      } catch {
+        todayYmd = nowBangkok.toISOString().split("T")[0];
+        todayDisplay = nowBangkok.toLocaleDateString("th-TH");
+      }
+
+      // Check if there are bills specifically approved today in Bangkok timezone
+      const todayApprovedBills = allApprovedBills.filter(b => {
+        const d = (b.data && typeof b.data === "object") ? b.data : {};
+        const rawApprovedAt = b.approved_at || d.approved_at || b["approved_at"];
+        if (rawApprovedAt) {
+          try {
+            const approvedBangkokYmd = new Intl.DateTimeFormat("en-CA", {
+              timeZone: "Asia/Bangkok",
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit"
+            }).format(new Date(rawApprovedAt));
+            if (approvedBangkokYmd === todayYmd) return true;
+          } catch {}
+        }
+        const rawApprovedDate = b["วันที่อนุมัติ"] || d["วันที่อนุมัติ"];
+        if (rawApprovedDate) {
+          const iso = normalizeDateToIso(rawApprovedDate);
+          if (iso && iso === todayYmd) return true;
+        }
+        const rawCreatedAt = b.created_at || d.created_at;
+        if (rawCreatedAt) {
+          try {
+            const createdBangkokYmd = new Intl.DateTimeFormat("en-CA", {
+              timeZone: "Asia/Bangkok",
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit"
+            }).format(new Date(rawCreatedAt));
+            if (createdBangkokYmd === todayYmd) return true;
+          } catch {}
+        }
+        return false;
+      });
+
+      // Use today's approved bills if present, otherwise all approved bills waiting to be closed
+      const approvedBills = todayApprovedBills.length > 0 ? todayApprovedBills : allApprovedBills;
+
+      if (approvedBills.length === 0) {
+        await replyTextMessage(
+          replyToken,
+          `ℹ️ ในระบบยังไม่มีรายการบิลสถานะ "อนุมัติ" ที่รอปิดงาน/โอนเงินในขณะนี้ครับ (${todayDisplay})`
+        );
+        return true;
+      }
+
+      const mainBills = approvedBills.filter(b => !isSubBillRecord(b));
+      const subBills = approvedBills.filter(b => isSubBillRecord(b));
+      const mainTotal = mainBills.reduce((s, b) => s + Number(b["ยอดเงิน"] || b.amount || 0), 0);
+      const subTotal = subBills.reduce((s, b) => s + Number(b["ยอดเงิน"] || b.amount || 0), 0);
+      const grandTotal = mainTotal + subTotal;
+
+      const operatorName = await getOperatorDisplayName(userId, "ผู้ตรวจสอบ / ผู้อนุมัติ");
+
+      // Identify Closers / Finance
+      const rawFinanceList = Array.from(new Set([...(closerIds || []), ...(financeIds || [])].filter(Boolean)));
+      const fallbackFinanceGroup = await getLineTargetGroup("finance");
+      const validFinanceGroup = fallbackFinanceGroup && fallbackFinanceGroup.startsWith("C") ? fallbackFinanceGroup : "";
+      const targetFinanceList = rawFinanceList.length > 0 
+        ? rawFinanceList 
+        : (validFinanceGroup ? [validFinanceGroup] : []);
+
+      const closerNames = targetFinanceList.length > 0
+        ? await getRecipientDisplayNames(targetFinanceList, "ท่าน")
+        : "ผู้ปิดงานหลัก / ฝ่ายการเงิน";
+
+      // 1. Build Closing Flex Cards with Red "ปิดงาน" buttons!
+      const flexItems: Array<{ altText: string; flex: Record<string, any> }> = [];
+      if (mainBills.length > 0) {
+        const mainFlex = createWithdrawApproverFlex(
+          mainBills,
+          peopleMap,
+          bankInfoMap,
+          contractsMap,
+          projectBudgetMap,
+          carsMap,
+          undefined,
+          `🏛️ บิลหลักตรวจสอบแล้ว (รอปิดงาน)`
+        );
+        flexItems.push({
+          altText: `🏛️ บิลหลักตรวจสอบแล้ว ${mainBills.length} รายการ (฿${mainTotal.toLocaleString("th-TH")})`,
+          flex: mainFlex
+        });
+      }
+      if (subBills.length > 0) {
+        const subFlex = createWithdrawApproverFlex(
+          subBills,
+          peopleMap,
+          bankInfoMap,
+          contractsMap,
+          projectBudgetMap,
+          carsMap,
+          undefined,
+          `👤 บิลย่อยตรวจสอบแล้ว (รอปิดงาน)`
+        );
+        flexItems.push({
+          altText: `👤 บิลย่อยตรวจสอบแล้ว ${subBills.length} รายการ (฿${subTotal.toLocaleString("th-TH")})`,
+          flex: subFlex
+        });
+      }
+
+      const replyMsg =
+        `✅ ตรวจสอบการอนุมัติเรียบร้อยแล้ว!\n\n` +
+        `👮‍♂️ ผู้ตรวจสอบ: ${operatorName}\n` +
+        `📅 ประจำวันที่: ${todayDisplay}\n` +
+        `📊 บิลที่ตรวจสอบแล้ว: ${approvedBills.length} บิล\n` +
+        `💰 ยอดเงินรวม: ฿${grandTotal.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\n` +
+        `📢 ระบบได้ส่งการ์ดสำหรับปิดงานให้ดำเนินการด้านล่างเรียบร้อยแล้วครับ 🎯`;
+
+      // 2. Reply in current room (Confirmation Text + Closing Flex Cards)
+      let replied = false;
+      if (replyToken) {
+        const messagesPayload: any[] = [{ type: "text", text: replyMsg }];
+        for (const item of flexItems.slice(0, 4)) {
+          messagesPayload.push({
+            type: "flex",
+            altText: item.altText,
+            contents: item.flex
+          });
+        }
+        replied = await replyMessages(replyToken, messagesPayload);
+      }
+
+      // If replyToken failed or was empty, push directly to targetId
+      if (!replied && targetId) {
+        await sendTextMessage(targetId, replyMsg).catch(() => null);
+        for (const item of flexItems) {
+          await sendFlexMessageDetailed(targetId, item.altText, item.flex).catch(() => null);
+        }
+      }
+
+      // 3. Also push closing Flex cards to other closers who are outside current room
+      if (targetFinanceList.length > 0) {
+        let billBreakdown = "";
+        if (mainBills.length > 0) {
+          billBreakdown += `  • 🏛️ บิลหลัก: ${mainBills.length} รายการ (฿${mainTotal.toLocaleString("th-TH")})\n`;
+        }
+        if (subBills.length > 0) {
+          billBreakdown += `  • 👤 บิลย่อย: ${subBills.length} รายการ (฿${subTotal.toLocaleString("th-TH")})\n`;
+        }
+
+        const notifyCloserMsg =
+          `📢 แจ้งเตือนผู้ปิดงานหลัก (${closerNames}):\n\n` +
+          `👮‍♂️ ${operatorName} ได้ทำการ [✅ ตรวจสอบรายการอนุมัติ] ประจำวันที่ ${todayDisplay} เรียบร้อยแล้ว\n\n` +
+          `📊 สรุปรายการบิลรอปิดงาน (${approvedBills.length} บิล):\n` +
+          billBreakdown +
+          `💰 ยอดเงินรวมทั้งสิ้น: ฿${grandTotal.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\n` +
+          `👉 กดปุ่ม [ปิดงาน] ที่การ์ดด้านล่างเพื่อดำเนินการจ่ายเงินและปิดงานได้ทันทีครับ ✨`;
+
+        for (const financeId of targetFinanceList) {
+          if (financeId && financeId !== targetId) {
+            await sendTextMessage(financeId, notifyCloserMsg).catch(err => {
+              console.error(`Failed sending verification push to closer ${financeId}:`, err);
+            });
+            for (const item of flexItems) {
+              await sendFlexMessageDetailed(financeId, item.altText, item.flex).catch(err => {
+                console.error(`Failed sending flex card to closer ${financeId}:`, err);
+              });
+            }
+          }
+        }
+      }
+
       return true;
     }
 
@@ -1015,6 +1254,7 @@ export async function handleLineCommand(
 
         if (isApprove) {
           patchPayload.approved_at = nowIso;
+          patchPayload["วันที่อนุมัติ"] = todayDate;
         } else if (isReject) {
           patchPayload.rejected_at = nowIso;
         } else {

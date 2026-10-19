@@ -271,6 +271,13 @@ export function mapSupabaseRowToSheetRow(dbTable: string, row: Record<string, an
     res["created_by"] = res["ผู้สร้างบิล"];
     res["รูปถ่ายบิล"] = row.image_url ?? row["รูปถ่ายบิล"] ?? dataObj["รูปถ่ายบิล"];
     res["สถานะ"] = row.status ?? row["สถานะ"] ?? dataObj["สถานะ"];
+    res.status = res["สถานะ"];
+    res.approved_at = row.approved_at || dataObj.approved_at || null;
+    res["approved_at"] = res.approved_at;
+    res["วันที่อนุมัติ"] = dataObj["วันที่อนุมัติ"] || row.approved_at || dataObj.approved_at || "";
+    res.paid_at = row.paid_at || dataObj.paid_at || null;
+    res["paid_at"] = res.paid_at;
+    res.data = dataObj;
     const resolvedBillDate = row.bill_date ? String(row.bill_date) : row["ว/ด/ป"] ?? row["วันที่"] ?? dataObj["ว/ด/ป"] ?? dataObj["วันที่"] ?? (row.created_at ? getTodayDateIso(new Date(row.created_at)) : "");
     res["ว/ด/ป"] = resolvedBillDate;
     res["วันที่"] = resolvedBillDate;
@@ -720,6 +727,21 @@ export function mapSheetRowToSupabaseRow(tableName: string, row: Record<string, 
 
     const rawStatus = row["สถานะ"] ?? row.status;
     if (hasValue(rawStatus)) dbRow.status = String(rawStatus).trim();
+
+    const rawApprovedAt = row["approved_at"] ?? row.approved_at ?? row["วันที่อนุมัติ"];
+    if (hasValue(rawApprovedAt)) {
+      dbRow.approved_at = rawApprovedAt;
+      if (!dbRow.data) dbRow.data = {};
+      dbRow.data.approved_at = rawApprovedAt;
+      dbRow.data["วันที่อนุมัติ"] = rawApprovedAt;
+    }
+
+    const rawPaidAt = row["paid_at"] ?? row.paid_at;
+    if (hasValue(rawPaidAt)) {
+      dbRow.paid_at = rawPaidAt;
+      if (!dbRow.data) dbRow.data = {};
+      dbRow.data.paid_at = rawPaidAt;
+    }
 
     const rawDate = row["ว/ด/ป"] ?? row["วันที่"] ?? row.bill_date;
     if (hasValue(rawDate)) dbRow.bill_date = normalizeDateToIso(rawDate);

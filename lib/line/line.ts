@@ -465,6 +465,38 @@ export async function replyMultipleFlexMessages(
   }
 }
 
+export async function replyMessages(
+  replyToken: string,
+  messages: any[]
+): Promise<boolean> {
+  const token = await getDynamicAccessToken();
+  if (!token || !replyToken) return false;
+  try {
+    const valid = messages.filter(Boolean).slice(0, 5);
+    if (valid.length === 0) return false;
+    const res = await fetch(`${LINE_API_BASE}/reply`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        replyToken,
+        messages: valid
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.warn("⚠️ replyMessages failed:", err);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.warn("⚠️ replyMessages error:", e);
+    return false;
+  }
+}
+
 /**
  * Send multiple Flex messages via push (up to 5 messages)
  */
@@ -668,7 +700,9 @@ export function createBillNotificationFlex(bill: {
   const requesterName = resolveStaffDisplayName(rawRequester, peopleMap) || rawRequester;
   const pettyCashInfo = resolvePettyCashInfo(rawRequester, pettyCashMap, peopleMap);
 
-  const rawPlate = (bill as any)["ทะเบียน"] || (bill as any).plate_no || (bill as any)["id_car"] || (bill as any).id_car;
+  const billItemsList = (bill as any).items || (bill as any).data?.items || [];
+  const itemWithPlate = Array.isArray(billItemsList) ? billItemsList.find((i: any) => i.vehiclePlate || i.plate) : null;
+  const rawPlate = (bill as any)["ทะเบียน"] || (bill as any).plate_no || (bill as any)["id_car"] || (bill as any).id_car || (bill as any).data?.["ทะเบียน"] || (bill as any).data?.plate_no || itemWithPlate?.vehiclePlate || itemWithPlate?.plate;
   const carDisplayName = resolveCarDisplayName(rawPlate, carsMap);
 
   const rawStaff = (bill as any)["ชื่อพนักงาน"] || (bill as any).staff_name || (bill as any)["รหัสพนักงาน"];
@@ -686,8 +720,17 @@ export function createBillNotificationFlex(bill: {
 
   let rawBillDescription = bill.description || (bill as any)["รายละเอียดงาน"] || (bill as any).data?.["รายละเอียดงาน"] || (bill as any)["สินค้า/ทำงาน"] || (bill as any)["รายละเอียด"] || "-";
   let billDescription = sanitizeFlexItemDescription(rawBillDescription, carsMap, peopleMap);
-  if (carDisplayName && (billDescription === "-" || !billDescription || /^[a-zA-Z]{1,3}[-_]?\d+$/.test(billDescription))) {
-    billDescription = rawCategory.includes("ซ่อม") ? `ซ่อมรถ (${carDisplayName})` : `น้ำมัน (${carDisplayName})`;
+  const isFuel = rawCategory.includes("น้ำมัน") || billDescription.includes("น้ำมัน") || rawCategory.startsWith("4.") || rawCategory.startsWith("501");
+  const isRepair = rawCategory.includes("ซ่อม") || billDescription.includes("ซ่อม") || rawCategory.startsWith("5.");
+
+  if (carDisplayName) {
+    if (billDescription === "-" || !billDescription || /^[a-zA-Z]{1,3}[-_]?\d+$/.test(billDescription) || billDescription === "น้ำมัน" || billDescription === "501 น้ำมัน" || billDescription.startsWith("501") || billDescription === "ซ่อมรถ") {
+      billDescription = isRepair ? `ซ่อมรถ (${carDisplayName})` : `น้ำมัน (${carDisplayName})`;
+    } else if (isFuel && !billDescription.includes(carDisplayName) && !billDescription.includes(carDisplayName.split(" ")[0])) {
+      billDescription = `${billDescription} (${carDisplayName})`;
+    } else if (isRepair && !billDescription.includes(carDisplayName) && !billDescription.includes(carDisplayName.split(" ")[0])) {
+      billDescription = `${billDescription} (${carDisplayName})`;
+    }
   } else if (staffDisplayName && (billDescription === "-" || !billDescription || /^[a-zA-Z]{1,3}[-_]?\d+$/.test(billDescription))) {
     billDescription = `พนักงาน (${staffDisplayName})`;
   } else if (toolDisplayName && (billDescription === "-" || !billDescription || /^[a-zA-Z]{1,3}[-_]?\d+$/.test(billDescription))) {
@@ -1811,7 +1854,8 @@ export function createBillSearchResultFlex(
 
           const hasImages = imgList.length > 0;
 
-          const rawCarRef = (b as any)["ทะเบียน"] || (b as any).plate_no || (b as any)["id_car"] || (b as any).id_car;
+          const lineItems = extractBillLineItems(b);
+          const rawCarRef = (b as any)["ทะเบียน"] || (b as any).plate_no || (b as any)["id_car"] || (b as any).id_car || (b as any).data?.["ทะเบียน"] || (b as any).data?.plate_no || lineItems.find((i: any) => i.vehiclePlate)?.vehiclePlate;
           const carPlate = resolveCarDisplayName(rawCarRef, carsMap);
 
           const rawStaffRef = (b as any)["ชื่อพนักงาน"] || (b as any).staff_name || (b as any)["รหัสพนักงาน"];
@@ -1822,9 +1866,20 @@ export function createBillSearchResultFlex(
           const isContractor = rawVendorType === "ผู้รับเหมา" || Boolean((b as any)["ผู้รับเหมา"]) || Boolean((b as any).contractor_id) || rawCatName.includes("ค่าแรง") || rawCatName.startsWith("2.");
 
           const rawDesc = b.description || (b as any)["รายละเอียดงาน"] || (b as any).data?.["รายละเอียดงาน"] || (b as any)["สินค้า/ทำงาน"] || (b as any)["รายละเอียด"] || "-";
-          const cleanDesc = sanitizeFlexItemDescription(rawDesc, carsMap, peopleMap);
-
-          const lineItems = extractBillLineItems(b);
+          let cleanDesc = sanitizeFlexItemDescription(rawDesc, carsMap, peopleMap);
+          if (carPlate && (rawCatName.includes("น้ำมัน") || cleanDesc.includes("น้ำมัน") || rawCatName.startsWith("501"))) {
+            if (cleanDesc === "น้ำมัน" || cleanDesc.startsWith("501")) {
+              cleanDesc = `น้ำมัน (${carPlate})`;
+            } else if (!cleanDesc.includes(carPlate) && !cleanDesc.includes(carPlate.split(" ")[0])) {
+              cleanDesc = `${cleanDesc} (${carPlate})`;
+            }
+          } else if (carPlate && (rawCatName.includes("ซ่อม") || cleanDesc.includes("ซ่อม"))) {
+            if (cleanDesc === "ซ่อมรถ") {
+              cleanDesc = `ซ่อมรถ (${carPlate})`;
+            } else if (!cleanDesc.includes(carPlate) && !cleanDesc.includes(carPlate.split(" ")[0])) {
+              cleanDesc = `${cleanDesc} (${carPlate})`;
+            }
+          }
 
           const textDetailsBox = {
             type: "box",
@@ -2076,6 +2131,20 @@ export function createBillSearchResultFlex(
                         }
                         if (rawDetail && !itemTitle.includes(rawDetail)) {
                           itemTitle = `${itemTitle} (${rawDetail})`;
+                        }
+                      }
+                      const itemPlate = resolveCarDisplayName(item.vehiclePlate || (rawCatName.includes("น้ำมัน") || rawCatName.includes("ซ่อม") ? rawCarRef : ""), carsMap);
+                      if (itemPlate && (rawCat.includes("น้ำมัน") || cleanCat.includes("น้ำมัน") || rawCatName.includes("น้ำมัน"))) {
+                        if (itemTitle === "น้ำมัน" || itemTitle.startsWith("501")) {
+                          itemTitle = `น้ำมัน (${itemPlate})`;
+                        } else if (!itemTitle.includes(itemPlate) && !itemTitle.includes(itemPlate.split(" ")[0])) {
+                          itemTitle = `${itemTitle} (${itemPlate})`;
+                        }
+                      } else if (itemPlate && (rawCat.includes("ซ่อม") || cleanCat.includes("ซ่อม") || rawCatName.includes("ซ่อม"))) {
+                        if (itemTitle === "ซ่อมรถ") {
+                          itemTitle = `ซ่อมรถ (${itemPlate})`;
+                        } else if (!itemTitle.includes(itemPlate) && !itemTitle.includes(itemPlate.split(" ")[0])) {
+                          itemTitle = `${itemTitle} (${itemPlate})`;
                         }
                       }
 
@@ -2556,24 +2625,22 @@ export async function getLineTargetIds(): Promise<{
         ownerId = String(cfg.LINE_USER_ID_OWN || process.env.LINE_USER_ID_OWN || LINE_CONFIG.USER_ID_OWN || "").trim();
       }
 
-      if (approverSet.size === 0) {
-        const rawApprovers = String(cfg.LINE_USER_ID_APPROVER || process.env.LINE_USER_ID_APPROVER || LINE_CONFIG.USER_ID_APPROVER || "").trim();
-        if (rawApprovers) {
-          rawApprovers.split(",").forEach(id => {
-            const clean = id.trim();
-            if (clean) approverSet.add(clean);
-          });
-        }
+      // Always merge explicitly configured approvers from system_options line_config
+      const rawApprovers = String(cfg.LINE_USER_ID_APPROVER || process.env.LINE_USER_ID_APPROVER || LINE_CONFIG.USER_ID_APPROVER || "").trim();
+      if (rawApprovers) {
+        rawApprovers.split(",").forEach(id => {
+          const clean = id.trim();
+          if (clean) approverSet.add(clean);
+        });
       }
 
-      if (financeSet.size === 0) {
-        const rawClosers = String(cfg.LINE_USER_ID_CLOSER || cfg.LINE_USER_ID_FINANCE || process.env.LINE_USER_ID_CLOSER || "").trim();
-        if (rawClosers) {
-          rawClosers.split(",").forEach(id => {
-            const clean = id.trim();
-            if (clean) financeSet.add(clean);
-          });
-        }
+      // Always merge explicitly configured closers/finance from system_options line_config
+      const rawClosers = String(cfg.LINE_USER_ID_CLOSER || cfg.LINE_USER_ID_FINANCE || process.env.LINE_USER_ID_CLOSER || "").trim();
+      if (rawClosers) {
+        rawClosers.split(",").forEach(id => {
+          const clean = id.trim();
+          if (clean) financeSet.add(clean);
+        });
       }
 
       // เจ้าของระบบ (Owner) มีสิทธิ์แค่รับแจ้งเตือนประจำวันเท่านั้น (ตัดออกจาก approverSet และ financeSet)
@@ -4990,12 +5057,12 @@ export function createMultiBillFlex(
       const imgList = getBillImages(b);
       const hasImages = imgList.length > 0;
 
-      const isFuelBill = rawCatName.includes("น้ำมัน") || rawCatName.startsWith("4.");
+      const isFuelBill = rawCatName.includes("น้ำมัน") || rawCatName.startsWith("4.") || rawCatName.startsWith("501");
       const isRepairBill = rawCatName.includes("ซ่อมรถ") || rawCatName.startsWith("5.");
       const isToolBill = rawCatName.includes("เครื่องมือ") || rawCatName.startsWith("7.");
       const isOtherBill = rawCatName.includes("อื่นๆ") || rawCatName.startsWith("8.");
 
-      const rawCarRef = b["ทะเบียน"] || b.plate_no || b["id_car"] || b.id_car;
+      const rawCarRef = b["ทะเบียน"] || b.plate_no || b["id_car"] || b.id_car || b.data?.["ทะเบียน"] || b.data?.plate_no || lineItems.find((i: any) => i.vehiclePlate)?.vehiclePlate;
       const carPlate = resolveCarDisplayName(rawCarRef, carsMap);
 
       const toolName = String(b["ชื่อเครื่องมือ"] || b.tool_name || "").trim();
@@ -5322,6 +5389,28 @@ export function createMultiBillFlex(
                     }
                   }
                   itemTitle = sanitizeFlexItemDescription(itemTitle, carsMap, peopleMap);
+
+                  const itemPlate = resolveCarDisplayName(item.vehiclePlate || (isFuelBill || isRepairBill ? rawCarRef : ""), carsMap);
+                  const isItemFuel = isFuelBill || rawCat.includes("น้ำมัน") || rawName.includes("น้ำมัน") || cleanCat.includes("น้ำมัน");
+                  const isItemRepair = isRepairBill || rawCat.includes("ซ่อม") || rawName.includes("ซ่อม") || cleanCat.includes("ซ่อม");
+
+                  if (isItemFuel && itemPlate && !itemTitle.includes(itemPlate) && !itemTitle.includes(itemPlate.split(" ")[0])) {
+                    if (itemTitle === "น้ำมัน" || itemTitle === "501 น้ำมัน" || itemTitle.startsWith("501")) {
+                      itemTitle = `น้ำมัน (${itemPlate})`;
+                    } else {
+                      itemTitle = `${itemTitle} (${itemPlate})`;
+                    }
+                  } else if (isItemRepair && itemPlate && !itemTitle.includes(itemPlate) && !itemTitle.includes(itemPlate.split(" ")[0])) {
+                    if (itemTitle === "ซ่อมรถ" || itemTitle.startsWith("502")) {
+                      itemTitle = `ซ่อมรถ (${itemPlate})`;
+                    } else {
+                      itemTitle = `${itemTitle} (${itemPlate})`;
+                    }
+                  } else if (item.toolName && !itemTitle.includes(item.toolName)) {
+                    itemTitle = `${itemTitle} (${item.toolName})`;
+                  } else if (item.subItem && !itemTitle.includes(item.subItem)) {
+                    itemTitle = `${itemTitle} (${item.subItem})`;
+                  }
 
                   const budgetField = resolveProductBudgetField(rawCat) || resolveProductBudgetField(cleanCat) || resolveProductBudgetField(rawName);
                   const { cap: budgetCap, actualField } = getBudgetCapForField(budgetField, projInfo?.allBudgets);
@@ -6552,8 +6641,6 @@ export function createDailyApprovalSummaryFlex(
             : g.accountNo)
         : "-";
 
-      const confirmText = `ยืนยันการอนุมัติแล้ว: ${g.payeeName} ${g.bankName ? `(${g.bankName})` : ""} ยอด ฿${g.totalAmount.toLocaleString("th-TH")} (บิล: ${billTags})`;
-
       groupRows.push({
         type: "box",
         layout: "vertical",
@@ -6645,25 +6732,6 @@ export function createDailyApprovalSummaryFlex(
                 flex: 8
               }
             ]
-          },
-          // Row 4: Confirm approval action for this recipient group
-          {
-            type: "box",
-            layout: "horizontal",
-            margin: "xs",
-            contents: [
-              {
-                type: "button",
-                action: {
-                  type: "message",
-                  label: "✅ รับทราบการอนุมัติ",
-                  text: confirmText
-                },
-                style: "secondary",
-                height: "sm",
-                color: isSub ? "#FEF3C7" : "#EFF6FF"
-              }
-            ]
           }
         ]
       });
@@ -6688,16 +6756,18 @@ export function createDailyApprovalSummaryFlex(
                 weight: "bold",
                 color: "#FFFFFF",
                 size: "sm",
-                flex: 7
+                flex: totalPages > 1 ? 7 : 1
               },
-              {
-                type: "text",
-                text: totalPages > 1 ? `หน้า ${pageIndex + 1}/${totalPages}` : "",
-                color: "#93C5FD",
-                size: "xxs",
-                align: "end",
-                flex: 3
-              }
+              ...(totalPages > 1 ? [
+                {
+                  type: "text",
+                  text: `หน้า ${pageIndex + 1}/${totalPages}`,
+                  color: "#93C5FD",
+                  size: "xxs",
+                  align: "end",
+                  flex: 3
+                }
+              ] : [])
             ]
           },
           {
@@ -6801,32 +6871,19 @@ export function createDailyApprovalSummaryFlex(
           },
           {
             type: "box",
-            layout: "horizontal",
+            layout: "vertical",
             margin: "xs",
-            spacing: "sm",
             contents: [
               {
                 type: "button",
                 action: {
                   type: "message",
-                  label: "💸 เช็คยอดโอนวันนี้",
-                  text: "ยอดโอนวันนี้"
+                  label: "✅ ตรวจสอบการอนุมัติแล้ว",
+                  text: "ตรวจสอบการอนุมัติแล้ว"
                 },
                 style: "primary",
                 height: "sm",
-                color: "#10B981",
-                flex: 5
-              },
-              {
-                type: "button",
-                action: {
-                  type: "message",
-                  label: "📋 อนุมัติทั้งหมด",
-                  text: "ยอดอนุมัติทั้งหมด"
-                },
-                style: "secondary",
-                height: "sm",
-                flex: 5
+                color: "#10B981"
               }
             ]
           }
@@ -6835,7 +6892,7 @@ export function createDailyApprovalSummaryFlex(
     };
   }
 
-  const pageSize = 12;
+  const pageSize = 6;
   const bubbles: any[] = [];
 
   if (mainGroups.length > 0) {

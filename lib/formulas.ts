@@ -539,15 +539,27 @@ function applyBillFormulasFast(
 
   // Resolve Vehicle display name (e.g. "1ฒล3982 (Toyota)" or "1ฒล3982")
   let carName = carFast;
+  let carPlateOnly = carFast;
   if (context.carMap && carFast) {
     const car = context.carMap.get(carFast) || context.carMap.get(carFast.toLowerCase()) || context.carMap.get(carFast.toUpperCase());
     if (car) {
-      const plate = String(car["หมายเลขทะเบียน"] || car.plate_no || "").trim();
+      const plate = String(car["หมายเลขทะเบียน"] || car.plate_no || car["ทะเบียน"] || "").trim();
       const brand = String(car["ยี่ห้อรถ"] || car.brand || "").trim();
       if (plate) {
+        carPlateOnly = plate;
         carName = brand && !plate.includes(brand) ? `${plate} (${brand})` : plate;
       }
     }
+  }
+
+  // Update row fields with resolved license plate instead of raw ID
+  if (carPlateOnly && carPlateOnly !== carFast) {
+    row["ทะเบียน"] = carPlateOnly;
+    row["plate_no"] = carPlateOnly;
+  }
+  if (carFast && (row["รายการ"] === carFast || row.sub_category === carFast)) {
+    row["รายการ"] = carPlateOnly;
+    row.sub_category = carPlateOnly;
   }
 
   // Resolve Staff display name
@@ -669,15 +681,27 @@ function applyBillFormulasWithContext(
   }
 
   let carName = carVal;
+  let carPlateOnly = carVal;
   if (context.cars && carVal) {
     const car = context.cars.find(item => String(item["id_car"]) === carVal || String(item.id) === carVal || String(item["หมายเลขทะเบียน"]) === carVal);
     if (car) {
-      const plate = String(car["หมายเลขทะเบียน"] || car.plate_no || "").trim();
+      const plate = String(car["หมายเลขทะเบียน"] || car.plate_no || car["ทะเบียน"] || "").trim();
       const brand = String(car["ยี่ห้อรถ"] || car.brand || "").trim();
       if (plate) {
+        carPlateOnly = plate;
         carName = brand && !plate.includes(brand) ? `${plate} (${brand})` : plate;
       }
     }
+  }
+
+  // Update row fields with resolved license plate instead of raw ID
+  if (carPlateOnly && carPlateOnly !== carVal) {
+    row["ทะเบียน"] = carPlateOnly;
+    row["plate_no"] = carPlateOnly;
+  }
+  if (carVal && (row["รายการ"] === carVal || row.sub_category === carVal)) {
+    row["รายการ"] = carPlateOnly;
+    row.sub_category = carPlateOnly;
   }
 
   let staffName = staffVal;

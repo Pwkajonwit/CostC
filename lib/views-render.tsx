@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, Building2, Store, User, Briefcase, Truck, Users, Building, FileText, ClipboardList, CreditCard, Calendar, Landmark, Phone } from "lucide-react";
+import { ArrowLeft, Building2, Store, User, Briefcase, Truck, Users, Building, FileText, ClipboardList, CreditCard, Calendar, Landmark, Phone, Fuel } from "lucide-react";
 import { notFound } from "next/navigation";
 import { BillFollowDashboard, MainDashboard, WithdrawDashboard, WorkStatusDashboard } from "@/components/dashboards/DashboardsServer";
 import { DataTable } from "@/components/tables/DataTable";
@@ -70,7 +70,8 @@ export async function renderRowDetailPage(id: string, rowKey: string) {
     const kVal = String(item[keyColumn] || "").trim();
     const sRow = String(item._sheetRow || "").trim();
     const nameVal = String(item["ชื่อร้าน"] || item["ชื่อร้านค้า"] || item["ชื่อ-นามสกุล"] || item["ชื่อเล่น"] || item["ชื่อบริษัท"] || item["ชื่อลูกค้า"] || "").trim();
-    return idVal === decodedKey || kVal === decodedKey || sRow === decodedKey || nameVal === decodedKey || kVal.toLowerCase() === decodedKey.toLowerCase() || idVal.toLowerCase() === decodedKey.toLowerCase();
+    const plateVal = String(item["หมายเลขทะเบียน"] || item["ทะเบียน"] || item.plate_no || "").trim();
+    return idVal === decodedKey || kVal === decodedKey || sRow === decodedKey || nameVal === decodedKey || plateVal === decodedKey || kVal.toLowerCase() === decodedKey.toLowerCase() || idVal.toLowerCase() === decodedKey.toLowerCase() || plateVal.toLowerCase() === decodedKey.toLowerCase();
   });
   if (!row) notFound();
 
@@ -78,8 +79,6 @@ export async function renderRowDetailPage(id: string, rowKey: string) {
   const peopleRows = await safeRows(TABLES.PEOPLE);
   const bLookup = bankLookup(bankRows);
   const pLookup = peopleLookup(peopleRows);
-
-  const columns = getViewColumns(view.name, Object.keys(row).filter(column => !column.startsWith("_")));
   const relatedSections = await getRelatedSections(id, row, { banks: bLookup, people: pLookup });
   const title = detailTitle(id, row, decodedKey);
   const primaryCode = String(row[keyColumn] || "").trim();
@@ -134,7 +133,34 @@ export async function renderRowDetailPage(id: string, rowKey: string) {
       billCount,
       lastDate: lastDate ? formatDateDisplay(lastDate) : "-"
     };
+    row["ยอดซื้อสะสม"] = totalAmount;
   }
+
+  const isCarDetail = id === "cars";
+  let carBillsSummary: { totalAmount: number; billCount: number; lastDate: string } | null = null;
+  if (isCarDetail) {
+    const carRelatedBills = relatedSections[0]?.rows || [];
+    const totalAmount = carRelatedBills.reduce((sum, b) => sum + (toNumber(b["ยอดเงิน"]) || 0), 0);
+    const billCount = carRelatedBills.length;
+    let lastDate = "";
+    carRelatedBills.forEach(b => {
+      const d = String(b["ว/ด/ป"] || b["วันที่"] || "").trim();
+      if (d && (!lastDate || d > lastDate)) lastDate = d;
+    });
+    carBillsSummary = {
+      totalAmount,
+      billCount,
+      lastDate: lastDate ? formatDateDisplay(lastDate) : "-"
+    };
+    row["ยอดบิลรวม"] = totalAmount;
+  }
+
+  const rawColumns = getViewColumns(view.name, Object.keys(row).filter(column => !column.startsWith("_")));
+  const columns = rawColumns.filter(col => {
+    if (isCarDetail && (col === "ยอดบิลรวม" || col === "จำนวนบิล")) return false;
+    if (isStoreDetail && (col === "ยอดซื้อสะสม" || col === "จำนวนบิล")) return false;
+    return true;
+  });
 
   return (
     <div className="w-full flex flex-col gap-3 font-sans text-xs">
@@ -171,58 +197,101 @@ export async function renderRowDetailPage(id: string, rowKey: string) {
         ) : null}
       </header>
 
-      <section className="p-3 sm:p-4 max-w-[1600px] w-full mx-auto space-y-4">
+      <section className="p-3 sm:p-4 max-w-[1600px] w-full mx-auto space-y-3 sm:space-y-3.5">
         {/* STORE PURCHASE SUMMARY CARDS */}
         {storePurchasesSummary && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="p-3.5 bg-gradient-to-br from-emerald-50 to-emerald-100/40 border border-emerald-200 rounded-lg shadow-2xs flex flex-col justify-between">
-              <div className="flex items-center justify-between text-emerald-800">
-                <span className="text-xs font-semibold">ยอดซื้อสะสมทั้งหมด</span>
-                <Store size={16} className="text-emerald-600" />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <div className="p-3 bg-white border border-slate-200/80 rounded-xl shadow-2xs flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 border border-emerald-100">
+                <Store size={17} />
               </div>
-              <div className="mt-2 flex items-baseline gap-1">
-                <span className="text-xl font-bold text-emerald-950 font-mono">฿{storePurchasesSummary.totalAmount.toLocaleString("th-TH")}</span>
+              <div className="min-w-0 flex-1">
+                <div className="text-2xs font-medium text-slate-500 uppercase tracking-wide">ยอดซื้อสะสมทั้งหมด</div>
+                <div className="text-base sm:text-lg font-bold text-slate-900 font-mono tracking-tight leading-snug">
+                  ฿{storePurchasesSummary.totalAmount.toLocaleString("th-TH")}
+                </div>
               </div>
-              <span className="text-2xs text-emerald-600 mt-1">คำนวณจากประวัติบิลทั้งหมดในระบบ</span>
             </div>
 
-            <div className="p-3.5 bg-gradient-to-br from-indigo-50 to-indigo-100/40 border border-indigo-200 rounded-lg shadow-2xs flex flex-col justify-between">
-              <div className="flex items-center justify-between text-indigo-800">
-                <span className="text-xs font-semibold">จำนวนบิลที่เคยสั่งซื้อ</span>
-                <FileText size={16} className="text-indigo-600" />
+            <div className="p-3 bg-white border border-slate-200/80 rounded-xl shadow-2xs flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 border border-indigo-100">
+                <FileText size={17} />
               </div>
-              <div className="mt-2 flex items-baseline gap-1">
-                <span className="text-xl font-bold text-indigo-950 font-mono">{storePurchasesSummary.billCount}</span>
-                <span className="text-xs text-indigo-600">บิล</span>
+              <div className="min-w-0 flex-1">
+                <div className="text-2xs font-medium text-slate-500 uppercase tracking-wide">จำนวนบิลที่เคยสั่งซื้อ</div>
+                <div className="text-base sm:text-lg font-bold text-slate-900 font-mono tracking-tight leading-snug">
+                  {storePurchasesSummary.billCount} <span className="text-xs font-normal text-slate-500">บิล</span>
+                </div>
               </div>
-              <span className="text-2xs text-indigo-600 mt-1">รายการบิลที่ผูกกับร้านค้านี้</span>
             </div>
 
-            <div className="p-3.5 bg-gradient-to-br from-amber-50 to-amber-100/40 border border-amber-200 rounded-lg shadow-2xs flex flex-col justify-between">
-              <div className="flex items-center justify-between text-amber-800">
-                <span className="text-xs font-semibold">วันที่สั่งซื้อล่าสุด</span>
-                <Calendar size={16} className="text-amber-600" />
+            <div className="p-3 bg-white border border-slate-200/80 rounded-xl shadow-2xs flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0 border border-amber-100">
+                <Calendar size={17} />
               </div>
-              <div className="mt-2 flex items-baseline gap-1">
-                <span className="text-base font-bold text-amber-950 font-mono">{storePurchasesSummary.lastDate}</span>
+              <div className="min-w-0 flex-1">
+                <div className="text-2xs font-medium text-slate-500 uppercase tracking-wide">วันที่สั่งซื้อล่าสุด</div>
+                <div className="text-base sm:text-lg font-bold text-slate-900 font-mono tracking-tight leading-snug">
+                  {storePurchasesSummary.lastDate}
+                </div>
               </div>
-              <span className="text-2xs text-amber-600 mt-1">วันที่ของบิลล่าสุด</span>
+            </div>
+          </div>
+        )}
+
+        {/* CAR BILLS SUMMARY CARDS */}
+        {carBillsSummary && (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <div className="p-3 bg-white border border-slate-200/80 rounded-xl shadow-2xs flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 border border-emerald-100">
+                <Truck size={17} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-2xs font-medium text-slate-500 uppercase tracking-wide">ยอดบิลสะสมทั้งหมด</div>
+                <div className="text-base sm:text-lg font-bold text-slate-900 font-mono tracking-tight leading-snug">
+                  ฿{carBillsSummary.totalAmount.toLocaleString("th-TH")}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3 bg-white border border-slate-200/80 rounded-xl shadow-2xs flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 border border-indigo-100">
+                <FileText size={17} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-2xs font-medium text-slate-500 uppercase tracking-wide">จำนวนบิลที่เกี่ยวข้อง</div>
+                <div className="text-base sm:text-lg font-bold text-slate-900 font-mono tracking-tight leading-snug">
+                  {carBillsSummary.billCount} <span className="text-xs font-normal text-slate-500">บิล</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3 bg-white border border-slate-200/80 rounded-xl shadow-2xs flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0 border border-amber-100">
+                <Calendar size={17} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-2xs font-medium text-slate-500 uppercase tracking-wide">วันที่บิลล่าสุด</div>
+                <div className="text-base sm:text-lg font-bold text-slate-900 font-mono tracking-tight leading-snug">
+                  {carBillsSummary.lastDate}
+                </div>
+              </div>
             </div>
           </div>
         )}
 
         {/* MAIN INFO CARD */}
-        <article className="bg-white border border-slate-200 rounded-md overflow-hidden">
-          <header className="p-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+        <article className="bg-white border border-slate-200/80 rounded-xl overflow-hidden shadow-2xs">
+          <header className="px-3.5 py-2.5 bg-slate-50/80 border-b border-slate-200/70 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <FileText size={15} className="text-slate-600 shrink-0" />
-              <h2 className="text-xs text-slate-800 tracking-tight m-0">ข้อมูลหลัก</h2>
+              <FileText size={14} className="text-slate-500 shrink-0" />
+              <h2 className="text-xs font-semibold text-slate-800 tracking-tight m-0">ข้อมูลหลัก</h2>
             </div>
-            <span className="text-xs text-slate-500">{columns.length} ฟิลด์</span>
+            <span className="text-2xs text-slate-400 font-medium">{columns.length} ฟิลด์</span>
           </header>
 
-          <div className="p-3 sm:p-4">
-            <dl className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
+          <div className="p-3 sm:p-3.5">
+            <dl className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 sm:gap-2.5">
               {columns.map(column => {
                 const val = row[column];
                 const isEmpty = val === null || val === undefined || String(val).trim() === "" || String(val).trim().toLowerCase() === "non";
@@ -230,23 +299,23 @@ export async function renderRowDetailPage(id: string, rowKey: string) {
                 const isCode = column.toLowerCase().includes("id") || column.includes("รหัส") || column.includes("เลข");
 
                 return (
-                  <div key={column} className="bg-white p-2.5 rounded border border-slate-200 flex flex-col justify-between">
-                    <dt className="text-xs text-slate-500 uppercase tracking-wider mb-1">
+                  <div key={column} className="bg-slate-50/70 rounded-lg p-2 px-2.5 border border-slate-100 hover:border-slate-200/80 transition-colors flex flex-col justify-between">
+                    <dt className="text-2xs font-medium text-slate-400 uppercase tracking-wider truncate mb-0.5">
                       {column}
                     </dt>
-                    <dd className="mt-0.5">
+                    <dd className="text-xs">
                       {isEmpty ? (
-                        <span className="text-slate-400 font-normal text-xs">-</span>
+                        <span className="text-slate-300 font-normal">-</span>
                       ) : isAmount ? (
-                        <span className="text-xs font-mono text-slate-900">
+                        <span className="font-mono font-semibold text-slate-900">
                           {formatDetailValue(column, val, { banks: bLookup, people: pLookup })}
                         </span>
                       ) : isCode ? (
-                        <span className="text-xs font-mono text-slate-900">
+                        <span className="font-mono font-medium text-slate-900">
                           {formatDetailValue(column, val, { banks: bLookup, people: pLookup })}
                         </span>
                       ) : (
-                        <span className="text-xs text-slate-800 break-words">
+                        <span className="font-medium text-slate-800 break-words">
                           {formatDetailValue(column, val, { banks: bLookup, people: pLookup })}
                         </span>
                       )}
@@ -285,8 +354,10 @@ export async function renderRowDetailPage(id: string, rowKey: string) {
               subtitle={section.subtitle}
               rowLabel="รายการ"
               limit={100}
-              detailBasePath="/views/project-all"
-              detailKeyColumn="ID Project"
+              showSearch
+              showDateFilter={section.showDateFilter ?? true}
+              detailBasePath={section.detailBasePath || "/views/project-all"}
+              detailKeyColumn={section.detailKeyColumn || "ID Project"}
             />
           </section>
         ))}
@@ -313,6 +384,9 @@ type RelatedSection = {
   subtitle: string;
   columns: string[];
   rows: SheetRow[];
+  detailBasePath?: string;
+  detailKeyColumn?: string;
+  showDateFilter?: boolean;
 };
 
 async function getRelatedSections(id: string, row: SheetRow, lookups?: { banks?: Record<string, string>; people?: Record<string, string> }): Promise<RelatedSection[]> {
@@ -411,6 +485,33 @@ async function getRelatedSections(id: string, row: SheetRow, lookups?: { banks?:
     });
   }
 
+  if (id === "cars") {
+    const dataRows = await safeRows(TABLES.DATA);
+    const carId = String(row["id_car"] || row.id || "").trim();
+    const plateNo = String(row["หมายเลขทะเบียน"] || row["ทะเบียน"] || row.plate_no || "").trim();
+    const related = dataRows.filter(bill => {
+      if (!isCommittedBill(bill)) return false;
+      return billMatchesCar(bill, carId, plateNo);
+    });
+
+    const mappedRelated = related.map(item => {
+      const req = String(item["ผู้เบิก"] || "").trim();
+      return {
+        ...item,
+        "ผู้เบิก": pLookup[req] || req
+      };
+    });
+
+    sections.push({
+      title: `รายการบิลและค่าใช้จ่ายของรถคันนี้ (${plateNo || carId})`,
+      subtitle: mappedRelated.length ? `${mappedRelated.length} รายการจาก Data (น้ำมัน, ซ่อมรถ, อะไหล่ และอื่นๆ)` : `ยังไม่มีรายการบันทึกบิลของรถคันนี้`,
+      columns: ["ลำดับ", "ID Project", "ชื่อ Project", "ผู้เบิก", "ร้าน/บุคคล", "สินค้า/ทำงาน", "บิล", "ยอดเงิน", "ยอดโอน", "ว/ด/ป", "สถานะ"],
+      rows: mappedRelated,
+      detailBasePath: "/bills",
+      detailKeyColumn: "ลำดับ"
+    });
+  }
+
   return sections;
 }
 
@@ -502,7 +603,7 @@ async function renderView(
     const sort = parseSort(firstSearchParam(query?.sort));
     const [rawRows, projectDataRows, companyRows, bankRows, projectRows, contractorRows, customerRows, taskAttachments] = await Promise.all([
       safeRows(view.table),
-      (view.id === "project-all" || view.id === "contract-open" || view.id === "contractors") ? safeRows(TABLES.DATA) : Promise.resolve([]),
+      (view.id === "project-all" || view.id === "contract-open" || view.id === "contractors" || view.id === "cars") ? safeRows(TABLES.DATA) : Promise.resolve([]),
       view.id === "project-all" ? safeRows(TABLES.COMPANY) : Promise.resolve([]),
       (view.id === "stores" || view.id === "contractors" || view.id === "people" || view.id === "bill-entry") ? safeRows(TABLES.BANK) : Promise.resolve([]),
       view.id === "contract-open" ? safeRows(TABLES.PROJECT) : Promise.resolve([]),
@@ -527,8 +628,25 @@ async function renderView(
         ? hydrateProjectRowsForList(rawRows, projectDataRows)
         : view.id === "contractors"
           ? hydrateContractorsWithYearlySpend(rawRows, projectDataRows)
-          : view.id === "customers"
+          : view.id === "cars"
             ? rawRows.map(r => {
+                const carId = String(r["id_car"] || r.id || "").trim();
+                const plateNo = String(r["หมายเลขทะเบียน"] || r["ทะเบียน"] || r.plate_no || "").trim();
+                let totalAmount = 0;
+                let billCount = 0;
+                for (const b of projectDataRows) {
+                  if (isCommittedBill(b) && billMatchesCar(b, carId, plateNo)) {
+                    totalAmount += (toNumber(b["ยอดเงิน"]) || 0);
+                    billCount += 1;
+                  }
+                }
+                return {
+                  ...r,
+                  "ยอดบิลรวม": totalAmount
+                };
+              })
+            : view.id === "customers"
+              ? rawRows.map(r => {
                 const k = String(r["id_cus"] || r["id"] || "").trim();
                 const name = String(r["ชื่อลูกค้า"] || r["name"] || "").trim();
                 const cts = contactsMap[k] || [];
@@ -804,4 +922,62 @@ function peopleLookup(peopleRows: Awaited<ReturnType<typeof getRows>>) {
     if (nickname) lookup[nickname] = displayName;
     return lookup;
   }, {});
+}
+
+function billMatchesCar(bill: SheetRow, carId: string, plateNo: string): boolean {
+  if (!carId && !plateNo) return false;
+  const cId = carId.toLowerCase().trim();
+  const cIdNum = cId.replace(/^car[-_]?/i, "").trim();
+  const cleanPlate = plateNo.replace(/\s+/g, "").toLowerCase().trim();
+
+  const candidates: string[] = [];
+  const addCandidate = (val: unknown) => {
+    if (!val) return;
+    const s = String(val).trim();
+    if (s && s !== "-" && s !== "non") {
+      candidates.push(s);
+      candidates.push(s.toLowerCase());
+      candidates.push(s.replace(/\s+/g, "").toLowerCase());
+    }
+  };
+
+  addCandidate(bill["ทะเบียน"]);
+  addCandidate(bill.plate_no);
+  addCandidate(bill["id_car"]);
+  addCandidate(bill.id_car);
+  addCandidate(bill["หมายเลขทะเบียน"]);
+
+  const dataObj = bill.data as any;
+  if (dataObj && typeof dataObj === "object") {
+    addCandidate(dataObj["ทะเบียน"]);
+    addCandidate(dataObj.plate_no);
+    addCandidate(dataObj["id_car"]);
+    addCandidate(dataObj.id_car);
+    addCandidate(dataObj["หมายเลขทะเบียน"]);
+  }
+
+  const items = Array.isArray(bill.items) ? bill.items : (Array.isArray(dataObj?.items) ? dataObj.items : []);
+  for (const item of items) {
+    if (item && typeof item === "object") {
+      addCandidate(item.vehiclePlate);
+      addCandidate(item.plate);
+      addCandidate(item.id_car);
+      addCandidate(item.car_id);
+      addCandidate(item.detail);
+      addCandidate(item.description);
+    }
+  }
+
+  const desc = String(bill["สินค้า/ทำงาน"] || bill.description || bill["รายละเอียดงาน"] || "").toLowerCase();
+
+  for (const cand of candidates) {
+    if (cleanPlate && cand.includes(cleanPlate)) return true;
+    if (cId && cand === cId) return true;
+    if (cIdNum && (cand === cIdNum || cand === `car${cIdNum}`)) return true;
+  }
+
+  if (cleanPlate && desc.replace(/\s+/g, "").includes(cleanPlate)) return true;
+  if (cId && desc.includes(cId)) return true;
+
+  return false;
 }
