@@ -565,7 +565,7 @@ export function extractBillLineItems(b: Record<string, any>): Array<{ category?:
     try {
       const parsed = JSON.parse(rawItems);
       if (Array.isArray(parsed) && parsed.length > 0) return parsed.filter(Boolean);
-    } catch {}
+    } catch { }
   }
   return [];
 }
@@ -598,14 +598,14 @@ export function resolveBillDeductionInfo(b: Record<string, any>): { hasDeduct: b
   const isActive = Boolean(
     rawWhtNum > 0 ||
     (rawD &&
-    rawD !== "-" &&
-    rawD !== "0" &&
-    rawD !== "0%" &&
-    rawDLower !== "ไม่มี" &&
-    !rawDLower.includes("ไม่มีการหักภาษี") &&
-    !rawDLower.includes("ไม่มีหัก") &&
-    rawDLower !== "false" &&
-    rawDLower !== "no")
+      rawD !== "-" &&
+      rawD !== "0" &&
+      rawD !== "0%" &&
+      rawDLower !== "ไม่มี" &&
+      !rawDLower.includes("ไม่มีการหักภาษี") &&
+      !rawDLower.includes("ไม่มีหัก") &&
+      rawDLower !== "false" &&
+      rawDLower !== "no")
   );
 
   const gross = getBillFlexGrossAmount(b);
@@ -2363,7 +2363,7 @@ export * from "./line-tasks-works";
 
 function normalizeUri(uri?: string): string {
   let str = (uri || "").trim();
-  if (!str) return "https://coscosesuperbase.vercel.app";
+  if (!str) return "https://cost-c.vercel.app";
   if (!str.startsWith("http://") && !str.startsWith("https://")) {
     str = `https://${str}`;
   }
@@ -2453,7 +2453,7 @@ export async function getLineUserIdByRequester(requesterKey: string): Promise<st
     const { data: members } = await supabaseAdmin
       .from("master_members")
       .select("*");
-    
+
     if (members && members.length > 0) {
       const match = members.find(m => {
         const d = (m.data && typeof m.data === "object") ? m.data : {};
@@ -2579,22 +2579,24 @@ export async function getLineTargetIds(): Promise<{
           const isOwner = (m.is_owner !== undefined && m.is_owner !== null)
             ? Boolean(m.is_owner)
             : Boolean(
-                d.is_owner || d["เจ้าของระบบ"] || m["เจ้าของระบบ"] ||
-                m.role === "Owner" || m.system_role === "Owner" ||
-                permStr.includes("Owner") || permStr.includes("เจ้าของระบบ")
-              );
+              d.is_owner || d["เจ้าของระบบ"] || m["เจ้าของระบบ"] ||
+              m.role === "Owner" || m.system_role === "Owner" ||
+              permStr.includes("Owner") || permStr.includes("เจ้าของระบบ")
+            );
           if (isOwner) {
-            if (!ownerId) ownerId = lineId;
+            if (!ownerId || m.id === "P001" || d.id === "P001" || m.nickname === "แมน") {
+              ownerId = lineId;
+            }
           }
 
           // 2. ผู้อนุมัติบิล (Approver - ตรวจสอบและกดอนุมัติบิล)
           const isApprover = (m.can_close_bill !== undefined && m.can_close_bill !== null)
             ? Boolean(m.can_close_bill)
             : Boolean(
-                d.can_close_bill || d["อนุมัติบิล"] || m["อนุมัติบิล"] ||
-                m.system_role === "Admin_Approver" ||
-                permStr.includes("Approver") || permStr.includes("อนุมัติบิล")
-              );
+              d.can_close_bill || d["อนุมัติบิล"] || m["อนุมัติบิล"] ||
+              m.system_role === "Admin_Approver" ||
+              permStr.includes("Approver") || permStr.includes("อนุมัติบิล")
+            );
           if (isApprover) {
             approverSet.add(lineId);
           }
@@ -2603,17 +2605,17 @@ export async function getLineTargetIds(): Promise<{
           const isFinance = (m.can_approve !== undefined && m.can_approve !== null)
             ? Boolean(m.can_approve)
             : Boolean(
-                d.can_approve || d["ฝ่ายการเงิน"] || m["ฝ่ายการเงิน"] ||
-                m.system_role === "Admin_Closer" ||
-                permStr.includes("Finance") || permStr.includes("ฝ่ายการเงิน") || permStr.includes("ปิดบิล")
-              );
+              d.can_approve || d["ฝ่ายการเงิน"] || m["ฝ่ายการเงิน"] ||
+              m.system_role === "Admin_Closer" ||
+              permStr.includes("Finance") || permStr.includes("ฝ่ายการเงิน") || permStr.includes("ปิดบิล")
+            );
           if (isFinance) {
             financeSet.add(lineId);
           }
         }
       }
 
-      // 2. Fallback to line_config in system_options only when no members are assigned
+      // 2. Fallback to line_config in system_options only when no members are assigned in master_members
       const { data: configRow } = await supabaseAdmin
         .from("system_options")
         .select("data")
@@ -2625,22 +2627,26 @@ export async function getLineTargetIds(): Promise<{
         ownerId = String(cfg.LINE_USER_ID_OWN || process.env.LINE_USER_ID_OWN || LINE_CONFIG.USER_ID_OWN || "").trim();
       }
 
-      // Always merge explicitly configured approvers from system_options line_config
-      const rawApprovers = String(cfg.LINE_USER_ID_APPROVER || process.env.LINE_USER_ID_APPROVER || LINE_CONFIG.USER_ID_APPROVER || "").trim();
-      if (rawApprovers) {
-        rawApprovers.split(",").forEach(id => {
-          const clean = id.trim();
-          if (clean) approverSet.add(clean);
-        });
+      // Only fallback to line_config if master_members has NO approvers assigned
+      if (approverSet.size === 0) {
+        const rawApprovers = String(cfg.LINE_USER_ID_APPROVER || process.env.LINE_USER_ID_APPROVER || LINE_CONFIG.USER_ID_APPROVER || "").trim();
+        if (rawApprovers) {
+          rawApprovers.split(",").forEach(id => {
+            const clean = id.trim();
+            if (clean) approverSet.add(clean);
+          });
+        }
       }
 
-      // Always merge explicitly configured closers/finance from system_options line_config
-      const rawClosers = String(cfg.LINE_USER_ID_CLOSER || cfg.LINE_USER_ID_FINANCE || process.env.LINE_USER_ID_CLOSER || "").trim();
-      if (rawClosers) {
-        rawClosers.split(",").forEach(id => {
-          const clean = id.trim();
-          if (clean) financeSet.add(clean);
-        });
+      // Only fallback to line_config if master_members has NO closers/finance assigned
+      if (financeSet.size === 0) {
+        const rawClosers = String(cfg.LINE_USER_ID_CLOSER || cfg.LINE_USER_ID_FINANCE || process.env.LINE_USER_ID_CLOSER || "").trim();
+        if (rawClosers) {
+          rawClosers.split(",").forEach(id => {
+            const clean = id.trim();
+            if (clean) financeSet.add(clean);
+          });
+        }
       }
 
       // เจ้าของระบบ (Owner) มีสิทธิ์แค่รับแจ้งเตือนประจำวันเท่านั้น (ตัดออกจาก approverSet และ financeSet)
@@ -3749,7 +3755,7 @@ export function resolveBillExpenseCategory(b: Record<string, any>): string {
     try {
       const parsed = JSON.parse(rawItems);
       if (Array.isArray(parsed)) lineItems = parsed;
-    } catch {}
+    } catch { }
   }
 
   for (const it of lineItems) {
@@ -3855,7 +3861,7 @@ export async function getProjectBudgetMap(forceRefresh = false): Promise<Map<str
           try {
             const parsed = JSON.parse(rawItems);
             if (Array.isArray(parsed)) bLineItems = parsed;
-          } catch {}
+          } catch { }
         }
 
         if (bLineItems.length > 0) {
@@ -4442,7 +4448,7 @@ export function resolveVendorName(
     if (Array.isArray(rawItems)) {
       lineItems = rawItems;
     } else if (typeof rawItems === "string" && rawItems.trim().startsWith("[")) {
-      try { lineItems = JSON.parse(rawItems); } catch {}
+      try { lineItems = JSON.parse(rawItems); } catch { }
     }
     if (lineItems.length > 0) {
       const itemStores = Array.from(new Set(
@@ -4817,15 +4823,15 @@ export function createMultiBillFlex(
 
         if (activeContractMap instanceof Map) {
           matchedContract = activeContractMap.get(rawContractor) ||
-                            (pId && rawContractor ? activeContractMap.get(`${pId}_${rawContractor}`) : null) ||
-                            (pId && vendor ? activeContractMap.get(`${pId}_${vendor}`) : null) ||
-                            (vendor ? activeContractMap.get(vendor) : null) ||
-                            (rawContractor ? activeContractMap.get(rawContractor.toLowerCase()) : null);
+            (pId && rawContractor ? activeContractMap.get(`${pId}_${rawContractor}`) : null) ||
+            (pId && vendor ? activeContractMap.get(`${pId}_${vendor}`) : null) ||
+            (vendor ? activeContractMap.get(vendor) : null) ||
+            (rawContractor ? activeContractMap.get(rawContractor.toLowerCase()) : null);
         } else if (typeof activeContractMap === "object") {
           matchedContract = activeContractMap[rawContractor] ||
-                            (pId && rawContractor ? activeContractMap[`${pId}_${rawContractor}`] : null) ||
-                            (pId && vendor ? activeContractMap[`${pId}_${vendor}`] : null) ||
-                            (vendor ? activeContractMap[vendor] : null);
+            (pId && rawContractor ? activeContractMap[`${pId}_${rawContractor}`] : null) ||
+            (pId && vendor ? activeContractMap[`${pId}_${vendor}`] : null) ||
+            (vendor ? activeContractMap[vendor] : null);
         }
       }
 
@@ -6630,26 +6636,21 @@ export function createDailyApprovalSummaryFlex(
 
     pageGroups.forEach((g, gIdx) => {
       const isMulti = g.bills.length > 1;
+      const formattedAmt = g.totalAmount.toLocaleString("th-TH");
       const billTags = g.bills
         .slice(0, 5)
         .map(b => `#${b.billNo}`)
         .join(", ") + (g.bills.length > 5 ? ` +${g.bills.length - 5}` : "");
 
-      const formattedAcc = g.accountNo
-        ? (g.accountNo.replace(/\D/g, "").length >= 9
-            ? `${g.accountNo.slice(0, 3)}-${g.accountNo.slice(3, 4)}-${g.accountNo.slice(4, 9)}-${g.accountNo.slice(9)}`.replace(/-+$/, "")
-            : g.accountNo)
-        : "-";
-
       groupRows.push({
         type: "box",
         layout: "vertical",
-        backgroundColor: gIdx % 2 === 0 ? "#F8FAFC" : "#FFFFFF",
-        paddingAll: "8px",
-        cornerRadius: "6px",
-        borderColor: isSub ? "#FEF3C7" : "#E2E8F0",
+        backgroundColor: isSub ? "#FFFBEB" : "#F8FAFC",
+        cornerRadius: "8px",
         borderWidth: "1px",
-        margin: "sm",
+        borderColor: isSub ? "#FDE68A" : "#E2E8F0",
+        paddingAll: "8px",
+        margin: gIdx > 0 ? "xs" : "none",
         contents: [
           // Row 1: Payee Name + Total Amount
           {
@@ -6658,36 +6659,38 @@ export function createDailyApprovalSummaryFlex(
             contents: [
               {
                 type: "text",
-                text: `${g.nickname || g.payeeName}`,
+                text: isSub ? `👤 ผู้เบิก: ${g.payeeName}` : `🏪 ${g.payeeName}`,
                 weight: "bold",
-                color: isSub ? "#92400E" : "#1E293B",
+                color: isSub ? "#92400E" : "#0F172A",
                 size: "xs",
-                flex: 6,
+                flex: 7,
                 wrap: true
               },
               {
                 type: "text",
-                text: `฿${g.totalAmount.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                text: `฿${formattedAmt}`,
                 weight: "bold",
                 color: isSub ? "#D97706" : "#2563EB",
                 size: "xs",
                 align: "end",
-                flex: 4
+                flex: 5
               }
             ]
           },
-          // Row 2: Account Number + Bank Name
+          // Row 2: Bank & Account No (ตามแบบยอดโอนทั้งหมด)
           {
             type: "box",
             layout: "horizontal",
             margin: "xs",
+            alignItems: "center",
             contents: [
               {
                 type: "text",
-                text: formattedAcc !== "-" ? `💳 ${formattedAcc}` : "💳 (ไม่มีเลข บ/ช)",
-                color: isSub ? "#78350F" : "#475569",
-                size: "xxs",
-                flex: 5
+                text: g.accountNo ? `เลข: ${g.accountNo}` : "ไม่มีเลขบัญชี",
+                color: g.accountNo ? (isSub ? "#047857" : "#0284C7") : "#DC2626",
+                size: "xs",
+                weight: "bold",
+                flex: 7
               },
               {
                 type: "text",
@@ -6699,6 +6702,7 @@ export function createDailyApprovalSummaryFlex(
               }
             ]
           },
+          // Optional: Account Name if specified and distinct
           ...(g.accountName && g.accountName !== g.payeeName ? [
             {
               type: "box",
@@ -6725,9 +6729,10 @@ export function createDailyApprovalSummaryFlex(
                 type: "text",
                 text: isSub
                   ? `🧾 ${isMulti ? `รวม ${g.bills.length} บิลย่อย:` : "บิลย่อย:"} ${billTags}`
-                  : `🧾 ${isMulti ? `รวม ${g.bills.length} บิล:` : "บิล:"} ${billTags}`,
-                color: isSub ? "#B45309" : "#64748B",
+                  : `📦 ${isMulti ? `รวม ${g.bills.length} บิล:` : "บิล:"} ${billTags}`,
+                color: isSub ? "#B45309" : (isMulti ? "#2563EB" : "#64748B"),
                 size: "xxs",
+                weight: isMulti ? "bold" : "regular",
                 wrap: true,
                 flex: 8
               }

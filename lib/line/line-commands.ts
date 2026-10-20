@@ -75,21 +75,52 @@ export async function handleLineCommand(
 
   try {
     // 1. System Health Check & Test Commands
-    if (lowerText === "testbot" || lowerText === "check" || lowerText === "status" || lowerText === "getid") {
+    // 1. System Health Check & Permission Inspection Commands
+    if (
+      lowerText === "testbot" ||
+      lowerText === "check" ||
+      lowerText === "status" ||
+      lowerText === "getid" ||
+      cleanCmd === "สิทธิ์" ||
+      cleanCmd === "เช็คสิทธิ์" ||
+      cleanCmd === "ดูสิทธิ์" ||
+      cleanCmd === "ตรวจสอบสิทธิ์"
+    ) {
       if (lowerText === "getid") {
         await replyTextMessage(replyToken, `🟢 BOT Online (Supabase Engine)\n\nTarget ID: ${targetId}\nUser ID: ${userId}`);
         return true;
       }
 
-      const { data, error } = await supabaseAdmin.from("bills").select("id", { count: "exact", head: true });
-      if (error) {
-        await replyTextMessage(replyToken, `⚠️ ตรวจสอบระบบ: LINE Webhook ทำงานปกติ แต่พบข้อความจาก Supabase: ${error.message}`);
-      } else {
-        await replyTextMessage(
-          replyToken,
-          `✅ 🤖 บอท CostCode Supabase ทำงานปกติ 100%!\n\n- Engine: Next.js v15 (Serverless)\n- Database: Supabase PostgreSQL (Connected)\n- Target ID: ${targetId}\n- Status: พร้อมรับทุกคำสั่ง 24/7`
-        );
-      }
+      const {
+        isLineApproverAuthorized,
+        isLineCloserAuthorized,
+        getLineConfigIds,
+        getOperatorDisplayName,
+        getRecipientDisplayNames
+      } = await import("@/lib/line/line");
+
+      const [canApprove, canClose, { approverIds, closerIds }, userName] = await Promise.all([
+        isLineApproverAuthorized(userId, targetId),
+        isLineCloserAuthorized(userId, targetId),
+        getLineConfigIds(),
+        getOperatorDisplayName(userId, "พนักงาน")
+      ]);
+
+      const approverNames = approverIds.length > 0 ? await getRecipientDisplayNames(approverIds, "ท่าน") : "ยังไม่ได้ระบุ";
+      const closerNames = closerIds.length > 0 ? await getRecipientDisplayNames(closerIds, "ท่าน") : "ยังไม่ได้ระบุ";
+
+      const checkMsg =
+        `👮‍♂️ ข้อมูลและสิทธิ์ผู้ใช้งาน LINE ของคุณ:\n\n` +
+        `• ผู้ใช้งาน: ${userName}\n` +
+        `• User ID: ${userId || "ไม่พบ"}\n` +
+        `• สิทธิ์อนุมัติบิล (Approver): ${canApprove ? "✅ มีสิทธิ์ (อนุมัติได้)" : "❌ ไม่มีสิทธิ์"}\n` +
+        `• สิทธิ์ฝ่ายการเงิน (Closer): ${canClose ? "✅ มีสิทธิ์ (ปิดงานได้)" : "❌ ไม่มีสิทธิ์"}\n\n` +
+        `⚙️ สรุปบทบาทในระบบ:\n` +
+        `• ผู้อนุมัติบิล (Approver): ${approverNames}\n` +
+        `• ผู้ปิดงานบิล (Closer): ${closerNames}\n\n` +
+        `💡 สถานะระบบ: บอทเชื่อมต่อ Supabase สมบูรณ์ 100% พร้อมใช้งานครับ`;
+
+      await replyTextMessage(replyToken, checkMsg);
       return true;
     }
 
@@ -673,31 +704,38 @@ export async function handleLineCommand(
         `📅 ประจำวันที่: ${todayDisplay}\n` +
         `📊 บิลที่ตรวจสอบแล้ว: ${approvedBills.length} บิล\n` +
         `💰 ยอดเงินรวม: ฿${grandTotal.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\n` +
-        `📢 ระบบได้ส่งการ์ดสำหรับปิดงานให้ดำเนินการด้านล่างเรียบร้อยแล้วครับ 🎯`;
+        `📢 ระบบได้ส่งสัญญาณแจ้งเตือนและส่งการ์ดปิดงานไปยังผู้ปิดงานหลัก (${closerNames}) เรียบร้อยแล้วครับ 🎯`;
 
-      // 2. Reply in current room (Confirmation Text + Closing Flex Cards)
+      // 2. Reply in current room (If current user/room is Closer, also include Flex; otherwise send confirmation text)
+      const isCurrentRoomCloser = targetId && targetFinanceList.includes(targetId);
       let replied = false;
       if (replyToken) {
-        const messagesPayload: any[] = [{ type: "text", text: replyMsg }];
-        for (const item of flexItems.slice(0, 4)) {
-          messagesPayload.push({
-            type: "flex",
-            altText: item.altText,
-            contents: item.flex
-          });
+        if (isCurrentRoomCloser && flexItems.length > 0) {
+          const messagesPayload: any[] = [{ type: "text", text: replyMsg }];
+          for (const item of flexItems.slice(0, 4)) {
+            messagesPayload.push({
+              type: "flex",
+              altText: item.altText,
+              contents: item.flex
+            });
+          }
+          replied = await replyMessages(replyToken, messagesPayload);
+        } else {
+          replied = await replyTextMessage(replyToken, replyMsg);
         }
-        replied = await replyMessages(replyToken, messagesPayload);
       }
 
-      // If replyToken failed or was empty, push directly to targetId
+      // If replyToken failed or was empty, fallback send text to targetId
       if (!replied && targetId) {
         await sendTextMessage(targetId, replyMsg).catch(() => null);
-        for (const item of flexItems) {
-          await sendFlexMessageDetailed(targetId, item.altText, item.flex).catch(() => null);
+        if (isCurrentRoomCloser) {
+          for (const item of flexItems) {
+            await sendFlexMessageDetailed(targetId, item.altText, item.flex).catch(() => null);
+          }
         }
       }
 
-      // 3. Also push closing Flex cards to other closers who are outside current room
+      // 3. Push closing Flex cards to Closers
       if (targetFinanceList.length > 0) {
         let billBreakdown = "";
         if (mainBills.length > 0) {
@@ -716,7 +754,8 @@ export async function handleLineCommand(
           `👉 กดปุ่ม [ปิดงาน] ที่การ์ดด้านล่างเพื่อดำเนินการจ่ายเงินและปิดงานได้ทันทีครับ ✨`;
 
         for (const financeId of targetFinanceList) {
-          if (financeId && financeId !== targetId) {
+          // Send push to closers (if closer was not already sent via reply in the same 1-on-1 chat)
+          if (financeId && !(isCurrentRoomCloser && financeId === targetId)) {
             await sendTextMessage(financeId, notifyCloserMsg).catch(err => {
               console.error(`Failed sending verification push to closer ${financeId}:`, err);
             });
@@ -1013,7 +1052,7 @@ export async function handleLineCommand(
         if (!isAuthorized) {
           await replyTextMessage(
             replyToken,
-            `⛔ ขออภัยครับ บัญชี LINE ของคุณไม่มีสิทธิ์ในการ${isReject ? "ไม่อนุมัติ" : "อนุมัติ"}บิล\n\n(สิทธิ์การอนุมัติสงวนไว้เฉพาะผู้อนุมัติบิล หรือ ผู้ดูแลระบบเท่านั้น ฝ่ายการเงินไม่มีสิทธิ์อนุมัติบิล)`
+            `⛔ คุณไม่มีสิทธิ์${isReject ? "ไม่อนุมัติ" : "อนุมัติ"}บิล (เฉพาะผู้อนุมัติ)`
           );
           return true;
         }
@@ -1023,7 +1062,7 @@ export async function handleLineCommand(
         if (!isAuthorized) {
           await replyTextMessage(
             replyToken,
-            `⛔ ขออภัยครับ บัญชี LINE ของคุณไม่มีสิทธิ์ในการปิดงาน/จ่ายเงินบิล\n\n(สิทธิ์การปิดงานสงวนไว้เฉพาะฝ่ายการเงิน หรือ ผู้ดูแลระบบเท่านั้น)`
+            `⛔ คุณไม่มีสิทธิ์ปิดงาน/จ่ายเงิน (เฉพาะฝ่ายการเงิน)`
           );
           return true;
         }
