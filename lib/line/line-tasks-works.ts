@@ -1496,17 +1496,16 @@ export function createWorkSummaryFlex(
       ? `ทั้งหมด ${totalItemsCount} รายการ • ชุดที่ ${pageIdx + 1}/${totalPages} ${teamSuffix}`
       : `${totalItemsCount} รายการล่าสุด ${teamSuffix}`;
 
-    // 1. Top Card Header (Title on left, buttons in top-right corner with flex: 0 so they never truncate)
+    // 1. Top Card Header (Title on left, small buttons in top-right corner)
     bodyContents.push({
       type: "box",
       layout: "horizontal",
       alignItems: "center",
-      spacing: "sm",
       contents: [
         {
           type: "box",
           layout: "vertical",
-          flex: 1,
+          flex: 6,
           contents: [
             {
               type: "text",
@@ -1532,7 +1531,7 @@ export function createWorkSummaryFlex(
           spacing: "xs",
           alignItems: "center",
           justifyContent: "flex-end",
-          flex: 0,
+          flex: 4,
           contents: [
             ...(groupPwUrl
               ? [
@@ -1540,14 +1539,13 @@ export function createWorkSummaryFlex(
                   type: "box",
                   layout: "horizontal",
                   backgroundColor: "#06C755",
-                  cornerRadius: "5px",
-                  paddingStart: "12px",
-                  paddingEnd: "12px",
-                  paddingTop: "5px",
-                  paddingBottom: "5px",
+                  cornerRadius: "4px",
+                  paddingStart: "8px",
+                  paddingEnd: "8px",
+                  paddingTop: "4px",
+                  paddingBottom: "4px",
                   alignItems: "center",
                   justifyContent: "center",
-                  flex: 0,
                   action: {
                     type: "uri",
                     label: "กลุ่ม",
@@ -1557,7 +1555,7 @@ export function createWorkSummaryFlex(
                     {
                       type: "text",
                       text: "กลุ่ม",
-                      size: "xs",
+                      size: "xxs",
                       weight: "bold",
                       color: "#FFFFFF",
                       align: "center",
@@ -1571,14 +1569,13 @@ export function createWorkSummaryFlex(
               type: "box",
               layout: "horizontal",
               backgroundColor: "#2563EB",
-              cornerRadius: "5px",
-              paddingStart: "10px",
-              paddingEnd: "10px",
-              paddingTop: "5px",
-              paddingBottom: "5px",
+              cornerRadius: "4px",
+              paddingStart: "8px",
+              paddingEnd: "8px",
+              paddingTop: "4px",
+              paddingBottom: "4px",
               alignItems: "center",
               justifyContent: "center",
-              flex: 0,
               action: {
                 type: "uri",
                 label: "+ เปิดงาน",
@@ -1588,7 +1585,7 @@ export function createWorkSummaryFlex(
                 {
                   type: "text",
                   text: "+ เปิดงาน",
-                  size: "xs",
+                  size: "xxs",
                   weight: "bold",
                   color: "#FFFFFF",
                   align: "center",
@@ -1770,20 +1767,19 @@ export function createWorkSummaryFlex(
               type: "box",
               layout: "horizontal",
               alignItems: "center",
-              spacing: "xs",
               contents: [
                 {
                   type: "text",
                   text: dateInspectFormatted,
                   size: "xxs",
                   color: "#475569",
-                  flex: 1,
+                  flex: 5,
                   wrap: false
                 },
                 {
                   type: "box",
                   layout: "horizontal",
-                  flex: 0,
+                  flex: 5,
                   justifyContent: "flex-end",
                   spacing: "xs",
                   contents: [
@@ -1794,13 +1790,12 @@ export function createWorkSummaryFlex(
                       borderColor: "#CBD5E1",
                       borderWidth: "1px",
                       cornerRadius: "4px",
-                      paddingTop: "3px",
-                      paddingBottom: "3px",
-                      paddingStart: "8px",
-                      paddingEnd: "8px",
+                      paddingTop: "2px",
+                      paddingBottom: "2px",
+                      paddingStart: "5px",
+                      paddingEnd: "5px",
                       alignItems: "center",
                       justifyContent: "center",
-                      flex: 0,
                       action: {
                         type: "clipboard",
                         label: "คัดลอก",
@@ -1813,8 +1808,7 @@ export function createWorkSummaryFlex(
                           size: "xxs",
                           weight: "bold",
                           color: "#334155",
-                          align: "center",
-                          wrap: false
+                          align: "center"
                         }
                       ]
                     },
@@ -1823,13 +1817,12 @@ export function createWorkSummaryFlex(
                       layout: "horizontal",
                       backgroundColor: "#65A30D",
                       cornerRadius: "4px",
-                      paddingTop: "4px",
-                      paddingBottom: "4px",
-                      paddingStart: "8px",
-                      paddingEnd: "8px",
+                      paddingTop: "3px",
+                      paddingBottom: "3px",
+                      paddingStart: "5px",
+                      paddingEnd: "5px",
                       alignItems: "center",
                       justifyContent: "center",
-                      flex: 0,
                       action: {
                         type: "uri",
                         label: "อัพเดท",
@@ -1842,8 +1835,7 @@ export function createWorkSummaryFlex(
                           size: "xxs",
                           weight: "bold",
                           color: "#FFFFFF",
-                          align: "center",
-                          wrap: false
+                          align: "center"
                         }
                       ]
                     },
@@ -1852,13 +1844,12 @@ export function createWorkSummaryFlex(
                       layout: "horizontal",
                       backgroundColor: "#DC2626",
                       cornerRadius: "4px",
-                      paddingTop: "4px",
-                      paddingBottom: "4px",
-                      paddingStart: "10px",
-                      paddingEnd: "10px",
+                      paddingTop: "3px",
+                      paddingBottom: "3px",
+                      paddingStart: "5px",
+                      paddingEnd: "5px",
                       alignItems: "center",
                       justifyContent: "center",
-                      flex: 0,
                       action: {
                         type: "message",
                         label: "ปิด",
@@ -1871,8 +1862,7 @@ export function createWorkSummaryFlex(
                           size: "xxs",
                           weight: "bold",
                           color: "#FFFFFF",
-                          align: "center",
-                          wrap: false
+                          align: "center"
                         }
                       ]
                     }
