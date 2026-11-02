@@ -298,6 +298,66 @@ export async function sendMultipleTextMessages(to: string, texts: string[]): Pro
   }
 }
 
+/**
+ * Helper to split multi-page Flex (either giga bubbles stacked vertically or carousel bubbles)
+ * into valid LINE Flex message objects (max 5 messages per API call).
+ */
+function buildSafeFlexMessages(
+  altText: string,
+  flexContents: Record<string, any>
+): Array<{ type: "flex"; altText: string; contents: Record<string, any> }> {
+  if (!flexContents || flexContents.type !== "carousel" || !Array.isArray(flexContents.contents)) {
+    return [{ type: "flex", altText, contents: flexContents }];
+  }
+
+  const bubbles = flexContents.contents;
+  if (bubbles.length <= 1) {
+    return [{ type: "flex", altText, contents: bubbles[0] || flexContents }];
+  }
+
+  // If bubbles use size: "giga" (full-width card), LINE does not allow "giga" inside a carousel.
+  // Send each "giga" bubble as a separate full-width Flex message in the same reply/push!
+  const hasGigaBubble = bubbles.some((b: any) => b?.size === "giga");
+  if (hasGigaBubble) {
+    return bubbles.map((b: any, idx: number) => ({
+      type: "flex" as const,
+      altText: bubbles.length > 1 ? `${altText} (${idx + 1}/${bubbles.length})` : altText,
+      contents: b,
+    }));
+  }
+
+  const MAX_BUBBLES_PER_CAROUSEL = 12;
+  const MAX_CAROUSEL_BYTES = 45000; // Safely below LINE's 50KB limit
+
+  const chunks: Array<Record<string, any>[]> = [];
+  let currentChunk: Record<string, any>[] = [];
+  let currentBytes = 30;
+
+  for (const b of bubbles) {
+    const bSize = Buffer.byteLength(JSON.stringify(b), "utf8");
+    if (
+      currentChunk.length > 0 &&
+      (currentChunk.length >= MAX_BUBBLES_PER_CAROUSEL || currentBytes + bSize > MAX_CAROUSEL_BYTES)
+    ) {
+      chunks.push(currentChunk);
+      currentChunk = [b];
+      currentBytes = 30 + bSize;
+    } else {
+      currentChunk.push(b);
+      currentBytes += bSize + 1;
+    }
+  }
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk);
+  }
+
+  return chunks.map((chunk, idx) => ({
+    type: "flex" as const,
+    altText: chunks.length > 1 ? `${altText} (ชุดที่ ${idx + 1}/${chunks.length})` : altText,
+    contents: chunk.length === 1 ? chunk[0] : { type: "carousel", contents: chunk },
+  }));
+}
+
 export async function sendFlexMessageDetailed(
   to: string,
   altText: string,
@@ -317,33 +377,31 @@ export async function sendFlexMessageDetailed(
     };
   }
   try {
-    const res = await fetch(`${LINE_API_BASE}/push`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        to,
-        messages: [
-          {
-            type: "flex",
-            altText,
-            contents: flexContents,
-          },
-        ],
-      }),
-    });
+    const allMessages = buildSafeFlexMessages(altText, flexContents);
+    for (let i = 0; i < allMessages.length; i += 5) {
+      const batch = allMessages.slice(i, i + 5);
+      const res = await fetch(`${LINE_API_BASE}/push`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          to,
+          messages: batch,
+        }),
+      });
 
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      console.error("❌ LINE Flex Push Error Details:", JSON.stringify(errJson, null, 2));
-      console.error("❌ LINE Flex Payload:", JSON.stringify(flexContents, null, 2));
-      const lineMsg = errJson.details?.map((d: any) => `${d.property}: ${d.message}`).join(", ") || errJson.message || `HTTP Status ${res.status}`;
-      return {
-        success: false,
-        error: `ส่งข้อความ LINE ไม่สำเร็จ (LINE API ตอบกลับ: "${lineMsg}")`,
-      };
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        console.error("❌ LINE Flex Push Error Details:", JSON.stringify(errJson, null, 2));
+        console.error("❌ LINE Flex Payload:", JSON.stringify(flexContents, null, 2));
+        const lineMsg = errJson.details?.map((d: any) => `${d.property}: ${d.message}`).join(", ") || errJson.message || `HTTP Status ${res.status}`;
+        return {
+          success: false,
+          error: `ส่งข้อความ LINE ไม่สำเร็จ (LINE API ตอบกลับ: "${lineMsg}")`,
+        };
+      }
     }
     return { success: true };
   } catch (error: any) {
@@ -374,6 +432,10 @@ export async function replyFlexMessage(
     return false;
   }
   try {
+    const allMessages = buildSafeFlexMessages(altText, flexContents);
+    const firstBatch = allMessages.slice(0, 5);
+    const remainingMessages = allMessages.slice(5);
+
     const res = await fetch(`${LINE_API_BASE}/reply`, {
       method: "POST",
       headers: {
@@ -382,15 +444,26 @@ export async function replyFlexMessage(
       },
       body: JSON.stringify({
         replyToken,
-        messages: [
-          {
-            type: "flex",
-            altText,
-            contents: flexContents,
-          },
-        ],
+        messages: firstBatch,
       }),
     });
+
+    if (res.ok && remainingMessages.length > 0 && targetId) {
+      for (let i = 0; i < remainingMessages.length; i += 5) {
+        const pushBatch = remainingMessages.slice(i, i + 5);
+        await fetch(`${LINE_API_BASE}/push`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            to: targetId,
+            messages: pushBatch,
+          }),
+        }).catch(() => undefined);
+      }
+    }
 
     if (!res.ok) {
       const errJson = await res.json().catch(() => ({}));
@@ -430,14 +503,12 @@ export async function replyMultipleFlexMessages(
     return false;
   }
   try {
-    const validList = flexList.filter(f => f && f.contents).slice(0, 5);
+    const validList = flexList.filter(f => f && f.contents);
     if (validList.length === 0) return false;
 
-    const messages = validList.map(f => ({
-      type: "flex",
-      altText: f.altText,
-      contents: f.contents,
-    }));
+    const messages = validList
+      .flatMap(f => buildSafeFlexMessages(f.altText, f.contents))
+      .slice(0, 5);
 
     const res = await fetch(`${LINE_API_BASE}/reply`, {
       method: "POST",
@@ -518,14 +589,12 @@ export async function sendMultipleFlexMessagesDetailed(
     };
   }
   try {
-    const validList = flexList.filter(f => f && f.contents).slice(0, 5);
+    const validList = flexList.filter(f => f && f.contents);
     if (validList.length === 0) return { success: false, error: "ไม่มีข้อความ Flex ที่ถูกต้อง" };
 
-    const messages = validList.map(f => ({
-      type: "flex",
-      altText: f.altText,
-      contents: f.contents,
-    }));
+    const messages = validList
+      .flatMap(f => buildSafeFlexMessages(f.altText, f.contents))
+      .slice(0, 5);
 
     const res = await fetch(`${LINE_API_BASE}/push`, {
       method: "POST",
