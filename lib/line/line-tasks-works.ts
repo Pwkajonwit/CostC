@@ -3053,10 +3053,8 @@ export async function handleTaskCommands(
   const spaceBracketMatch = trimmedRaw.match(/^งาน\s+\[([^\[\]]+)\]$/i);
   // Check if it's "งาน:ชื่อ" or "งาน: ชื่อ" (where the part after "งาน:" is a single name or single token without other instructions)
   const colonPlainMatch = trimmedRaw.match(/^งาน\s*:\s*([^\s:\[\]]+)$/i);
-  // Check if it's "งาน ชื่อ" (single token after "งาน")
-  const spacePlainMatch = trimmedRaw.match(/^งาน\s+([^\s:\[\]]+)$/i);
 
-  const isMemberNameQuery = Boolean(colonBracketMatch || spaceBracketMatch || colonPlainMatch || spacePlainMatch);
+  const isMemberNameQuery = Boolean(colonBracketMatch || spaceBracketMatch || colonPlainMatch);
   const isWorkGridQuery = isWork2Query || isMemberNameQuery;
 
   if (isWorkGridQuery || rawText.startsWith("งาน:") || rawText.startsWith("งานด่วน:") || rawText.startsWith("งานใหม่:")) {
@@ -3067,8 +3065,6 @@ export async function handleTaskCommands(
       content = spaceBracketMatch[1].trim();
     } else if (colonPlainMatch) {
       content = colonPlainMatch[1].trim();
-    } else if (spacePlainMatch) {
-      content = spacePlainMatch[1].trim();
     } else if (isWork2Query) {
       content = trimmedRaw.replace(/^งาน\s*2\s*:?/, "").replace(/^\[|\]$/g, "").trim();
     } else {
@@ -3291,9 +3287,7 @@ export async function handleTaskCommands(
     rawText.startsWith("ยืนยันปิดงาน:") ||
     (rawText.startsWith("ปิด:") && !rawText.includes("\n") && /^\d+$/.test(rawText.replace(/^ปิด:/, "").trim())) ||
     (rawText.startsWith("ปิดงาน ") && /^\d+$/.test(rawText.replace(/^ปิดงาน\s+/, "").trim())) ||
-    (rawText.startsWith("ปิด ") && !rawText.includes("\n") && /^\d+$/.test(rawText.replace(/^ปิด\s+/, "").trim())) ||
-    lowerText === "ปิดงาน" ||
-    lowerText === "ปิด";
+    (rawText.startsWith("ปิด ") && !rawText.includes("\n") && /^\d+$/.test(rawText.replace(/^ปิด\s+/, "").trim()));
 
   if (isSubmitKeywordMessage || isShortSendCommand || isShortCloseCommand) {
     let numId = 0;
@@ -3870,7 +3864,7 @@ export async function handleWorkCommands(
 
   // 5. One-Tap Status Auto-Advance ("เลื่อน: 1", "เลื่อน 1", "อัพเดท: 1", "อัพเดท 1", "อัปเดต 1", "update 1")
   const isAdvanceMatch =
-    /^(?:เลื่อน|อัพเดท|อัปเดต|update)(?:pw|pm)?(?::|\s+)?/i.test(rawText.trim());
+    /^(?:เลื่อน|อัพเดท|อัปเดต|update)(?:pw|pm)?(?::|\s+)\s*(?:pw-?|pm-?)?#?\d+$/i.test(rawText.trim());
 
   if (isAdvanceMatch) {
     const rawWorkId = rawText.replace(/^(?:เลื่อน|อัพเดท|อัปเดต|update)(?:pw|pm)?(?::|\s+)?\s*(?:pw-?|pm-?)?/i, "").trim();
@@ -3961,7 +3955,7 @@ export async function handleWorkCommands(
 
   // 6. Set Status Directly ("สถานะ:", "สถานะpw:", "สถานะpm:", "สถานะ 6 รอเสนอ")
   const isDirectStatus =
-    /^(?:สถานะ|status)(?:pw|pm)?(?::|\s+)?/i.test(rawText.trim());
+    /^(?:สถานะ|status)(?:pw|pm)?(?::|\s+)\s*(?:pw-?|pm-?)?#?\d+\s+\S+/i.test(rawText.trim());
 
   if (isDirectStatus) {
     const rawVal = rawText.replace(/^(?:สถานะ|status)(?:pw|pm)?(?::|\s+)?\s*(?:pw-?|pm-?)?/i, "").trim();

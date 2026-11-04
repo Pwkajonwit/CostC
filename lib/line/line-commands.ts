@@ -158,11 +158,7 @@ export async function handleLineCommand(
       cleanCmd === "โอนเงินทั้งหมด" ||
       cleanCmd === "ยอดโอนเงิน" ||
       cleanCmd.startsWith("ยอดโอน:") ||
-      cleanCmd.startsWith("ยอดโอน ") ||
-      cleanCmd.startsWith("โอน:") ||
-      cleanCmd.startsWith("โอน ") ||
-      cleanCmd.includes("ยอดโอนวันนี้") ||
-      cleanCmd.includes("โอนวันนี้");
+      cleanCmd.startsWith("โอน:");
 
     if (isDailyTransferCmd) {
       const isColonCommand = rawText.startsWith("ยอดโอน:") || rawText.startsWith("โอน:");
@@ -344,11 +340,7 @@ export async function handleLineCommand(
       cleanCmd === "อนุมัติทั้งหมด" ||
       cleanCmd === "ยอดอนุมัติ all" ||
       cleanCmd.startsWith("ยอดอนุมัติ:") ||
-      cleanCmd.startsWith("ยอดอนุมัติ ") ||
-      (cleanCmd.startsWith("อนุมัติ:") && !rawText.startsWith("อนุมัติบิล") && !rawText.startsWith("อนุมัติเงินสด") && !rawText.startsWith("อนุมัติทั้งหมด:")) ||
-      (cleanCmd.startsWith("อนุมัติ ") && !rawText.startsWith("อนุมัติบิล") && !rawText.startsWith("อนุมัติเงินสด") && !rawText.startsWith("อนุมัติทั้งหมด:")) ||
-      cleanCmd.includes("ยอดอนุมัติวันนี้") ||
-      cleanCmd.includes("อนุมัติวันนี้");
+      (cleanCmd.startsWith("อนุมัติ:") && !rawText.startsWith("อนุมัติบิล") && !rawText.startsWith("อนุมัติเงินสด") && !rawText.startsWith("อนุมัติทั้งหมด:"));
 
     if (isDailyApprovalCmd) {
       const isColonCommand = rawText.startsWith("ยอดอนุมัติ:") || rawText.startsWith("อนุมัติ:");
@@ -532,15 +524,12 @@ export async function handleLineCommand(
     }
 
     // 2.2.1 Check & Verify Approval Notification Command
-    // ("ตรวจสอบการอนุมัติแล้ว", "ตรวจสอบอนุมัติแล้ว", "ตรวจอนุมัติแล้ว", "ตรวจสอบเรียบร้อย")
+    // ("ตรวจสอบการอนุมัติแล้ว", "ตรวจสอบอนุมัติแล้ว", "ตรวจอนุมัติแล้ว", "ยืนยันตรวจสอบการอนุมัติ")
     const isApprovalVerifiedCmd = (
       cleanCmd === "ตรวจสอบการอนุมัติแล้ว" ||
       cleanCmd === "ตรวจสอบอนุมัติแล้ว" ||
       cleanCmd === "ตรวจอนุมัติแล้ว" ||
-      cleanCmd === "ตรวจสอบเรียบร้อยแล้ว" ||
-      cleanCmd === "ตรวจสอบเรียบร้อย" ||
-      cleanCmd === "ยืนยันตรวจสอบการอนุมัติ" ||
-      cleanCmd === "ตรวจสอบแล้ว"
+      cleanCmd === "ยืนยันตรวจสอบการอนุมัติ"
     );
 
     if (isApprovalVerifiedCmd) {
@@ -1422,45 +1411,34 @@ export async function handleLineCommand(
     }
 
     const isWaitingApprovalCmd = (
-      lowerText === "รออนุมัติ" ||
-      lowerText === "รอ อนุมัติ" ||
-      lowerText === "ตั้งเบิก" ||
+      cleanCmd === "รออนุมัติ" ||
+      cleanCmd === "รอ อนุมัติ" ||
+      cleanCmd === "ตั้งเบิก" ||
       rawText.startsWith("รออนุมัติ:") ||
       rawText.startsWith("รอ อนุมัติ:") ||
-      rawText.startsWith("ตั้งเบิก:") ||
-      lowerText.startsWith("รออนุมัติ ") ||
-      lowerText.startsWith("รอ อนุมัติ ") ||
-      lowerText.startsWith("ตั้งเบิก ")
+      rawText.startsWith("ตั้งเบิก:")
     );
 
     const isApprovedCmd = (
-      lowerText === "รอปิดงาน" ||
-      lowerText === "รอ ปิดงาน" ||
-      lowerText === "รอจ่าย" ||
-      lowerText === "รอโอน" ||
-      lowerText === "อนุมัติแล้ว" ||
-      lowerText === "รอปิดบิล" ||
+      cleanCmd === "รอปิดงาน" ||
+      cleanCmd === "รอ ปิดงาน" ||
+      cleanCmd === "รอจ่าย" ||
+      cleanCmd === "รอโอน" ||
+      cleanCmd === "อนุมัติแล้ว" ||
+      cleanCmd === "รอปิดบิล" ||
       rawText.startsWith("รอปิดงาน:") ||
       rawText.startsWith("รอ ปิดงาน:") ||
       rawText.startsWith("รอจ่าย:") ||
       rawText.startsWith("รอโอน:") ||
       rawText.startsWith("อนุมัติแล้ว:") ||
-      rawText.startsWith("รอปิดบิล:") ||
-      lowerText.startsWith("รอปิดงาน ") ||
-      lowerText.startsWith("รอ ปิดงาน ") ||
-      lowerText.startsWith("รอจ่าย ") ||
-      lowerText.startsWith("รอโอน ") ||
-      lowerText.startsWith("อนุมัติแล้ว ") ||
-      lowerText.startsWith("รอปิดบิล ")
+      rawText.startsWith("รอปิดบิล:")
     );
 
     const isWaitingWithdrawCmd = (
-      lowerText === "รอตั้งเบิก" ||
-      lowerText === "รอ ตั้งเบิก" ||
+      cleanCmd === "รอตั้งเบิก" ||
+      cleanCmd === "รอ ตั้งเบิก" ||
       rawText.startsWith("รอตั้งเบิก:") ||
-      rawText.startsWith("รอ ตั้งเบิก:") ||
-      lowerText.startsWith("รอตั้งเบิก ") ||
-      lowerText.startsWith("รอ ตั้งเบิก ")
+      rawText.startsWith("รอ ตั้งเบิก:")
     );
 
     // 6. Query Bills Specific Commands
@@ -1752,8 +1730,8 @@ export async function handleLineCommand(
       cleanCmd === "สรุป บิล" ||
       cleanCmd === "สรุป วันนี้" ||
       cleanCmd === "สรุปทั้งหมด" ||
-      cleanCmd === ":รวม" ||
-      (cleanCmd.startsWith("สรุป") && !cleanCmd.includes("โอน"))
+      cleanCmd === "สรุปบิลทั้งหมด" ||
+      cleanCmd === ":รวม"
     ) {
       const isAll = cleanCmd === "สรุปทั้งหมด" || cleanCmd === ":รวม" || cleanCmd.includes("ทั้งหมด");
       const { getRows } = await import("@/lib/db");
@@ -1947,16 +1925,10 @@ export async function handleLineCommand(
       return true;
     }
 
-    // Fallback for unhandled messages
+    // Fallback for unhandled messages (ไม่ตอบกลับข้อความทั่วไปที่ไม่ได้กำหนดไว้)
     return false;
   } catch (err: any) {
     console.error("❌ Exception inside handleLineCommand:", err);
-    if (replyToken) {
-      await replyTextMessage(
-        replyToken,
-        `🤖 รับคำสั่ง "${text}" เรียบร้อยแล้วครับ (ระบบได้บันทึกการประมวลผลข้อมูลเข้าสู่ Supabase เรียบร้อยแล้ว)`
-      );
-    }
-    return true;
+    return false;
   }
 }
