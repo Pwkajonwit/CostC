@@ -45,7 +45,33 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // 2. Load backup config & history
+    // 2. Proxy image download (bypass CORS when needed)
+    if (type === "proxy-image") {
+      const targetUrl = searchParams.get("url");
+      if (!targetUrl) {
+        return NextResponse.json({ error: "Missing url" }, { status: 400 });
+      }
+      try {
+        const fetched = await fetch(targetUrl);
+        if (!fetched.ok) {
+          return NextResponse.json({ error: "Failed to fetch image from source" }, { status: fetched.status });
+        }
+        const contentType = fetched.headers.get("content-type") || "image/jpeg";
+        const buffer = await fetched.arrayBuffer();
+        return new NextResponse(buffer, {
+          status: 200,
+          headers: {
+            "Content-Type": contentType,
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=86400",
+          },
+        });
+      } catch (e: any) {
+        return NextResponse.json({ error: e.message }, { status: 500 });
+      }
+    }
+
+    // 3. Load backup config & history
     if (type === "config") {
       const config = await getBackupConfig();
       const history = await getBackupHistory();
@@ -56,7 +82,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // 3. Full backup payload export
+    // 4. Full backup payload export
     const { payload } = await generateFullBackupPayload("manual");
     return NextResponse.json(payload);
   } catch (error) {
@@ -70,15 +96,30 @@ export async function GET(req: NextRequest) {
 
 // ==========================================
 // POST /api/backup
-// 1. action === "trigger"       -> Trigger manual / auto snapshot
-// 2. action === "save-config"   -> Save schedule config
-// 3. action === "restore-point" -> Restore database from snapshot ID
-// 4. (default)                  -> Restore from uploaded JSON payload
+// 1. action === "trigger"           -> Trigger manual / auto snapshot
+// 2. action === "save-config"       -> Save schedule config
+// 3. action === "restore-point"     -> Restore database from snapshot ID
+// 4. action === "upload-attachment" -> Upload attachment image to Supabase Storage
+// 5. (default)                      -> Restore from uploaded JSON payload
 // ==========================================
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const action = body?.action;
+
+    // Upload attachment image to Supabase Storage
+    if (action === "upload-attachment") {
+      const filename = body?.filename;
+      const base64Data = body?.base64;
+      const contentType = body?.contentType || "image/jpeg";
+      if (!filename || !base64Data) {
+        return NextResponse.json({ error: "Missing filename or base64 data" }, { status: 400 });
+      }
+      const { uploadAttachmentToStorage } = await import("@/lib/backup-service");
+      const buffer = Buffer.from(base64Data, "base64");
+      const uploadRes = await uploadAttachmentToStorage(filename, buffer, contentType);
+      return NextResponse.json(uploadRes);
+    }
 
     // 1. Trigger snapshot
     if (action === "trigger") {

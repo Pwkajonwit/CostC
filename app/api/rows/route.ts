@@ -116,7 +116,7 @@ export async function GET(request: NextRequest) {
   const tableName = request.nextUrl.searchParams.get("tableName");
   const viewName = request.nextUrl.searchParams.get("viewName") || "";
   const page = Math.max(1, Number(request.nextUrl.searchParams.get("page") || 1));
-  const limit = Math.max(1, Math.min(500, Number(request.nextUrl.searchParams.get("limit") || 50)));
+  const limit = Math.max(1, Math.min(50000, Number(request.nextUrl.searchParams.get("limit") || 50)));
   const search = request.nextUrl.searchParams.get("search") || "";
   if (!tableName) return NextResponse.json({ error: "Missing tableName" }, { status: 400 });
 
@@ -210,7 +210,23 @@ export async function POST(request: NextRequest) {
 
     const row = ((body.row || body.values) && typeof (body.row || body.values) === "object" ? (body.row || body.values) : {}) as SheetRow;
     const actor = actorFromRequest(request);
-    if ((tableName === TABLES.DATA || tableName === "Data" || tableName === "bills")) {
+    const isDataBill = tableName === TABLES.DATA || tableName === "Data" || tableName === "bills";
+    if (isDataBill) {
+      let currentSeq = Number(row["ลำดับ"] || 0);
+      if (!row["ลำดับ"] || row["ลำดับ"] === "nextDataSequence" || isNaN(currentSeq) || currentSeq <= 0) {
+        try {
+          const sysOptions = await getSystemOptions();
+          const configuredStart = Number((sysOptions as any)?.bill_start_sequence || (sysOptions as any)?.["ลำดับบิลเริ่มต้น"] || 1);
+          const nextSeq = await getNextBillSequence(configuredStart);
+          row["ลำดับ"] = String(nextSeq);
+        } catch {
+          const nextSeq = await getNextBillSequence();
+          row["ลำดับ"] = String(nextSeq);
+        }
+      }
+      if (!row.id) {
+        row.id = String(row["ลำดับ"]).trim();
+      }
       if (!row["ผู้สร้างบิล"] && !row["created_by"]) {
         row["ผู้สร้างบิล"] = actor;
         row["created_by"] = actor;
@@ -218,6 +234,22 @@ export async function POST(request: NextRequest) {
         row["ผู้สร้างบิล"] = row["created_by"];
       } else if (row["ผู้สร้างบิล"] && !row["created_by"]) {
         row["created_by"] = row["ผู้สร้างบิล"];
+      }
+      if (!row["บิล"] || (row["บิล"] !== "หลัก" && row["บิล"] !== "ย่อย")) {
+        row["บิล"] = "หลัก";
+      }
+      if (!row["ร้านค้า/ผู้รับเหมา"]) {
+        if (row["ผู้รับเหมา"] || row["statusค่าแรง"] || row["ค่าแรง"]) {
+          row["ร้านค้า/ผู้รับเหมา"] = "ผู้รับเหมา";
+        } else if (row["ร้านค้า"]) {
+          row["ร้านค้า/ผู้รับเหมา"] = "ร้านค้า";
+        }
+      }
+      if (row["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา" && !row["statusค่าแรง"]) {
+        row["statusค่าแรง"] = "บุคคลธรรมดา";
+      }
+      if (!row["ผู้เบิก"]) {
+        row["ผู้เบิก"] = actor || "Admin";
       }
     }
     if (row["LINE User ID"] !== undefined || row["LINE"] !== undefined || row["line_user_id"] !== undefined) {
@@ -322,7 +354,7 @@ export async function POST(request: NextRequest) {
       revalidatePath("/petty-cash");
       revalidatePath("/views", "layout");
     } catch {}
-    return NextResponse.json({ ok: true, row: output });
+    return NextResponse.json({ ok: true, row: output, insertedRow: output });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 400 });
   }
@@ -1007,8 +1039,12 @@ function sanitizeBySchema(row: SheetRow, tableName: string) {
 }
 
 function validateRequiredBySchema(row: SheetRow, tableName: string) {
+  const isDataBill = tableName === TABLES.DATA || tableName === "Data" || tableName === "bills";
   const missing = getFormSchema(tableName).find(field => {
     if (!field.required || field.type === "Hidden" || field.readonly) return false;
+    // Auto-generated sequence for bills must not block insertion
+    if (isDataBill && field.name === "ลำดับ") return false;
+    if (field.key && String(field.initialValue || "").startsWith("next")) return false;
     const vType = String(row["ร้านค้า/ผู้รับเหมา"] ?? row.vendor_type ?? "").trim();
     if (field.name === "สินค้า") {
       const isMulti = String(row["_is_multi_item"] ?? "").trim() === "true" || Array.isArray(row.items) || (row.data && Array.isArray((row.data as any).items));

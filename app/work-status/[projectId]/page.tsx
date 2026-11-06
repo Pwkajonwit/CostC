@@ -51,13 +51,24 @@ export default async function ProjectDetailPage({ params, searchParams }: Projec
   const initialTab = typeof query.tab === "string" ? query.tab : undefined;
   const decodedProjectId = decodeURIComponent(projectId);
 
-  const [projectRows, dataRows, customerRows, companyRows, peopleRows, systemOptions] = await Promise.all([
+  const [
+    projectRows,
+    dataRows,
+    customerRows,
+    companyRows,
+    peopleRows,
+    systemOptions,
+    contractRows,
+    contractorRows,
+  ] = await Promise.all([
     getRows(TABLES.PROJECT).catch(() => []),
     getRows(TABLES.DATA).catch(() => []),
     getRows(TABLES.CUSTOMER).catch(() => []),
     getRows(TABLES.COMPANY).catch(() => []),
     getRows(TABLES.PEOPLE).catch(() => []),
     getSystemOptions().catch(() => ({} as Record<string, string[]>)),
+    getRows(TABLES.CONTRACT_WORK).catch(() => []),
+    getRows(TABLES.CONTRACTOR).catch(() => []),
   ]);
 
   const project = projectRows.find((row) => String(row["ID Project"] || "").trim() === decodedProjectId.trim());
@@ -156,6 +167,8 @@ export default async function ProjectDetailPage({ params, searchParams }: Projec
       detailFields={DETAIL_FIELDS}
       relatedColumns={RELATED_COLUMNS}
       initialTab={initialTab}
+      contractRows={contractRows}
+      contractorRows={contractorRows}
     />
   );
 }

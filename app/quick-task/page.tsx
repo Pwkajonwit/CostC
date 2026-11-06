@@ -152,6 +152,7 @@ export default function QuickTaskPage() {
             const pId = String(r["ID Project"] || r.id || "").trim();
             const pCus = String(r["ชื่อลูกค้า"] || r.customer_name || "").trim();
             if (pName && !seen.has(pName.toLowerCase()) && pName !== "งานทั่วไป") {
+              if (pName === "ดำเนินการ" || pName === "ชื่ออะไร") continue;
               seen.add(pName.toLowerCase());
               list.push({ id: pId, name: pName, customer: pCus });
             }
@@ -187,6 +188,19 @@ export default function QuickTaskPage() {
         (p.customer && p.customer.toLowerCase().includes(q))
     );
   }, [projects, projectFilter]);
+
+  // Quick project selection chips: filter valid project code/number, maximum 5 items
+  const quickProjects = useMemo(() => {
+    return projects
+      .filter((p) => {
+        if (!p.id || p.id === "0" || p.id === "-") return false;
+        // Must contain numeric digits in code
+        if (!/\d/.test(p.id)) return false;
+        if (p.name === "ดำเนินการ" || p.name === "ชื่ออะไร") return false;
+        return true;
+      })
+      .slice(0, 5);
+  }, [projects]);
 
   // Task item operations
   const handleAddTask = () => {
@@ -442,32 +456,36 @@ export default function QuickTaskPage() {
                 </div>
               )}
 
-              {/* Quick suggestion chips */}
-              <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                <span className="text-[10px] text-slate-400 mr-0.5">เลือกเร็ว:</span>
-                {projects.slice(0, 6).map((pOpt) => {
-                  const isSelected = project === pOpt.name;
-                  return (
-                    <button
-                      type="button"
-                      key={pOpt.name}
-                      onClick={() => {
-                        setProject(pOpt.name);
-                        setProjectId(pOpt.id);
-                        setProjectFilter("");
-                        setIsProjectDropdownOpen(false);
-                      }}
-                      className={`text-[10px] px-2 py-0.5 rounded-md transition cursor-pointer border ${
-                        isSelected
-                          ? "bg-blue-600 text-white border-blue-600 font-bold shadow-2xs"
-                          : "bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-200/60"
-                      }`}
-                    >
-                      {pOpt.name}
-                    </button>
-                  );
-                })}
-              </div>
+              {/* Quick suggestion chips (รหัสโครงการ แสดงสูงสุด 5 เลข) */}
+              {quickProjects.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                  <span className="text-[10px] text-slate-400 mr-0.5">เลือกด่วน:</span>
+                  {quickProjects.map((pOpt) => {
+                    const isSelected = project === pOpt.name || (projectId && projectId === pOpt.id);
+                    const codeLabel = pOpt.id.startsWith("#") ? pOpt.id : `#${pOpt.id}`;
+                    return (
+                      <button
+                        type="button"
+                        key={`${pOpt.id}-${pOpt.name}`}
+                        onClick={() => {
+                          setProject(pOpt.name);
+                          setProjectId(pOpt.id);
+                          setProjectFilter("");
+                          setIsProjectDropdownOpen(false);
+                        }}
+                        title={pOpt.name}
+                        className={`text-[10px] font-mono px-2.5 py-0.5 rounded-md transition cursor-pointer border ${
+                          isSelected
+                            ? "bg-blue-600 text-white border-blue-600 font-bold shadow-2xs"
+                            : "bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 border-slate-200/80 font-medium"
+                        }`}
+                      >
+                        {codeLabel}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Note */}

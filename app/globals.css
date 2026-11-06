@@ -137,6 +137,18 @@
   box-shadow: 2px 0 10px rgba(15, 23, 42, 0.04) !important;
 }
 
+/* Restore crisp typographic hierarchy inside DualSidebar */
+.dual-sidebar-nav .font-medium {
+  font-weight: 500 !important;
+}
+.dual-sidebar-nav .font-semibold {
+  font-weight: 600 !important;
+}
+.dual-sidebar-nav .font-bold,
+.dual-sidebar-nav strong {
+  font-weight: 700 !important;
+}
+
 /* ==========================================================================
    ZERO-GAP FULL FLUSH TABLE VIEWPORT (ส่วนท้ายตรึงชิดขอบล่างสุด 100%)
    ========================================================================== */
