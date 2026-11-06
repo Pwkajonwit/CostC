@@ -218,9 +218,14 @@ export async function validateBillRelations(row: SheetRow) {
       // เมื่อเลือกผู้รับเหมา แต่เป็นหมวดพนักงาน หรือหมวดอื่นๆ และไม่ได้ระบุผู้รับเหมา -> ไม่บังคับ
     } else {
       const hydratedContracts = await hydrateContractRows(contracts);
-      const contract = hydratedContracts.find(item => String(item.id_Conwork || "").trim() === contractId);
+      const contract = hydratedContracts.find(item => {
+        const id1 = String(item.id_Conwork || item["id_Conwork"] || item.id || "").trim().toLowerCase();
+        const targetId = contractId.toLowerCase();
+        const nick = String(item["ชื่อเล่น"] || item["ผู้รับเหมา"] || "").trim().toLowerCase();
+        return id1 === targetId || (nick && nick === targetId);
+      });
       if (!contract) throw new Error("ไม่พบรายการเปิดจ้างที่เลือก");
-      if (String(contract["ID Project"] || "").trim() !== projectId) {
+      if (String(contract["ID Project"] || contract.project_id || "").trim() !== projectId) {
         throw new Error("รายการเปิดจ้างไม่อยู่ใน Project ที่เลือก");
       }
       if (toNumber(contract["ค่าแรงคงเหลือ"]) <= 0) {

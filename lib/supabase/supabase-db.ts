@@ -654,7 +654,11 @@ export function mapSheetRowToSupabaseRow(tableName: string, row: Record<string, 
     }
 
     const rawProjectId = row["ID Project"] ?? row.project_id;
-    if (hasValue(rawProjectId)) dbRow.project_id = String(rawProjectId).trim();
+    if (hasValue(rawProjectId) && String(rawProjectId).trim() !== "") {
+      dbRow.project_id = String(rawProjectId).trim();
+    } else {
+      dbRow.project_id = null;
+    }
 
     const rawProjectName = row["ชื่อ Project"] ?? row.project_name;
     if (hasValue(rawProjectName)) dbRow.project_name = String(rawProjectName).trim();
@@ -696,10 +700,12 @@ export function mapSheetRowToSupabaseRow(tableName: string, row: Record<string, 
         const rate = parseDeductPercent(rawDeduct);
         dbRow.withholding_tax = rate > 0 ? rate : 3;
         const customDeduct = toNumber(row["จำนวนหัก"] ?? row.deduct_amount ?? row["3เปอร์"] ?? 0);
-        dbRow.deduct_amount = customDeduct;
+        if (!dbRow.data) dbRow.data = {};
+        dbRow.data.deduct_amount = customDeduct;
       } else {
         dbRow.withholding_tax = 0;
-        dbRow.deduct_amount = 0;
+        if (!dbRow.data) dbRow.data = {};
+        dbRow.data.deduct_amount = 0;
         dbRow.wht_issued_date = null;
       }
     }
@@ -719,7 +725,6 @@ export function mapSheetRowToSupabaseRow(tableName: string, row: Record<string, 
     const rawCreatedBy = row["ผู้สร้างบิล"] ?? row.created_by ?? row["ผู้บันทึก"];
     if (hasValue(rawCreatedBy)) {
       dbRow.created_by = String(rawCreatedBy).trim();
-      dbRow["ผู้สร้างบิล"] = String(rawCreatedBy).trim();
     }
 
     const rawImage = row["รูปถ่ายบิล"] ?? row.image_url;
@@ -741,6 +746,13 @@ export function mapSheetRowToSupabaseRow(tableName: string, row: Record<string, 
       dbRow.paid_at = rawPaidAt;
       if (!dbRow.data) dbRow.data = {};
       dbRow.data.paid_at = rawPaidAt;
+    }
+
+    const rawCreatedAt = row["created_at"] ?? row.created_at;
+    if (hasValue(rawCreatedAt)) {
+      dbRow.created_at = rawCreatedAt;
+    } else {
+      dbRow.created_at = new Date().toISOString();
     }
 
     const rawDate = row["ว/ด/ป"] ?? row["วันที่"] ?? row.bill_date;
@@ -795,32 +807,56 @@ export function mapSheetRowToSupabaseRow(tableName: string, row: Record<string, 
     if (hasValue(row["statusค่าแรง"] ?? row.labor_status)) dbRow.labor_status = String(row["statusค่าแรง"] ?? row.labor_status).trim();
     if (hasValue(row["ยอดโอน"] ?? row.transfer_amount)) dbRow.transfer_amount = toNumber(row["ยอดโอน"] ?? row.transfer_amount);
 
-    if (hasValue(row["ร้านค้า"] ?? row.store_id)) dbRow.store_id = String(row["ร้านค้า"] ?? row.store_id).trim();
-    if (hasValue(row["ผู้รับเหมา"] ?? row.contractor_id)) dbRow.contractor_id = String(row["ผู้รับเหมา"] ?? row.contractor_id).trim();
-    if (hasValue(row["ร้านค้า/ผู้รับเหมา"] ?? row.vendor_type)) dbRow.vendor_type = String(row["ร้านค้า/ผู้รับเหมา"] ?? row.vendor_type).trim();
-    if (hasValue(row["สินค้า"] ?? row.product)) dbRow.product = String(row["สินค้า"] ?? row.product).trim();
-    if (hasValue(row["รายละเอียดงาน"] ?? row.work_details)) dbRow.work_details = String(row["รายละเอียดงาน"] ?? row.work_details).trim();
+    if (!dbRow.data) dbRow.data = {};
+    if (row.data && typeof row.data === "object") {
+      dbRow.data = { ...row.data, ...dbRow.data };
+    }
+    if (hasValue(row["ร้านค้า"] ?? row.store_id)) dbRow.data.store_id = String(row["ร้านค้า"] ?? row.store_id).trim();
+    if (hasValue(row["ผู้รับเหมา"] ?? row.contractor_id)) dbRow.data.contractor_id = String(row["ผู้รับเหมา"] ?? row.contractor_id).trim();
+    if (hasValue(row["ร้านค้า/ผู้รับเหมา"] ?? row.vendor_type)) dbRow.data.vendor_type = String(row["ร้านค้า/ผู้รับเหมา"] ?? row.vendor_type).trim();
+    if (hasValue(row["สินค้า"] ?? row.product)) dbRow.data.product = String(row["สินค้า"] ?? row.product).trim();
+    if (hasValue(row["รายละเอียดงาน"] ?? row.work_details)) dbRow.data.work_details = String(row["รายละเอียดงาน"] ?? row.work_details).trim();
     if (hasValue(row["รายการ"] ?? row.sub_category)) dbRow.sub_category = String(row["รายการ"] ?? row.sub_category).trim();
     if (hasValue(row["ชื่อพนักงาน"] ?? row.staff_name)) {
-      dbRow.staff_name = String(row["ชื่อพนักงาน"] ?? row.staff_name).trim();
-      if (!dbRow.data) dbRow.data = {};
-      dbRow.data["ชื่อพนักงาน"] = dbRow.staff_name;
+      dbRow.data.staff_name = String(row["ชื่อพนักงาน"] ?? row.staff_name).trim();
+      dbRow.data["ชื่อพนักงาน"] = dbRow.data.staff_name;
     }
     if (row.items !== undefined || row["items"] !== undefined) {
-      dbRow.items = row.items ?? row["items"];
+      dbRow.data.items = row.items ?? row["items"];
     }
   } else if (dbTable === "projects") {
-    if (row["ID Project"] !== undefined) dbRow.id = row["ID Project"];
-    if (row["ชื่อ Project"] !== undefined) dbRow.name = row["ชื่อ Project"];
-    if (row["ชื่อลูกค้า"] !== undefined) dbRow.customer_name = row["ชื่อลูกค้า"];
-    if (row["สถานที่"] !== undefined) dbRow.location = row["สถานที่"];
-    if (row["ยอดงาน"] !== undefined) dbRow.work_amount = row["ยอดงาน"];
-    if (row["งบไม่เกิน"] !== undefined) dbRow.budget = row["งบไม่เกิน"];
-    if (row["ยอดรวม vat"] !== undefined) dbRow.vat_total = row["ยอดรวม vat"];
-    if (row["วันที่"] !== undefined) dbRow.start_date = row["วันที่"] || null;
-    if (row["color"] !== undefined) dbRow.color = row["color"];
-    if (row["บริษัท"] !== undefined) dbRow.company = row["บริษัท"];
-    if (row["รับผิดชอบ"] !== undefined) dbRow.responsible_person = row["รับผิดชอบ"];
+    const rawId = row["ID Project"] ?? row.id;
+    if (hasValue(rawId)) dbRow.id = String(rawId).trim();
+
+    const rawName = row["ชื่อ Project"] ?? row.name;
+    if (hasValue(rawName)) dbRow.name = String(rawName).trim();
+
+    const rawCust = row["ชื่อลูกค้า"] ?? row.customer_name;
+    if (hasValue(rawCust)) dbRow.customer_name = String(rawCust).trim();
+
+    const rawLoc = row["สถานที่"] ?? row.location;
+    if (hasValue(rawLoc)) dbRow.location = String(rawLoc).trim();
+
+    const rawWork = row["ยอดงาน"] ?? row.work_amount;
+    if (hasValue(rawWork)) dbRow.work_amount = toNumber(rawWork);
+
+    const rawBudget = row["งบไม่เกิน"] ?? row.budget;
+    if (hasValue(rawBudget)) dbRow.budget = toNumber(rawBudget);
+
+    const rawVat = row["ยอดรวม vat"] ?? row.vat_total;
+    if (hasValue(rawVat)) dbRow.vat_total = toNumber(rawVat);
+
+    const rawDate = row["วันที่"] ?? row.start_date;
+    if (hasValue(rawDate)) dbRow.start_date = normalizeDateToIso(rawDate) || rawDate;
+
+    const rawColor = row["color"] ?? row.color;
+    if (hasValue(rawColor)) dbRow.color = String(rawColor).trim();
+
+    const rawComp = row["บริษัท"] ?? row.company;
+    if (hasValue(rawComp)) dbRow.company = String(rawComp).trim();
+
+    const rawResp = row["รับผิดชอบ"] ?? row.responsible_person;
+    if (hasValue(rawResp)) dbRow.responsible_person = String(rawResp).trim();
 
     // Preserve dynamic budget allocation fields into data JSONB
     const projectData = (row.data && typeof row.data === "object") ? { ...row.data } : {};
@@ -883,11 +919,19 @@ export function mapSheetRowToSupabaseRow(tableName: string, row: Record<string, 
     if (row["id_car"] !== undefined || row["id"] !== undefined) {
       dbRow.id = row["id_car"] ?? row["id"];
     }
-    if (row["หมายเลขทะเบียน"] !== undefined) dbRow.plate_no = row["หมายเลขทะเบียน"];
-    if (row["ยี่ห้อรถ"] !== undefined) dbRow.brand = row["ยี่ห้อรถ"];
-    if (row["สี"] !== undefined) dbRow.color = row["สี"];
-    if (row["รับผิดชอบ"] !== undefined) dbRow.responsible_person = row["รับผิดชอบ"];
-    if (row["รถของ"] !== undefined) dbRow.owner = row["รถของ"];
+    const rawPlate = row["หมายเลขทะเบียน"] ?? row.plate_no;
+    if (hasValue(rawPlate)) dbRow.plate_no = String(rawPlate).trim();
+    const rawBrand = row["ยี่ห้อรถ"] ?? row.brand;
+    if (hasValue(rawBrand)) dbRow.brand = String(rawBrand).trim();
+    const rawColor = row["สี"] ?? row.color;
+    if (hasValue(rawColor)) dbRow.color = String(rawColor).trim();
+    const rawResp = row["รับผิดชอบ"] ?? row.responsible_person;
+    if (hasValue(rawResp)) dbRow.responsible_person = String(rawResp).trim();
+    const rawOwner = row["รถของ"] ?? row.owner;
+    if (hasValue(rawOwner)) dbRow.owner = String(rawOwner).trim();
+    if (row.data && typeof row.data === "object") {
+      dbRow.data = { ...(dbRow.data || {}), ...row.data };
+    }
   } else if (dbTable === "customers") {
     if (row["id_cus"] !== undefined || row["id"] !== undefined) {
       dbRow.id = row["id_cus"] ?? row["id"];
@@ -989,16 +1033,68 @@ export function mapSheetRowToSupabaseRow(tableName: string, row: Record<string, 
         dbRow.id = candidateId;
       }
     }
-    if (row["id_Contractor"] !== undefined) dbRow.contractor_id = row["id_Contractor"];
-    if (row["ID Project"] !== undefined) dbRow.project_id = row["ID Project"];
-    if (row["ชื่อ Project"] !== undefined) dbRow.project_name = row["ชื่อ Project"];
-    if (row["ยอดเงินจ้าง"] !== undefined) dbRow.total_contract_amount = row["ยอดเงินจ้าง"];
-    if (row["รายละเอียดงาน"] !== undefined) dbRow.work_details = row["รายละเอียดงาน"];
-    if (row["เบอร์โทรศัพท์"] !== undefined) dbRow.phone = row["เบอร์โทรศัพท์"];
-    if (row["ยอดเงินจ่าย"] !== undefined) dbRow.paid_amount = row["ยอดเงินจ่าย"];
-    if (row["วันที่"] !== undefined || row["work_date"] !== undefined || row["date"] !== undefined || row["contract_date"] !== undefined) {
-      dbRow.work_date = row["วันที่"] ?? row["work_date"] ?? row["date"] ?? row["contract_date"];
+    const rawCId = row["id_Contractor"] ?? row.contractor_id;
+    if (hasValue(rawCId) && String(rawCId).trim() !== "") {
+      dbRow.contractor_id = String(rawCId).trim();
+    } else {
+      dbRow.contractor_id = null;
     }
+    const rawPId = row["ID Project"] ?? row.project_id;
+    if (hasValue(rawPId) && String(rawPId).trim() !== "") {
+      dbRow.project_id = String(rawPId).trim();
+    } else {
+      dbRow.project_id = null;
+    }
+    const rawPName = row["ชื่อ Project"] ?? row.project_name;
+    if (hasValue(rawPName)) dbRow.project_name = String(rawPName).trim();
+    const rawAmt = row["ยอดเงินจ้าง"] ?? row.total_contract_amount;
+    if (hasValue(rawAmt)) dbRow.total_contract_amount = toNumber(rawAmt);
+    const rawDetails = row["รายละเอียดงาน"] ?? row.work_details;
+    if (hasValue(rawDetails)) dbRow.work_details = String(rawDetails).trim();
+    const rawPhone = row["เบอร์โทรศัพท์"] ?? row.phone;
+    if (hasValue(rawPhone)) dbRow.phone = String(rawPhone).trim();
+    const rawPaid = row["ยอดเงินจ่าย"] ?? row.paid_amount;
+    if (hasValue(rawPaid)) dbRow.paid_amount = toNumber(rawPaid);
+    const rawDate = row["วันที่"] ?? row["work_date"] ?? row["date"] ?? row["contract_date"];
+    if (hasValue(rawDate)) {
+      dbRow.work_date = normalizeDateToIso(rawDate) || rawDate;
+    }
+    const cwData = (row.data && typeof row.data === "object") ? { ...row.data } : {};
+    Object.entries(row).forEach(([k, v]) => {
+      if (
+        !k.startsWith("_") &&
+        !["id_Conwork", "id", "id_Contractor", "contractor_id", "ID Project", "project_id", "ชื่อ Project", "project_name", "ยอดเงินจ้าง", "total_contract_amount", "รายละเอียดงาน", "work_details", "เบอร์โทรศัพท์", "phone", "ยอดเงินจ่าย", "paid_amount", "วันที่", "work_date", "date", "contract_date", "created_at", "data"].includes(k)
+      ) {
+        cwData[k] = v;
+      }
+    });
+    dbRow.data = cwData;
+  } else if (dbTable === "products") {
+    const rawId = row["id_product"] ?? row["รหัสสินค้า"] ?? row.id;
+    if (hasValue(rawId)) dbRow.id = String(rawId).trim();
+
+    const rawName = row["ชื่อประเภทสินค้า"] ?? row["ชื่อสินค้า"] ?? row.name;
+    if (hasValue(rawName)) dbRow.name = String(rawName).trim();
+
+    const rawCat = row["หมวดหมู่"] ?? row.category;
+    if (hasValue(rawCat)) dbRow.category = String(rawCat).trim();
+
+    const rawUnit = row["หน่วยนับ"] ?? row.unit;
+    if (hasValue(rawUnit)) dbRow.unit = String(rawUnit).trim();
+
+    const rawPrice = row["ราคา"] ?? row["ราคาต่อหน่วย"] ?? row.price;
+    if (hasValue(rawPrice)) dbRow.price = toNumber(rawPrice);
+
+    const prodData = (row.data && typeof row.data === "object") ? { ...row.data } : {};
+    Object.entries(row).forEach(([k, v]) => {
+      if (
+        !k.startsWith("_") &&
+        !["id_product", "รหัสสินค้า", "ชื่อประเภทสินค้า", "ชื่อสินค้า", "หมวดหมู่", "หน่วยนับ", "ราคา", "ราคาต่อหน่วย", "id", "name", "category", "unit", "price", "data", "created_at"].includes(k)
+      ) {
+        prodData[k] = v;
+      }
+    });
+    dbRow.data = prodData;
   } else if (dbTable === "loans") {
     if (row["id"] !== undefined) dbRow.id = row["id"];
     if (row["ชื่อ"] !== undefined) dbRow.borrower_name = row["ชื่อ"];
@@ -3096,11 +3192,7 @@ function getBusinessKey(dbTable: string, row: Record<string, any>): string {
     return String(row.name || row["ชื่อ Project"] || "").trim().toLowerCase();
   }
   if (dbTable === "bills") {
-    const proj = String(row.project_id || row["ID Project"] || "").trim();
-    const bill = String(row.bill_no || row["บิล"] || "").trim();
-    const amount = String(row.amount || row["ยอดเงิน"] || "").trim();
-    const date = String(row.bill_date || row["ว/ด/ป"] || "").trim();
-    if (proj && bill) return `bill:${proj}:${bill}:${amount}:${date}`.toLowerCase();
+    // For bills, do not use heuristic business key deduplication because each bill has a unique identity
     return "";
   }
   return "";
@@ -3134,7 +3226,7 @@ export async function bulkInsertRowsToSupabase(tableName: string, rowsData: Reco
 
   try {
     // 1. Fetch existing records to prevent duplicates and match IDs
-    const { data: existingRecords } = await supabaseAdmin.from(dbTable).select("*");
+    const { data: existingRecords } = await supabaseAdmin.from(dbTable).select("*").limit(50000);
     const existingList = existingRecords || [];
 
     const existingById = new Map<string, Record<string, any>>();
@@ -3236,7 +3328,7 @@ export async function bulkInsertRowsToSupabase(tableName: string, rowsData: Reco
 
       // Auto-retry if any column is missing in Postgres schema cache (e.g. bank_name)
       let retries = 0;
-      while (res.error && retries < 6) {
+      while (res.error && retries < 20) {
         retries++;
         const match = res.error.message.match(/Could not find the '([^']+)' column/i);
         if (match && match[1]) {

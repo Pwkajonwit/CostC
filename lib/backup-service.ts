@@ -1,4 +1,4 @@
-﻿import { getRows, bulkAppendRows, getSystemOptions } from "@/lib/db";
+import { getRows, bulkAppendRows, getSystemOptions } from "@/lib/db";
 import { supabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/supabase-db";
 import { clearCache } from "@/lib/utils/cache";
 import { sendTextMessageDetailed } from "@/lib/line/line";
@@ -541,3 +541,42 @@ export async function sendBackupLineNotification(
     console.warn("LINE backup alert skipped:", lineErr);
   }
 }
+
+// 12. Extract all attachment URLs across all tables
+export { extractAllAttachmentUrls, type AttachmentEntry } from "@/lib/utils/backup-helpers";
+
+// 13. Upload single attachment buffer back into Supabase Storage
+export async function uploadAttachmentToStorage(
+  filename: string,
+  buffer: Buffer,
+  contentType = "image/jpeg",
+  bucketName = "repairs"
+): Promise<{ success: boolean; path?: string; publicUrl?: string; error?: string }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: "Supabase not configured" };
+  }
+
+  try {
+    const { data, error } = await supabaseAdmin.storage
+      .from(bucketName)
+      .upload(filename, buffer, {
+        contentType,
+        upsert: true
+      });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    const { data: pubData } = supabaseAdmin.storage.from(bucketName).getPublicUrl(data.path);
+
+    return {
+      success: true,
+      path: data.path,
+      publicUrl: pubData?.publicUrl
+    };
+  } catch (err: any) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+

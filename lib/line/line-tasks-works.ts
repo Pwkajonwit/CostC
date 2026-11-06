@@ -622,435 +622,439 @@ export function createTaskSummaryFlex(
     return fallbackStr || isoStr;
   };
 
-  const ITEMS_PER_PAGE = 12;
-  const totalPages = Math.max(1, Math.ceil(tasks.length / ITEMS_PER_PAGE));
-
-  const buildPageBubble = (pageTasks: typeof tasks, pageIdx: number): Record<string, any> => {
-    const pageTitle = totalPages > 1 ? `${summaryTitle} (ชุดที่ ${pageIdx + 1}/${totalPages})` : summaryTitle;
-    return {
-      type: "bubble",
-      size: "giga",
-      body: {
-        type: "box",
-        layout: "vertical",
-        paddingAll: "14px",
-        spacing: "sm",
-        contents: [
-          // Top Header Row
-          {
-            type: "box",
-            layout: "horizontal",
-            alignItems: "center",
-            contents: [
-              {
-                type: "box",
-                layout: "vertical",
-                flex: 1,
-                contents: [
-                  {
-                    type: "text",
-                    text: pageTitle,
-                    weight: "bold",
-                    color: "#0F172A",
-                    size: "xs",
-                    wrap: true,
-                  },
-                  {
-                    type: "text",
-                    text: subtitle,
-                    size: "xxs",
-                    color: "#64748B",
-                    margin: "xs",
-                  },
-                ],
-              },
-              {
-                type: "box",
-                layout: "horizontal",
-                backgroundColor: options?.actionButton?.bgColor || "#2563EB",
-                cornerRadius: "6px",
-                width: "88px",
-                paddingTop: "5px",
-                paddingBottom: "5px",
-                alignItems: "center",
-                justifyContent: "center",
-                flex: 0,
-                action: {
-                  type: "uri",
-                  label: options?.actionButton?.label || "เปิดงานใหม่",
-                  uri: options?.actionButton?.uri || getLiffUrl("/quick-task"),
+  return {
+    type: "bubble",
+    size: "giga",
+    body: {
+      type: "box",
+      layout: "vertical",
+      paddingAll: "14px",
+      spacing: "sm",
+      contents: [
+        // Top Header Row
+        {
+          type: "box",
+          layout: "horizontal",
+          alignItems: "center",
+          contents: [
+            {
+              type: "box",
+              layout: "vertical",
+              flex: 1,
+              contents: [
+                {
+                  type: "text",
+                  text: summaryTitle,
+                  weight: "bold",
+                  color: "#0F172A",
+                  size: "xs",
+                  wrap: true,
                 },
-                contents: [
-                  {
-                    type: "text",
-                    text: options?.actionButton?.label ? options.actionButton.label : "+ เปิดงานใหม่",
-                    size: "xxs",
-                    weight: "bold",
-                    color: options?.actionButton?.color || "#FFFFFF",
-                    align: "center",
-                    wrap: false,
-                  },
-                ],
+                {
+                  type: "text",
+                  text: subtitle,
+                  size: "xxs",
+                  color: "#64748B",
+                  margin: "xs",
+                },
+              ],
+            },
+            {
+              type: "box",
+              layout: "horizontal",
+              backgroundColor: options?.actionButton?.bgColor || "#2563EB",
+              cornerRadius: "6px",
+              width: "88px",
+              paddingTop: "5px",
+              paddingBottom: "5px",
+              alignItems: "center",
+              justifyContent: "center",
+              flex: 0,
+              action: {
+                type: "uri",
+                label: options?.actionButton?.label || "เปิดงานใหม่",
+                uri: options?.actionButton?.uri || getLiffUrl("/quick-task"),
               },
-            ],
-          },
-          { type: "separator", margin: "xs", color: "#E2E8F0" },
-          // Table Column Header Row (ไม่มีไทม์ไลน์)
-          {
-            type: "box",
-            layout: "horizontal",
-            margin: "xs",
-            contents: [
-              { type: "text", text: "รายการทั้งหมด", size: "xxs", weight: "bold", color: "#6B7280", flex: 6 },
-              { type: "separator" },
-              { type: "text", text: "เริ่ม/เสร็จ", size: "xxs", weight: "bold", color: "#6B7280", flex: 3, align: "center" },
-              { type: "separator" },
-              { type: "text", text: "วัน", size: "xxs", weight: "bold", color: "#6B7280", flex: 1, align: "center" },
-              { type: "separator" },
-              { type: "text", text: "สถานะ", size: "xxs", weight: "bold", color: "#6B7280", flex: 3, align: "center" },
-            ],
-          },
-          { type: "separator", margin: "xs" },
-          // Table Task Items (Empty Notice or Task Rows)
-          ...(pageTasks.length === 0
-            ? [
-              {
-                type: "box",
-                layout: "vertical",
-                paddingAll: "16px",
-                alignItems: "center",
-                contents: [
-                  {
-                    type: "text",
-                    text: "ไม่มีรายการงานค้าง ทุกงานดำเนินการเสร็จเรียบร้อยแล้ว",
-                    size: "xs",
-                    color: "#16A34A",
-                    weight: "bold",
-                    align: "center",
-                  },
-                ],
-              },
-            ]
-            : pageTasks.map((t, index) => {
-              const globalIdx = pageIdx * ITEMS_PER_PAGE + index;
-              const taskIdStr = String(t.id || globalIdx + 100);
-              const cleanId = taskIdStr.replace(/\D/g, "") || taskIdStr;
+              contents: [
+                {
+                  type: "text",
+                  text: options?.actionButton?.label ? options.actionButton.label : "+ เปิดงานใหม่",
+                  size: "xxs",
+                  weight: "bold",
+                  color: options?.actionButton?.color || "#FFFFFF",
+                  align: "center",
+                  wrap: false,
+                },
+              ],
+            },
+          ],
+        },
+        { type: "separator", margin: "xs", color: "#E2E8F0" },
+        // Table Column Header Row (ไม่มีไทม์ไลน์)
+        {
+          type: "box",
+          layout: "horizontal",
+          margin: "xs",
+          contents: [
+            { type: "text", text: "รายการทั้งหมด", size: "xxs", weight: "bold", color: "#6B7280", flex: 6 },
+            { type: "separator" },
+            { type: "text", text: "เริ่ม/เสร็จ", size: "xxs", weight: "bold", color: "#6B7280", flex: 3, align: "center" },
+            { type: "separator" },
+            { type: "text", text: "วัน", size: "xxs", weight: "bold", color: "#6B7280", flex: 1, align: "center" },
+            { type: "separator" },
+            { type: "text", text: "สถานะ", size: "xxs", weight: "bold", color: "#6B7280", flex: 3, align: "center" },
+          ],
+        },
+        { type: "separator", margin: "xs" },
+        // Table Task Items (Empty Notice or Task Rows)
+        ...(tasks.length === 0
+          ? [
+            {
+              type: "box",
+              layout: "vertical",
+              paddingAll: "16px",
+              alignItems: "center",
+              contents: [
+                {
+                  type: "text",
+                  text: "ไม่มีรายการงานค้าง ทุกงานดำเนินการเสร็จเรียบร้อยแล้ว",
+                  size: "xs",
+                  color: "#16A34A",
+                  weight: "bold",
+                  align: "center",
+                },
+              ],
+            },
+          ]
+          : tasks.slice(0, 15).map((t, index) => {
+            const taskIdStr = String(t.id || index + 100);
+            const cleanId = taskIdStr.replace(/\D/g, "") || taskIdStr;
 
-              // 1. Resolve attachments
-              const taskAtt = options?.attachmentsMap?.[cleanId] || options?.attachmentsMap?.[taskIdStr];
-              const rawImgs = (taskAtt?.images && taskAtt.images.length > 0)
-                ? taskAtt.images
-                : ((t.images && t.images.length > 0)
-                  ? t.images
-                  : (t.imageUrl || t.image_url ? [t.imageUrl || t.image_url] : []));
-              const taskImages: string[] = (Array.isArray(rawImgs) ? rawImgs : [rawImgs])
-                .filter((s: any) => typeof s === "string" && s.startsWith("http"));
+            // 1. Resolve attachments
+            const taskAtt = options?.attachmentsMap?.[cleanId] || options?.attachmentsMap?.[taskIdStr];
+            const rawImgs = (taskAtt?.images && taskAtt.images.length > 0)
+              ? taskAtt.images
+              : ((t.images && t.images.length > 0)
+                ? t.images
+                : (t.imageUrl || t.image_url ? [t.imageUrl || t.image_url] : []));
+            const taskImages: string[] = (Array.isArray(rawImgs) ? rawImgs : [rawImgs])
+              .filter((s: any) => typeof s === "string" && s.startsWith("http"));
 
-              const uploadUrl = `${baseUrl}/task-upload?id=${cleanId}`;
+            const uploadUrl = `${baseUrl}/task-upload?id=${cleanId}`;
 
-              // 2. Resolve dates
-              let taskStartIso = "";
-              if (t.do_date) taskStartIso = normalizeDateToIso(t.do_date);
-              else if (t.dateStr) taskStartIso = normalizeDateToIso(t.dateStr);
+            // 2. Resolve dates
+            let taskStartIso = "";
+            if (t.do_date) taskStartIso = normalizeDateToIso(t.do_date);
+            else if (t.dateStr) taskStartIso = normalizeDateToIso(t.dateStr);
 
-              let taskEndIso = "";
-              if (t.send_date) taskEndIso = normalizeDateToIso(t.send_date);
-              else if (t.sendDateStr && t.sendDateStr !== "-") taskEndIso = normalizeDateToIso(t.sendDateStr);
+            let taskEndIso = "";
+            if (t.send_date) taskEndIso = normalizeDateToIso(t.send_date);
+            else if (t.sendDateStr && t.sendDateStr !== "-") taskEndIso = normalizeDateToIso(t.sendDateStr);
 
-              if (!taskStartIso && taskEndIso) taskStartIso = taskEndIso;
-              else if (taskStartIso && !taskEndIso) {
-                if (t.days && t.days > 1) {
-                  const [sy, sm, sd] = taskStartIso.split("-").map(Number);
-                  const endD = new Date(Date.UTC(sy, sm - 1, sd + (t.days - 1)));
-                  taskEndIso = `${endD.getUTCFullYear()}-${String(endD.getUTCMonth() + 1).padStart(2, "0")}-${String(endD.getUTCDate()).padStart(2, "0")}`;
-                } else {
-                  taskEndIso = taskStartIso;
-                }
+            if (!taskStartIso && taskEndIso) taskStartIso = taskEndIso;
+            else if (taskStartIso && !taskEndIso) {
+              if (t.days && t.days > 1) {
+                const [sy, sm, sd] = taskStartIso.split("-").map(Number);
+                const endD = new Date(Date.UTC(sy, sm - 1, sd + (t.days - 1)));
+                taskEndIso = `${endD.getUTCFullYear()}-${String(endD.getUTCMonth() + 1).padStart(2, "0")}-${String(endD.getUTCDate()).padStart(2, "0")}`;
+              } else {
+                taskEndIso = taskStartIso;
               }
+            }
 
-              let durationDays = t.days || 1;
-              if (taskStartIso && taskEndIso) {
-                const startMs = new Date(taskStartIso).getTime();
-                const endMs = new Date(taskEndIso).getTime();
-                const diff = Math.round((endMs - startMs) / 86400000) + 1;
-                if (diff > 0) durationDays = diff;
+            let durationDays = t.days || 1;
+            if (taskStartIso && taskEndIso) {
+              const startMs = new Date(taskStartIso).getTime();
+              const endMs = new Date(taskEndIso).getTime();
+              const diff = Math.round((endMs - startMs) / 86400000) + 1;
+              if (diff > 0) durationDays = diff;
+            }
+
+            const startDisplay = formatShortDisplay(taskStartIso, t.dateStr || "");
+            const endDisplay = taskEndIso && taskEndIso !== taskStartIso
+              ? formatShortDisplay(taskEndIso, t.sendDateStr || "")
+              : (t.sendDateStr && t.sendDateStr !== "-" ? formatShortDisplay("", t.sendDateStr) : "");
+
+            const displayDate = endDisplay ? `${startDisplay}\n${endDisplay}` : (startDisplay || "-");
+
+            const st = String(t.status || "").trim();
+            const isDone = st === "เสร็จ" || st === "สำเร็จ" || st === "ปิดงาน";
+            const isSent = st === "ส่งงานแล้ว" || st === "ส่งแล้ว" || st === "รอตรวจ";
+            const isOverdue = !isDone && Boolean(taskEndIso && taskEndIso < todayIso);
+
+            // Resolve Contractor / Assignee name for the title bracket (ใช้ชื่อผู้รับเหมาเหมือนเดิม)
+            const rawAssignee = t.assignee_name || (taskAtt?.submittedBy ? taskAtt.submittedBy.replace(/\s*\(.*\)/, "").trim() : "");
+            const taskTitleText = t.details || t.title || "งานประจำวัน";
+            const displayTitle = rawAssignee
+              ? `[#${cleanId}] [${rawAssignee}] ${taskTitleText}`
+              : `[#${cleanId}] ${taskTitleText}`;
+
+            // Resolve Project Code & Name (เอารหัสชื่อโครงการมาอยู่บรรทัดล่างแทน ผู้เปิด)
+            const pIdFromTask = String((t as any).project_id || (t as any).projectId || "").trim();
+            const pIdFromAtt = String(taskAtt?.project_id || taskAtt?.projectId || "").trim();
+            let projectCode = pIdFromTask || pIdFromAtt || "";
+
+            const rawProj = (taskAtt?.project && !taskAtt.project.startsWith("ผู้รับ:"))
+              ? taskAtt.project
+              : (t.project && !t.project.startsWith("ผู้รับ:") ? t.project : "");
+            const projectName = String(rawProj || "").trim();
+
+            if ((!projectCode || projectCode === "0") && projectName && !projectName.includes("ทั่วไป")) {
+              const codeMap = options?.projectCodeMap || _cachedProjectCodeMap;
+              if (codeMap) {
+                projectCode = codeMap[projectName.toLowerCase()] || codeMap[projectName] || "";
               }
-
-              const startDisplay = formatShortDisplay(taskStartIso, t.dateStr || "");
-              const endDisplay = taskEndIso && taskEndIso !== taskStartIso
-                ? formatShortDisplay(taskEndIso, t.sendDateStr || "")
-                : (t.sendDateStr && t.sendDateStr !== "-" ? formatShortDisplay("", t.sendDateStr) : "");
-
-              const displayDate = endDisplay ? `${startDisplay}\n${endDisplay}` : (startDisplay || "-");
-
-              const st = String(t.status || "").trim();
-              const isDone = st === "เสร็จ" || st === "สำเร็จ" || st === "ปิดงาน";
-              const isSent = st === "ส่งงานแล้ว" || st === "ส่งแล้ว" || st === "รอตรวจ";
-              const isOverdue = !isDone && Boolean(taskEndIso && taskEndIso < todayIso);
-
-              // Resolve Contractor / Assignee name for the title bracket (ใช้ชื่อผู้รับเหมาเหมือนเดิม)
-              const rawAssignee = t.assignee_name || (taskAtt?.submittedBy ? taskAtt.submittedBy.replace(/\s*\(.*\)/, "").trim() : "");
-              const taskTitleText = t.details || t.title || "งานประจำวัน";
-              const displayTitle = rawAssignee
-                ? `[#${cleanId}] [${rawAssignee}] ${taskTitleText}`
-                : `[#${cleanId}] ${taskTitleText}`;
-
-              // Resolve Project Code & Name (เอารหัสชื่อโครงการมาอยู่บรรทัดล่างแทน ผู้เปิด)
-              const pIdFromTask = String((t as any).project_id || (t as any).projectId || "").trim();
-              const pIdFromAtt = String(taskAtt?.project_id || taskAtt?.projectId || "").trim();
-              let projectCode = pIdFromTask || pIdFromAtt || "";
-
-              const rawProj = (taskAtt?.project && !taskAtt.project.startsWith("ผู้รับ:"))
-                ? taskAtt.project
-                : (t.project && !t.project.startsWith("ผู้รับ:") ? t.project : "");
-              const projectName = String(rawProj || "").trim();
-
-              if ((!projectCode || projectCode === "0") && projectName && !projectName.includes("ทั่วไป")) {
-                const codeMap = options?.projectCodeMap || _cachedProjectCodeMap;
-                if (codeMap) {
-                  projectCode = codeMap[projectName.toLowerCase()] || codeMap[projectName] || "";
-                }
-                if (!projectCode && !projectName.includes(" ")) {
-                  projectCode = projectName.replace(/^ผู้รับ:\s*/, "").trim();
-                }
+              if (!projectCode && !projectName.includes(" ")) {
+                projectCode = projectName.replace(/^ผู้รับ:\s*/, "").trim();
               }
+            }
 
-              let projectDisplay = "";
-              if (projectCode && projectCode !== "0" && !projectCode.includes("ทั่วไป")) {
-                projectDisplay = (projectName && projectName !== projectCode)
-                  ? `[${projectCode}] ${projectName}`
-                  : `[${projectCode}]`;
-              } else if (projectName) {
-                projectDisplay = projectName;
-              }
+            let projectDisplay = "";
+            if (projectCode && projectCode !== "0" && !projectCode.includes("ทั่วไป")) {
+              projectDisplay = (projectName && projectName !== projectCode)
+                ? `[${projectCode}] ${projectName}`
+                : `[${projectCode}]`;
+            } else if (projectName) {
+              projectDisplay = projectName;
+            }
 
-              return {
-                type: "box",
-                layout: "vertical",
-                backgroundColor: index % 2 === 0 ? "#FFFFFF" : "#F8FAFC",
-                borderColor: isOverdue ? "#FECACA" : "#E2E8F0",
-                borderWidth: "1px",
-                cornerRadius: "6px",
-                paddingStart: "4px",
-                paddingEnd: "4px",
-                paddingTop: "6px",
-                paddingBottom: "6px",
-                margin: "xs",
-                contents: [
-                  {
-                    type: "box",
-                    layout: "horizontal",
-                    spacing: "xs",
-                    alignItems: "center",
-                    contents: [
-                      // Column 1: Task Title + Project Code & Name below
-                      {
-                        type: "box",
-                        layout: "vertical",
-                        flex: 6,
-                        spacing: "xs",
-                        contents: [
+            return {
+              type: "box",
+              layout: "vertical",
+              backgroundColor: index % 2 === 0 ? "#FFFFFF" : "#F8FAFC",
+              borderColor: isOverdue ? "#FECACA" : "#E2E8F0",
+              borderWidth: "1px",
+              cornerRadius: "6px",
+              paddingStart: "4px",
+              paddingEnd: "4px",
+              paddingTop: "6px",
+              paddingBottom: "6px",
+              margin: "xs",
+              contents: [
+                {
+                  type: "box",
+                  layout: "horizontal",
+                  spacing: "xs",
+                  alignItems: "center",
+                  contents: [
+                    // Column 1: Task Title + Project Code & Name below
+                    {
+                      type: "box",
+                      layout: "vertical",
+                      flex: 6,
+                      spacing: "xs",
+                      contents: [
+                        {
+                          type: "text",
+                          text: displayTitle,
+                          size: "xs",
+                          color: "#1F2937",
+                          wrap: true,
+                          weight: "bold",
+                        },
+                        ...(projectDisplay ? [
                           {
                             type: "text",
-                            text: displayTitle,
-                            size: "xs",
-                            color: "#1F2937",
-                            wrap: true,
-                            weight: "bold",
-                          },
-                          ...(projectDisplay ? [
-                            {
-                              type: "text",
-                              text: `โครงการ: ${projectDisplay}`,
-                              size: "xxs",
-                              color: "#64748B",
-                              wrap: true
-                            }
-                          ] : []),
-                          ...(t.note ? [
-                            {
-                              type: "text",
-                              text: `หมายเหตุ: ${t.note}`,
-                              size: "xxs",
-                              color: "#475569",
-                              wrap: true
-                            }
-                          ] : []),
+                            text: `โครงการ: ${projectDisplay}`,
+                            size: "xxs",
+                            color: "#64748B",
+                            wrap: true
+                          }
+                        ] : []),
+                        ...(t.note ? [
                           {
-                            type: "box",
-                            layout: "horizontal",
-                            margin: "xs",
-                            contents: [
-                              {
-                                type: "box",
-                                layout: "horizontal",
-                                backgroundColor: "#F8FAFC",
-                                borderColor: "#E2E8F0",
-                                borderWidth: "1px",
-                                cornerRadius: "4px",
-                                paddingStart: "6px",
-                                paddingEnd: "6px",
-                                paddingTop: "2px",
-                                paddingBottom: "2px",
-                                alignItems: "center",
-                                action: {
-                                  type: "uri",
-                                  label: "ถ่ายรูป/แนบ",
-                                  uri: uploadUrl,
-                                },
-                                contents: [
-                                  {
-                                    type: "text",
-                                    text: taskImages.length > 0 ? `ถ่ายรูป/แนบ (${taskImages.length})` : "ถ่ายรูป/แนบ",
-                                    size: "xxs",
-                                    color: "#64748B",
-                                  },
-                                ],
-                              },
-                            ],
-                          },
-                        ],
-                      },
-                      { type: "separator" },
-                      // Column 2: Date
-                      {
-                        type: "text",
-                        text: displayDate,
-                        size: "xxs",
-                        color: "#6B7280",
-                        flex: 3,
-                        align: "center",
-                        wrap: true,
-                      },
-                      { type: "separator" },
-                      // Column 3: Duration Days
-                      {
-                        type: "text",
-                        text: String(durationDays),
-                        size: "xs",
-                        color: "#374151",
-                        flex: 1,
-                        align: "center",
-                      },
-                      { type: "separator" },
-                      // Column 4: Status / Action buttons
-                      isDone
-                        ? {
-                          type: "text",
-                          text: "เสร็จ",
-                          size: "xxs",
-                          color: "#16A34A",
-                          flex: 3,
-                          align: "center",
-                          weight: "bold",
-                        }
-                        : {
+                            type: "text",
+                            text: `หมายเหตุ: ${t.note}`,
+                            size: "xxs",
+                            color: "#475569",
+                            wrap: true
+                          }
+                        ] : []),
+                        {
                           type: "box",
                           layout: "horizontal",
-                          flex: 3,
-                          alignItems: "center",
-                          justifyContent: "center",
-                          spacing: "xs",
+                          margin: "xs",
                           contents: [
                             {
                               type: "box",
                               layout: "horizontal",
-                              backgroundColor: isSent ? "#F0F9FF" : "#EFF6FF",
-                              borderColor: isSent ? "#BAE6FD" : "#BFDBFE",
+                              backgroundColor: "#F8FAFC",
+                              borderColor: "#E2E8F0",
                               borderWidth: "1px",
                               cornerRadius: "4px",
-                              paddingTop: "6px",
-                              paddingBottom: "6px",
-                              paddingStart: "2px",
-                              paddingEnd: "2px",
+                              paddingStart: "6px",
+                              paddingEnd: "6px",
+                              paddingTop: "2px",
+                              paddingBottom: "2px",
                               alignItems: "center",
-                              justifyContent: "center",
-                              flex: 1,
                               action: {
-                                type: "message",
-                                label: "ส่ง",
-                                text: `ส่งงาน: ${cleanId}`,
+                                type: "uri",
+                                label: "ถ่ายรูป/แนบ",
+                                uri: uploadUrl,
                               },
                               contents: [
                                 {
                                   type: "text",
-                                  text: "ส่ง",
+                                  text: taskImages.length > 0 ? `ถ่ายรูป/แนบ (${taskImages.length})` : "ถ่ายรูป/แนบ",
                                   size: "xxs",
-                                  color: isSent ? "#0284C7" : "#2563EB",
-                                  align: "center",
-                                  weight: "bold",
-                                },
-                              ],
-                            },
-                            {
-                              type: "box",
-                              layout: "horizontal",
-                              backgroundColor: "#ECFDF5",
-                              borderColor: "#A7F3D0",
-                              borderWidth: "1px",
-                              cornerRadius: "4px",
-                              paddingTop: "6px",
-                              paddingBottom: "6px",
-                              paddingStart: "2px",
-                              paddingEnd: "2px",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              flex: 1,
-                              action: {
-                                type: "message",
-                                label: "ปิด",
-                                text: `ปิดงาน: ${cleanId}`,
-                              },
-                              contents: [
-                                {
-                                  type: "text",
-                                  text: "ปิด",
-                                  size: "xxs",
-                                  color: "#059669",
-                                  align: "center",
-                                  weight: "bold",
+                                  color: "#64748B",
                                 },
                               ],
                             },
                           ],
                         },
-                    ],
-                  },
-                ],
-              };
-            })),
-          { type: "separator", margin: "xs", color: "#E2E8F0" },
-          {
-            type: "text",
-            text: totalPages > 1
-              ? `ชุดที่ ${pageIdx + 1}/${totalPages} • สถานะ: กด ส่งงาน (อัปโหลดรูป) / ปิดงาน (เสร็จสิ้นงาน)`
-              : "สถานะ: กด ส่งงาน (อัปโหลดรูป) / ปิดงาน (เสร็จสิ้นงาน)",
-            size: "xxs",
-            color: "#94A3B8",
-            align: "center",
-            margin: "xs",
-          },
-        ],
-      },
-    };
+                      ],
+                    },
+                    { type: "separator" },
+                    // Column 2: Date
+                    {
+                      type: "text",
+                      text: displayDate,
+                      size: "xxs",
+                      color: "#6B7280",
+                      flex: 3,
+                      align: "center",
+                      wrap: true,
+                    },
+                    { type: "separator" },
+                    // Column 3: Duration Days
+                    {
+                      type: "text",
+                      text: String(durationDays),
+                      size: "xs",
+                      color: "#374151",
+                      flex: 1,
+                      align: "center",
+                    },
+                    { type: "separator" },
+                    // Column 4: Status / Action buttons
+                    isDone
+                      ? {
+                        type: "text",
+                        text: "เสร็จ",
+                        size: "xxs",
+                        color: "#16A34A",
+                        flex: 3,
+                        align: "center",
+                        weight: "bold",
+                      }
+                      : {
+                        type: "box",
+                        layout: "horizontal",
+                        flex: 3,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        spacing: "xs",
+                        contents: [
+                          {
+                            type: "box",
+                            layout: "horizontal",
+                            backgroundColor: isSent ? "#F0F9FF" : "#EFF6FF",
+                            borderColor: isSent ? "#BAE6FD" : "#BFDBFE",
+                            borderWidth: "1px",
+                            cornerRadius: "4px",
+                            paddingTop: "6px",
+                            paddingBottom: "6px",
+                            paddingStart: "2px",
+                            paddingEnd: "2px",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            flex: 1,
+                            action: {
+                              type: "message",
+                              label: "ส่ง",
+                              text: `ส่งงาน: ${cleanId}`,
+                            },
+                            contents: [
+                              {
+                                type: "text",
+                                text: "ส่ง",
+                                size: "xxs",
+                                color: isSent ? "#0284C7" : "#2563EB",
+                                align: "center",
+                                weight: "bold",
+                              },
+                            ],
+                          },
+                          {
+                            type: "box",
+                            layout: "horizontal",
+                            backgroundColor: "#ECFDF5",
+                            borderColor: "#A7F3D0",
+                            borderWidth: "1px",
+                            cornerRadius: "4px",
+                            paddingTop: "6px",
+                            paddingBottom: "6px",
+                            paddingStart: "2px",
+                            paddingEnd: "2px",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            flex: 1,
+                            action: {
+                              type: "message",
+                              label: "ปิด",
+                              text: `ปิดงาน: ${cleanId}`,
+                            },
+                            contents: [
+                              {
+                                type: "text",
+                                text: "ปิด",
+                                size: "xxs",
+                                color: "#059669",
+                                align: "center",
+                                weight: "bold",
+                              },
+                            ],
+                          },
+                        ],
+                      },
+                  ],
+                },
+              ],
+            };
+          })),
+        { type: "separator", margin: "xs", color: "#E2E8F0" },
+        {
+          type: "text",
+          text: "สถานะ: กด ส่งงาน (อัปโหลดรูป) / ปิดงาน (เสร็จสิ้นงาน)",
+          size: "xxs",
+          color: "#94A3B8",
+          align: "center",
+          margin: "xs",
+        },
+        ...(tasks.length > 15
+          ? [
+            {
+              type: "box",
+              layout: "horizontal",
+              backgroundColor: "#F1F5F9",
+              cornerRadius: "6px",
+              paddingTop: "6px",
+              paddingBottom: "6px",
+              margin: "sm",
+              alignItems: "center",
+              justifyContent: "center",
+              action: {
+                type: "uri",
+                label: "ดูงานทั้งหมด",
+                uri: `${baseUrl}/views/tasks`,
+              },
+              contents: [
+                {
+                  type: "text",
+                  text: `ดูรายการงานทั้งหมดในระบบ (${tasks.length} รายการ)`,
+                  size: "xxs",
+                  color: "#475569",
+                  align: "center",
+                  weight: "bold",
+                },
+              ],
+            },
+          ]
+          : []),
+      ],
+    },
   };
-
-  if (tasks.length === 0) {
-    return buildPageBubble([], 0);
-  }
-
-  const bubbles: Record<string, any>[] = [];
-  for (let p = 0; p < totalPages; p++) {
-    const chunk = tasks.slice(p * ITEMS_PER_PAGE, (p + 1) * ITEMS_PER_PAGE);
-    bubbles.push(buildPageBubble(chunk, p));
-  }
-
-  return bubbles.length === 1
-    ? bubbles[0]
-    : {
-      type: "carousel",
-      contents: bubbles,
-    };
 }
 
 /**
@@ -1421,13 +1425,12 @@ export function createWorkSummaryFlex(
     groupedWorks[targetSection].push(rawW);
   }
 
-  const orderedItems: Array<{ work: any; sectionName: string }> = [];
+  let totalItemsCount = 0;
   for (const sectionName of sectionsOrder) {
-    for (const w of groupedWorks[sectionName] || []) {
-      orderedItems.push({ work: w, sectionName });
-    }
+    totalItemsCount += (groupedWorks[sectionName] || []).length;
   }
-  const totalItemsCount = orderedItems.length;
+
+  const bodyContents: any[] = [];
 
   // Resolve team-specific LINE group link from process.env:
   // PW -> GROUP_PW
@@ -1453,465 +1456,438 @@ export function createWorkSummaryFlex(
     groupPwUrl = groupPwUrl.replace(/^https?:\/\/line\.me\/(?:R\/)?/i, "line://");
   }
 
-  const getSectionStyle = (name: string) => {
-    if (name === "รอดูงาน") {
+  // 1. Top Card Header (Title on left, small buttons in top-right corner)
+  bodyContents.push({
+    type: "box",
+    layout: "horizontal",
+    alignItems: "center",
+    contents: [
+      {
+        type: "box",
+        layout: "vertical",
+        flex: 6,
+        contents: [
+          {
+            type: "text",
+            text: title,
+            weight: "bold",
+            size: "sm",
+            color: "#0F172A",
+            wrap: false
+          },
+          {
+            type: "text",
+            text: isAllTeams
+              ? `${totalItemsCount} รายการล่าสุด (รวมทุกทีม)`
+              : `${totalItemsCount} รายการล่าสุด (ทีม ${options?.teamName})`,
+            size: "xxs",
+            color: "#64748B",
+            margin: "xs",
+            wrap: false
+          }
+        ]
+      },
+      {
+        type: "box",
+        layout: "horizontal",
+        spacing: "xs",
+        alignItems: "center",
+        justifyContent: "flex-end",
+        flex: 4,
+        contents: [
+          ...(groupPwUrl
+            ? [
+              {
+                type: "box",
+                layout: "horizontal",
+                backgroundColor: "#06C755",
+                cornerRadius: "4px",
+                paddingStart: "8px",
+                paddingEnd: "8px",
+                paddingTop: "4px",
+                paddingBottom: "4px",
+                alignItems: "center",
+                justifyContent: "center",
+                action: {
+                  type: "uri",
+                  label: "กลุ่ม",
+                  uri: groupPwUrl
+                },
+                contents: [
+                  {
+                    type: "text",
+                    text: "กลุ่ม",
+                    size: "xxs",
+                    weight: "bold",
+                    color: "#FFFFFF",
+                    align: "center",
+                    wrap: false
+                  }
+                ]
+              }
+            ]
+            : []),
+          {
+            type: "box",
+            layout: "horizontal",
+            backgroundColor: "#2563EB",
+            cornerRadius: "4px",
+            paddingStart: "8px",
+            paddingEnd: "8px",
+            paddingTop: "4px",
+            paddingBottom: "4px",
+            alignItems: "center",
+            justifyContent: "center",
+            action: {
+              type: "uri",
+              label: "+ เปิดงาน",
+              uri: getLiffUrl("/quick-work")
+            },
+            contents: [
+              {
+                type: "text",
+                text: "+ เปิดงาน",
+                size: "xxs",
+                weight: "bold",
+                color: "#FFFFFF",
+                align: "center",
+                wrap: false
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  });
+
+  bodyContents.push({
+    type: "separator",
+    margin: "sm",
+    color: "#E2E8F0"
+  });
+
+  // 2. Sections and Items (Card List View matching Image 1 mockup)
+  for (const sectionName of sectionsOrder) {
+    const list = groupedWorks[sectionName] || [];
+    if (list.length === 0) continue;
+
+    const getSectionStyle = (name: string) => {
+      if (name === "รอดูงาน") {
+        return {
+          bannerBg: "#FEF3C7", // Yellow / cream
+          bannerBorder: "#FDE68A",
+          bannerText: "#92400E"
+        };
+      }
+      if (name === "รอเสนอ") {
+        return {
+          bannerBg: "#F3E8FF", // Light purple
+          bannerBorder: "#E9D5FF",
+          bannerText: "#7E22CE"
+        };
+      }
+      if (name === "ประชุม") {
+        return {
+          bannerBg: "#DCFCE7", // Light green
+          bannerBorder: "#86EFAC",
+          bannerText: "#15803D"
+        };
+      }
+      // ประมูล
       return {
-        bannerBg: "#FEF3C7", // Yellow / cream
-        bannerBorder: "#FDE68A",
-        bannerText: "#92400E"
+        bannerBg: "#E0F2FE", // Light cyan
+        bannerBorder: "#BAE6FD",
+        bannerText: "#0369A1"
       };
-    }
-    if (name === "รอเสนอ") {
-      return {
-        bannerBg: "#F3E8FF", // Light purple
-        bannerBorder: "#E9D5FF",
-        bannerText: "#7E22CE"
-      };
-    }
-    if (name === "ประชุม") {
-      return {
-        bannerBg: "#DCFCE7", // Light green
-        bannerBorder: "#86EFAC",
-        bannerText: "#15803D"
-      };
-    }
-    // ประมูล
-    return {
-      bannerBg: "#E0F2FE", // Light cyan
-      bannerBorder: "#BAE6FD",
-      bannerText: "#0369A1"
     };
-  };
+    const sMeta = getSectionStyle(sectionName);
 
-  const ITEMS_PER_PAGE = 12;
-  const totalPages = Math.max(1, Math.ceil(totalItemsCount / ITEMS_PER_PAGE));
-
-  const buildPageBubble = (
-    pageItems: Array<{ work: any; sectionName: string }>,
-    pageIdx: number
-  ): Record<string, any> => {
-    const bodyContents: any[] = [];
-    const teamSuffix = isAllTeams ? "(รวมทุกทีม)" : `(ทีม ${options?.teamName})`;
-    const subText = totalPages > 1
-      ? `ทั้งหมด ${totalItemsCount} รายการ • ชุดที่ ${pageIdx + 1}/${totalPages} ${teamSuffix}`
-      : `${totalItemsCount} รายการล่าสุด ${teamSuffix}`;
-
-    // 1. Top Card Header (Title on left, small buttons in top-right corner)
+    // Section Banner Header (e.g. รอดูงาน / รอเสนอ / ประชุม / ประมูล)
     bodyContents.push({
       type: "box",
       layout: "horizontal",
+      backgroundColor: sMeta.bannerBg,
+      borderColor: sMeta.bannerBorder,
+      borderWidth: "1px",
+      paddingStart: "10px",
+      paddingEnd: "10px",
+      paddingTop: "5px",
+      paddingBottom: "5px",
+      margin: "md",
+      cornerRadius: "4px",
       alignItems: "center",
       contents: [
         {
-          type: "box",
-          layout: "vertical",
-          flex: 6,
-          contents: [
-            {
-              type: "text",
-              text: totalPages > 1 ? `${title} (${pageIdx + 1}/${totalPages})` : title,
-              weight: "bold",
-              size: "sm",
-              color: "#0F172A",
-              wrap: false
-            },
-            {
-              type: "text",
-              text: subText,
-              size: "xxs",
-              color: "#64748B",
-              margin: "xs",
-              wrap: false
-            }
-          ]
-        },
-        {
-          type: "box",
-          layout: "horizontal",
-          spacing: "xs",
-          alignItems: "center",
-          justifyContent: "flex-end",
-          flex: 4,
-          contents: [
-            ...(groupPwUrl
-              ? [
-                {
-                  type: "box",
-                  layout: "horizontal",
-                  backgroundColor: "#06C755",
-                  cornerRadius: "4px",
-                  paddingStart: "8px",
-                  paddingEnd: "8px",
-                  paddingTop: "4px",
-                  paddingBottom: "4px",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  action: {
-                    type: "uri",
-                    label: "กลุ่ม",
-                    uri: groupPwUrl
-                  },
-                  contents: [
-                    {
-                      type: "text",
-                      text: "กลุ่ม",
-                      size: "xxs",
-                      weight: "bold",
-                      color: "#FFFFFF",
-                      align: "center",
-                      wrap: false
-                    }
-                  ]
-                }
-              ]
-              : []),
-            {
-              type: "box",
-              layout: "horizontal",
-              backgroundColor: "#2563EB",
-              cornerRadius: "4px",
-              paddingStart: "8px",
-              paddingEnd: "8px",
-              paddingTop: "4px",
-              paddingBottom: "4px",
-              alignItems: "center",
-              justifyContent: "center",
-              action: {
-                type: "uri",
-                label: "+ เปิดงาน",
-                uri: getLiffUrl("/quick-work")
-              },
-              contents: [
-                {
-                  type: "text",
-                  text: "+ เปิดงาน",
-                  size: "xxs",
-                  weight: "bold",
-                  color: "#FFFFFF",
-                  align: "center",
-                  wrap: false
-                }
-              ]
-            }
-          ]
+          type: "text",
+          text: sectionName,
+          weight: "bold",
+          color: sMeta.bannerText,
+          size: "xs"
         }
       ]
     });
 
-    bodyContents.push({
-      type: "separator",
-      margin: "sm",
-      color: "#E2E8F0"
-    });
+    for (let i = 0; i < list.length; i++) {
+      const w = list[i];
+      const idStr = String(w.id || "").replace(/\D/g, "");
+      const locationStr = w.location && w.location !== "-" ? String(w.location) : "-";
+      const rawCompanyStr = w.company && w.company !== "-" ? String(w.company) : "-";
+      const companyStr = w.short_name || w.company_short || resolveCustomerShortName(rawCompanyStr) || rawCompanyStr;
+      const contactLabel = w.contact1 && w.contact1 !== "-" ? `ติดต่อ ${w.contact1}` : "";
+      const detailStr = w.note && w.note !== "-" ? String(w.note) : (contactLabel || (w.pr_no && w.pr_no !== "-" ? `PR:${w.pr_no}` : "-"));
 
-    if (pageItems.length === 0) {
+      const isProposeState = sectionName === "รอเสนอ" || String(w.status || "").includes("เสนอ") || String(w.activity_type || "").includes("เสนอ");
+      let dateRaw = "-";
+      let dateSectionLabel = sectionName;
+
+      if (isProposeState) {
+        // เมื่อสถานะเป็นรอเสนอ ให้แสดงวันที่รอเสนอ (date_propose) แทน
+        if (w.date_propose && w.date_propose !== "-" && w.date_propose !== "null") {
+          dateRaw = String(w.date_propose);
+          dateSectionLabel = "รอเสนอ";
+        } else if (w.date_inspect && w.date_inspect !== "-" && w.date_inspect !== "null") {
+          dateRaw = String(w.date_inspect);
+          dateSectionLabel = "รอดูงาน";
+        }
+      } else {
+        dateRaw = String(w.date_inspect && w.date_inspect !== "-" ? w.date_inspect : (w.date_propose || "-"));
+        dateSectionLabel = sectionName;
+      }
+
+      const dateInspectFormatted = formatInspectForCard(dateRaw, dateSectionLabel);
+      const workEditUrl = getLiffUrl(`/quick-work?id=PW-${idStr || w.id}`);
+
+      const itemTeam = w.team ? (String(w.team).toUpperCase().startsWith("PW") || String(w.team).toUpperCase().startsWith("PM") ? String(w.team).toUpperCase() : `PW${w.team}`) : "PW";
+
+      let inspectDisplay = w.date_inspect && w.date_inspect !== "-" ? String(w.date_inspect).trim() : "";
+      if (inspectDisplay && !inspectDisplay.includes(":")) {
+        inspectDisplay = `${inspectDisplay} เวลา 10:00 น.`;
+      }
+
+      let proposeDisplay = w.date_propose && w.date_propose !== "-" ? String(w.date_propose).trim() : "";
+      if (proposeDisplay && !proposeDisplay.includes(":")) {
+        proposeDisplay = `${proposeDisplay} เวลา 10:00 น.`;
+      }
+
+      const itemCopyLines = [
+        idStr ? `ลำดับ: ${idStr}` : (w.id ? `ลำดับ: ${w.id}` : null),
+        `ทีม: ${itemTeam}`,
+        `เรื่อง: ${w.title || "-"}`,
+        companyStr && companyStr !== "-" ? `บริษัท: ${companyStr}` : null,
+        inspectDisplay ? `นัดดูหน้างาน: ${inspectDisplay}` : null,
+        proposeDisplay ? `นัดส่งเสนอ: ${proposeDisplay}` : (!inspectDisplay && dateInspectFormatted ? dateInspectFormatted.replace(/\s+/g, " ") : null),
+        w.contact1 && w.contact1 !== "-" ? `ติดต่อ: ${w.contact1}` : null,
+        w.phone1 && w.phone1 !== "-" ? `เบอร์โทร: ${formatPhoneNumber(w.phone1)}` : null,
+        locationStr && locationStr !== "-" ? `สถานที่: ${locationStr}` : null,
+        w.note && w.note !== "-" ? `หมายเหตุ: ${w.note}` : null
+      ].filter(Boolean).join("\n");
+
       bodyContents.push({
         type: "box",
         layout: "vertical",
-        paddingAll: "16px",
-        alignItems: "center",
+        paddingTop: "8px",
+        paddingBottom: "8px",
+        paddingStart: "4px",
+        paddingEnd: "4px",
+        spacing: "xs",
         contents: [
+          // Line 1: [ #11 ] จ๋าหะ • คาร์กิลล์ | ติดต่อ นายสมคิด
           {
-            type: "text",
-            text: options?.teamName
-              ? `ไม่พบรายการงานค้างของทีม ${options.teamName} ในขณะนี้`
-              : "ไม่พบรายการงานค้างในขณะนี้",
-            size: "xs",
-            color: "#94A3B8"
-          }
-        ]
-      });
-    } else {
-      let currentSection = "";
-      for (let i = 0; i < pageItems.length; i++) {
-        const { work: w, sectionName } = pageItems[i];
-
-        if (sectionName !== currentSection) {
-          currentSection = sectionName;
-          const sMeta = getSectionStyle(sectionName);
-          bodyContents.push({
             type: "box",
             layout: "horizontal",
-            backgroundColor: sMeta.bannerBg,
-            borderColor: sMeta.bannerBorder,
-            borderWidth: "1px",
-            paddingStart: "10px",
-            paddingEnd: "10px",
-            paddingTop: "5px",
-            paddingBottom: "5px",
-            margin: "md",
-            cornerRadius: "4px",
             alignItems: "center",
             contents: [
               {
                 type: "text",
-                text: sectionName,
-                weight: "bold",
-                color: sMeta.bannerText,
-                size: "xs"
+                flex: 7,
+                wrap: false,
+                size: "xs",
+                contents: [
+                  {
+                    type: "span",
+                    text: `[ #${idStr || w.id} ] `,
+                    color: "#2563EB",
+                    weight: "bold"
+                  },
+                  {
+                    type: "span",
+                    text: String(w.title || "ชื่องาน"),
+                    color: "#0F172A",
+                    weight: "bold"
+                  },
+                  ...(companyStr && companyStr !== "-"
+                    ? [
+                      {
+                        type: "span",
+                        text: ` • ${companyStr}`,
+                        color: "#475569",
+                        weight: "bold"
+                      }
+                    ]
+                    : [])
+                ]
+              },
+              {
+                type: "text",
+                text: contactLabel || (detailStr !== "-" ? detailStr : ""),
+                size: "xxs",
+                color: "#64748B",
+                flex: 3,
+                align: "end",
+                wrap: false
               }
             ]
-          });
-        }
-
-        const idStr = String(w.id || "").replace(/\D/g, "");
-        const locationStr = w.location && w.location !== "-" ? String(w.location) : "-";
-        const rawCompanyStr = w.company && w.company !== "-" ? String(w.company) : "-";
-        const companyStr = w.short_name || w.company_short || resolveCustomerShortName(rawCompanyStr) || rawCompanyStr;
-        const contactLabel = w.contact1 && w.contact1 !== "-" ? `ติดต่อ ${w.contact1}` : "";
-        const detailStr = w.note && w.note !== "-" ? String(w.note) : (contactLabel || (w.pr_no && w.pr_no !== "-" ? `PR:${w.pr_no}` : "-"));
-
-        const isProposeState = sectionName === "รอเสนอ" || String(w.status || "").includes("เสนอ") || String(w.activity_type || "").includes("เสนอ");
-        let dateRaw = "-";
-        let dateSectionLabel = sectionName;
-
-        if (isProposeState) {
-          if (w.date_propose && w.date_propose !== "-" && w.date_propose !== "null") {
-            dateRaw = String(w.date_propose);
-            dateSectionLabel = "รอเสนอ";
-          } else if (w.date_inspect && w.date_inspect !== "-" && w.date_inspect !== "null") {
-            dateRaw = String(w.date_inspect);
-            dateSectionLabel = "รอดูงาน";
+          },
+          // Line 2: วันนัดดู 11/10/26 10:00 น. | [ คัดลอก ] [ อัพเดท ] [ ปิด ]
+          {
+            type: "box",
+            layout: "horizontal",
+            alignItems: "center",
+            contents: [
+              {
+                type: "text",
+                text: dateInspectFormatted,
+                size: "xxs",
+                color: "#475569",
+                flex: 6,
+                wrap: false
+              },
+              {
+                type: "box",
+                layout: "horizontal",
+                flex: 4,
+                justifyContent: "flex-end",
+                spacing: "xs",
+                contents: [
+                  {
+                    type: "box",
+                    layout: "horizontal",
+                    backgroundColor: "#F1F5F9",
+                    borderColor: "#CBD5E1",
+                    borderWidth: "1px",
+                    cornerRadius: "4px",
+                    paddingTop: "2px",
+                    paddingBottom: "2px",
+                    paddingStart: "5px",
+                    paddingEnd: "5px",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    action: {
+                      type: "clipboard",
+                      label: "คัดลอก",
+                      clipboardText: itemCopyLines
+                    },
+                    contents: [
+                      {
+                        type: "text",
+                        text: "คัดลอก",
+                        size: "xxs",
+                        weight: "bold",
+                        color: "#334155",
+                        align: "center"
+                      }
+                    ]
+                  },
+                  {
+                    type: "box",
+                    layout: "horizontal",
+                    backgroundColor: "#65A30D",
+                    cornerRadius: "4px",
+                    paddingTop: "3px",
+                    paddingBottom: "3px",
+                    paddingStart: "5px",
+                    paddingEnd: "5px",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    action: {
+                      type: "uri",
+                      label: "อัพเดท",
+                      uri: workEditUrl
+                    },
+                    contents: [
+                      {
+                        type: "text",
+                        text: "อัพเดท",
+                        size: "xxs",
+                        weight: "bold",
+                        color: "#FFFFFF",
+                        align: "center"
+                      }
+                    ]
+                  },
+                  {
+                    type: "box",
+                    layout: "horizontal",
+                    backgroundColor: "#DC2626",
+                    cornerRadius: "4px",
+                    paddingTop: "3px",
+                    paddingBottom: "3px",
+                    paddingStart: "5px",
+                    paddingEnd: "5px",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    action: {
+                      type: "message",
+                      label: "ปิด",
+                      text: `ปิดpw: ${idStr || w.id}`
+                    },
+                    contents: [
+                      {
+                        type: "text",
+                        text: "ปิด",
+                        size: "xxs",
+                        weight: "bold",
+                        color: "#FFFFFF",
+                        align: "center"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
           }
-        } else {
-          dateRaw = String(w.date_inspect && w.date_inspect !== "-" ? w.date_inspect : (w.date_propose || "-"));
-          dateSectionLabel = sectionName;
-        }
+        ]
+      });
 
-        const dateInspectFormatted = formatInspectForCard(dateRaw, dateSectionLabel);
-        const workEditUrl = getLiffUrl(`/quick-work?id=PW-${idStr || w.id}`);
-
-        const itemTeam = w.team ? (String(w.team).toUpperCase().startsWith("PW") || String(w.team).toUpperCase().startsWith("PM") ? String(w.team).toUpperCase() : `PW${w.team}`) : "PW";
-
-        let inspectDisplay = w.date_inspect && w.date_inspect !== "-" ? String(w.date_inspect).trim() : "";
-        if (inspectDisplay && !inspectDisplay.includes(":")) {
-          inspectDisplay = `${inspectDisplay} เวลา 10:00 น.`;
-        }
-
-        let proposeDisplay = w.date_propose && w.date_propose !== "-" ? String(w.date_propose).trim() : "";
-        if (proposeDisplay && !proposeDisplay.includes(":")) {
-          proposeDisplay = `${proposeDisplay} เวลา 10:00 น.`;
-        }
-
-        const itemCopyLines = [
-          idStr ? `ลำดับ: ${idStr}` : (w.id ? `ลำดับ: ${w.id}` : null),
-          `ทีม: ${itemTeam}`,
-          `เรื่อง: ${w.title || "-"}`,
-          companyStr && companyStr !== "-" ? `บริษัท: ${companyStr}` : null,
-          inspectDisplay ? `นัดดูหน้างาน: ${inspectDisplay}` : null,
-          proposeDisplay ? `นัดส่งเสนอ: ${proposeDisplay}` : (!inspectDisplay && dateInspectFormatted ? dateInspectFormatted.replace(/\s+/g, " ") : null),
-          w.contact1 && w.contact1 !== "-" ? `ติดต่อ: ${w.contact1}` : null,
-          w.phone1 && w.phone1 !== "-" ? `เบอร์โทร: ${formatPhoneNumber(w.phone1)}` : null,
-          locationStr && locationStr !== "-" ? `สถานที่: ${locationStr}` : null,
-          w.note && w.note !== "-" ? `หมายเหตุ: ${w.note}` : null
-        ].filter(Boolean).join("\n");
-
+      if (i < list.length - 1) {
         bodyContents.push({
-          type: "box",
-          layout: "vertical",
-          paddingTop: "8px",
-          paddingBottom: "8px",
-          paddingStart: "4px",
-          paddingEnd: "4px",
-          spacing: "xs",
-          contents: [
-            // Line 1: [ #11 ] จ๋าหะ • คาร์กิลล์ | ติดต่อ นายสมคิด
-            {
-              type: "box",
-              layout: "horizontal",
-              alignItems: "center",
-              contents: [
-                {
-                  type: "text",
-                  flex: 7,
-                  wrap: false,
-                  size: "xs",
-                  contents: [
-                    {
-                      type: "span",
-                      text: `[ #${idStr || w.id} ] `,
-                      color: "#2563EB",
-                      weight: "bold"
-                    },
-                    {
-                      type: "span",
-                      text: String(w.title || "ชื่องาน"),
-                      color: "#0F172A",
-                      weight: "bold"
-                    },
-                    ...(companyStr && companyStr !== "-"
-                      ? [
-                        {
-                          type: "span",
-                          text: ` • ${companyStr}`,
-                          color: "#475569",
-                          weight: "bold"
-                        }
-                      ]
-                      : [])
-                  ]
-                },
-                {
-                  type: "text",
-                  text: contactLabel || (detailStr !== "-" ? detailStr : ""),
-                  size: "xxs",
-                  color: "#64748B",
-                  flex: 3,
-                  align: "end",
-                  wrap: false
-                }
-              ]
-            },
-            // Line 2: วันนัดดู 11/10/26 10:00 น. | [ คัดลอก ] [ อัพเดท ] [ ปิด ]
-            {
-              type: "box",
-              layout: "horizontal",
-              alignItems: "center",
-              contents: [
-                {
-                  type: "text",
-                  text: dateInspectFormatted,
-                  size: "xxs",
-                  color: "#475569",
-                  flex: 5,
-                  wrap: false
-                },
-                {
-                  type: "box",
-                  layout: "horizontal",
-                  flex: 5,
-                  justifyContent: "flex-end",
-                  spacing: "xs",
-                  contents: [
-                    {
-                      type: "box",
-                      layout: "horizontal",
-                      backgroundColor: "#F1F5F9",
-                      borderColor: "#CBD5E1",
-                      borderWidth: "1px",
-                      cornerRadius: "4px",
-                      paddingTop: "2px",
-                      paddingBottom: "2px",
-                      paddingStart: "5px",
-                      paddingEnd: "5px",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      action: {
-                        type: "clipboard",
-                        label: "คัดลอก",
-                        clipboardText: itemCopyLines
-                      },
-                      contents: [
-                        {
-                          type: "text",
-                          text: "คัดลอก",
-                          size: "xxs",
-                          weight: "bold",
-                          color: "#334155",
-                          align: "center"
-                        }
-                      ]
-                    },
-                    {
-                      type: "box",
-                      layout: "horizontal",
-                      backgroundColor: "#65A30D",
-                      cornerRadius: "4px",
-                      paddingTop: "3px",
-                      paddingBottom: "3px",
-                      paddingStart: "5px",
-                      paddingEnd: "5px",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      action: {
-                        type: "uri",
-                        label: "อัพเดท",
-                        uri: workEditUrl
-                      },
-                      contents: [
-                        {
-                          type: "text",
-                          text: "อัพเดท",
-                          size: "xxs",
-                          weight: "bold",
-                          color: "#FFFFFF",
-                          align: "center"
-                        }
-                      ]
-                    },
-                    {
-                      type: "box",
-                      layout: "horizontal",
-                      backgroundColor: "#DC2626",
-                      cornerRadius: "4px",
-                      paddingTop: "3px",
-                      paddingBottom: "3px",
-                      paddingStart: "5px",
-                      paddingEnd: "5px",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      action: {
-                        type: "message",
-                        label: "ปิด",
-                        text: `ปิดpw: ${idStr || w.id}`
-                      },
-                      contents: [
-                        {
-                          type: "text",
-                          text: "ปิด",
-                          size: "xxs",
-                          weight: "bold",
-                          color: "#FFFFFF",
-                          align: "center"
-                        }
-                      ]
-                    }
-                  ]
-                }
-              ]
-            }
-          ]
+          type: "separator",
+          color: "#F1F5F9",
+          margin: "sm"
         });
-
-        const nextSection = pageItems[i + 1]?.sectionName;
-        if (i < pageItems.length - 1 && nextSection === sectionName) {
-          bodyContents.push({
-            type: "separator",
-            color: "#F1F5F9",
-            margin: "sm"
-          });
-        }
       }
     }
-
-    return {
-      type: "bubble",
-      size: "giga",
-      body: {
-        type: "box",
-        layout: "vertical",
-        paddingAll: "14px",
-        contents: bodyContents
-      }
-    };
-  };
+  }
 
   if (totalItemsCount === 0) {
-    return buildPageBubble([], 0);
+    bodyContents.push({
+      type: "box",
+      layout: "vertical",
+      paddingAll: "16px",
+      alignItems: "center",
+      contents: [
+        {
+          type: "text",
+          text: options?.teamName
+            ? `ไม่พบรายการงานค้างของทีม ${options.teamName} ในขณะนี้`
+            : "ไม่พบรายการงานค้างในขณะนี้",
+          size: "xs",
+          color: "#94A3B8"
+        }
+      ]
+    });
   }
 
-  const bubbles: Record<string, any>[] = [];
-  for (let p = 0; p < totalPages; p++) {
-    const chunk = orderedItems.slice(p * ITEMS_PER_PAGE, (p + 1) * ITEMS_PER_PAGE);
-    bubbles.push(buildPageBubble(chunk, p));
-  }
-
-  return bubbles.length === 1
-    ? bubbles[0]
-    : {
-      type: "carousel",
-      contents: bubbles
-    };
+  return {
+    type: "bubble",
+    size: "giga",
+    body: {
+      type: "box",
+      layout: "vertical",
+      paddingAll: "14px",
+      contents: bodyContents
+    }
+  };
 }
 
 /**
@@ -2483,451 +2459,424 @@ export function createMemberTaskTableFlex(
     ? `เดือน ${day0.month}`
     : `เดือน ${dayMinus1.month}-${dayPlus2.month}`;
 
-  const ITEMS_PER_PAGE = 12;
-  const totalPages = Math.max(1, Math.ceil(planTasks.length / ITEMS_PER_PAGE));
-
-  const buildPageBubble = (pageTasks: typeof planTasks, pageIdx: number): Record<string, any> => {
-    const baseTitle = memberName && memberName !== "ทีมงานทั้งหมด"
-      ? `รายการงาน (${planTasks.length} งาน) | ${memberName}`
-      : `รายการงาน (${planTasks.length} งาน) | ไทม์ไลน์ 4 วัน - ${monthHeader}`;
-    const pageTitle = totalPages > 1 ? `${baseTitle} (ชุดที่ ${pageIdx + 1}/${totalPages})` : baseTitle;
-
-    return {
-      type: "bubble",
-      size: "giga",
-      body: {
-        type: "box",
-        layout: "vertical",
-        paddingAll: "14px",
-        spacing: "sm",
-        contents: [
-          // Top Header: Left is Flex Title, Right is Small Action Button
-          {
-            type: "box",
-            layout: "horizontal",
-            alignItems: "center",
-            contents: [
-              {
-                type: "box",
-                layout: "vertical",
-                flex: 1,
-                contents: [
-                  {
-                    type: "text",
-                    text: pageTitle,
-                    weight: "bold",
-                    color: "#0F172A",
-                    size: "xs",
-                    wrap: true,
-                  },
-                  {
-                    type: "text",
-                    text: memberName && memberName !== "ทีมงานทั้งหมด"
-                      ? `ไทม์ไลน์ 4 วัน - ${monthHeader} • (เอกสาร ${docCount} • แผนงาน ${planCount} • PJSA ${pjsaCount})`
-                      : `รวม ${planTasks.length} รายการ (เอกสาร ${docCount} • แผนงาน ${planCount} • PJSA ${pjsaCount})`,
-                    size: "xxs",
-                    color: "#64748B",
-                    margin: "xs",
-                  },
-                ],
-              },
-              {
-                type: "box",
-                layout: "horizontal",
-                backgroundColor: "#2563EB",
-                cornerRadius: "6px",
-                width: "88px",
-                paddingTop: "5px",
-                paddingBottom: "5px",
-                alignItems: "center",
-                justifyContent: "center",
-                flex: 0,
-                action: {
-                  type: "uri",
-                  label: "เปิดงานใหม่",
-                  uri: getLiffUrl("/quick-task"),
+  return {
+    type: "bubble",
+    size: "giga",
+    body: {
+      type: "box",
+      layout: "vertical",
+      paddingAll: "14px",
+      spacing: "sm",
+      contents: [
+        // Top Header: Left is Flex Title, Right is Small Action Button
+        {
+          type: "box",
+          layout: "horizontal",
+          alignItems: "center",
+          contents: [
+            {
+              type: "box",
+              layout: "vertical",
+              flex: 1,
+              contents: [
+                {
+                  type: "text",
+                  text: memberName && memberName !== "ทีมงานทั้งหมด"
+                    ? `รายการงาน (${planTasks.length} งาน) | ${memberName}`
+                    : `รายการงาน (${planTasks.length} งาน) | ไทม์ไลน์ 4 วัน - ${monthHeader}`,
+                  weight: "bold",
+                  color: "#0F172A",
+                  size: "xs",
+                  wrap: true,
                 },
-                contents: [
-                  {
-                    type: "text",
-                    text: "+ เปิดงานใหม่",
-                    size: "xxs",
-                    weight: "bold",
-                    color: "#FFFFFF",
-                    align: "center",
-                    wrap: false,
-                  },
-                ],
+                {
+                  type: "text",
+                  text: memberName && memberName !== "ทีมงานทั้งหมด"
+                    ? `ไทม์ไลน์ 4 วัน - ${monthHeader} • (เอกสาร ${docCount} • แผนงาน ${planCount} • PJSA ${pjsaCount})`
+                    : `รวม ${planTasks.length} รายการ (เอกสาร ${docCount} • แผนงาน ${planCount} • PJSA ${pjsaCount})`,
+                  size: "xxs",
+                  color: "#64748B",
+                  margin: "xs",
+                },
+              ],
+            },
+            {
+              type: "box",
+              layout: "horizontal",
+              backgroundColor: "#2563EB",
+              cornerRadius: "6px",
+              width: "88px",
+              paddingTop: "5px",
+              paddingBottom: "5px",
+              alignItems: "center",
+              justifyContent: "center",
+              flex: 0,
+              action: {
+                type: "uri",
+                label: "เปิดงานใหม่",
+                uri: getLiffUrl("/quick-task"),
               },
-            ],
-          },
-          { type: "separator", margin: "xs", color: "#E2E8F0" },
-          // Table Column Header Row
-          {
-            type: "box",
-            layout: "horizontal",
-            margin: "xs",
-            contents: [
-              { type: "text", text: "รายการทั้งหมด", size: "xxs", weight: "bold", color: "#6B7280", flex: 6 },
-              { type: "separator" },
-              { type: "text", text: "เริ่ม/เสร็จ", size: "xxs", weight: "bold", color: "#6B7280", flex: 3, align: "center" },
-              { type: "separator" },
-              { type: "text", text: "วัน", size: "xxs", weight: "bold", color: "#6B7280", flex: 1, align: "center" },
-              { type: "separator" },
-              {
-                type: "box",
-                layout: "vertical",
-                flex: 5,
-                contents: [
-                  { type: "text", text: "ไทม์ไลน์ 4 วัน", size: "xxs", weight: "bold", color: "#6B7280", align: "center" },
-                  {
-                    type: "box",
-                    layout: "horizontal",
-                    contents: [
-                      { type: "text", text: `${dayMinus1.displayDay}`, size: "xxs", align: "center", flex: 1, color: "#6B7280" },
-                      { type: "separator", color: "#EF4444" },
-                      { type: "text", text: `${day0.displayDay}`, size: "xxs", align: "center", flex: 1, color: "#EF4444", weight: "bold" },
-                      { type: "separator", color: "#EF4444" },
-                      { type: "text", text: `${dayPlus1.displayDay}`, size: "xxs", align: "center", flex: 1, color: "#6B7280" },
-                      { type: "separator" },
-                      { type: "text", text: `${dayPlus2.displayDay}`, size: "xxs", align: "center", flex: 1, color: "#6B7280" }
-                    ]
-                  }
-                ]
-              },
-              { type: "separator" },
-              { type: "text", text: "สถานะ", size: "xxs", weight: "bold", color: "#6B7280", flex: 3, align: "center" }
-            ]
-          },
-          { type: "separator", margin: "xs" },
-          // Table Task Items (Empty Notice or Task Rows)
-          ...(pageTasks.length === 0
-            ? [
-              {
-                type: "box",
-                layout: "vertical",
-                paddingAll: "16px",
-                alignItems: "center",
-                contents: [
-                  {
-                    type: "text",
-                    text: "ไม่มีรายการงานค้าง ทุกงานดำเนินการเสร็จเรียบร้อยแล้ว",
-                    size: "xs",
-                    color: "#16A34A",
-                    weight: "bold",
-                    align: "center"
-                  }
-                ]
+              contents: [
+                {
+                  type: "text",
+                  text: "+ เปิดงานใหม่",
+                  size: "xxs",
+                  weight: "bold",
+                  color: "#FFFFFF",
+                  align: "center",
+                  wrap: false,
+                },
+              ],
+            },
+          ],
+        },
+        { type: "separator", margin: "xs", color: "#E2E8F0" },
+        // Table Column Header Row
+        {
+          type: "box",
+          layout: "horizontal",
+          margin: "xs",
+          contents: [
+            { type: "text", text: "รายการทั้งหมด", size: "xxs", weight: "bold", color: "#6B7280", flex: 6 },
+            { type: "separator" },
+            { type: "text", text: "เริ่ม/เสร็จ", size: "xxs", weight: "bold", color: "#6B7280", flex: 3, align: "center" },
+            { type: "separator" },
+            { type: "text", text: "วัน", size: "xxs", weight: "bold", color: "#6B7280", flex: 1, align: "center" },
+            { type: "separator" },
+            {
+              type: "box",
+              layout: "vertical",
+              flex: 5,
+              contents: [
+                { type: "text", text: "ไทม์ไลน์ 4 วัน", size: "xxs", weight: "bold", color: "#6B7280", align: "center" },
+                {
+                  type: "box",
+                  layout: "horizontal",
+                  contents: [
+                    { type: "text", text: `${dayMinus1.displayDay}`, size: "xxs", align: "center", flex: 1, color: "#6B7280" },
+                    { type: "separator", color: "#EF4444" },
+                    { type: "text", text: `${day0.displayDay}`, size: "xxs", align: "center", flex: 1, color: "#EF4444", weight: "bold" },
+                    { type: "separator", color: "#EF4444" },
+                    { type: "text", text: `${dayPlus1.displayDay}`, size: "xxs", align: "center", flex: 1, color: "#6B7280" },
+                    { type: "separator" },
+                    { type: "text", text: `${dayPlus2.displayDay}`, size: "xxs", align: "center", flex: 1, color: "#6B7280" }
+                  ]
+                }
+              ]
+            },
+            { type: "separator" },
+            { type: "text", text: "สถานะ", size: "xxs", weight: "bold", color: "#6B7280", flex: 3, align: "center" }
+          ]
+        },
+        { type: "separator", margin: "xs" },
+        // Table Task Items (Empty Notice or Task Rows)
+        ...(planTasks.length === 0
+          ? [
+            {
+              type: "box",
+              layout: "vertical",
+              paddingAll: "16px",
+              alignItems: "center",
+              contents: [
+                {
+                  type: "text",
+                  text: "ไม่มีรายการงานค้าง ทุกงานดำเนินการเสร็จเรียบร้อยแล้ว",
+                  size: "xs",
+                  color: "#16A34A",
+                  weight: "bold",
+                  align: "center"
+                }
+              ]
+            }
+          ]
+          : planTasks.slice(0, 10).map((t, index) => {
+            const taskIdStr = String(t.id || index + 100);
+            const att = options?.attachmentsMap ? options.attachmentsMap[taskIdStr] : null;
+            const taskTitle = t.title || t.details || "งานประจำวัน";
+            const projectStr = (t.project || t.project_name || att?.project || "").trim();
+            const taskImages: string[] = (t.images && t.images.length > 0) ? t.images : (t.imageUrl ? [t.imageUrl] : (att?.images || []));
+
+            // 1. Resolve Task Start and End ISO Dates
+            let taskStartIso = "";
+            if (t.do_date) {
+              taskStartIso = normalizeDateToIso(t.do_date);
+            } else if (t.dateStr) {
+              taskStartIso = normalizeDateToIso(t.dateStr);
+            }
+
+            let taskEndIso = "";
+            if (t.send_date) {
+              taskEndIso = normalizeDateToIso(t.send_date);
+            } else if (t.sendDateStr && t.sendDateStr !== "-") {
+              taskEndIso = normalizeDateToIso(t.sendDateStr);
+            }
+
+            if (!taskStartIso && taskEndIso) {
+              taskStartIso = taskEndIso;
+            } else if (taskStartIso && !taskEndIso) {
+              if (t.days && t.days > 1) {
+                const [sy, sm, sd] = taskStartIso.split("-").map(Number);
+                const endD = new Date(Date.UTC(sy, sm - 1, sd + (t.days - 1)));
+                taskEndIso = `${endD.getUTCFullYear()}-${String(endD.getUTCMonth() + 1).padStart(2, "0")}-${String(endD.getUTCDate()).padStart(2, "0")}`;
+              } else {
+                taskEndIso = taskStartIso;
               }
-            ]
-            : pageTasks.map((t, index) => {
-              const globalIdx = pageIdx * ITEMS_PER_PAGE + index;
-              const taskIdStr = String(t.id || globalIdx + 100);
-              const att = options?.attachmentsMap ? options.attachmentsMap[taskIdStr] : null;
-              const taskTitle = t.title || t.details || "งานประจำวัน";
-              const projectStr = (t.project || t.project_name || att?.project || "").trim();
+            }
 
-              // 1. Resolve Task Start and End ISO Dates
-              let taskStartIso = "";
-              if (t.do_date) {
-                taskStartIso = normalizeDateToIso(t.do_date);
-              } else if (t.dateStr) {
-                taskStartIso = normalizeDateToIso(t.dateStr);
+            // 2. Task Duration in Days
+            let durationDays = t.days || 1;
+            if (taskStartIso && taskEndIso) {
+              const startMs = new Date(taskStartIso).getTime();
+              const endMs = new Date(taskEndIso).getTime();
+              const diff = Math.round((endMs - startMs) / 86400000) + 1;
+              if (diff > 0) durationDays = diff;
+            }
+
+            // 3. Format Display Dates for "เริ่ม/เสร็จ"
+            const formatShortDisplay = (isoStr: string, fallbackStr?: string) => {
+              if (!isoStr) {
+                if (fallbackStr && fallbackStr.includes("/2026")) {
+                  return fallbackStr.replace("/2026", "/69");
+                }
+                return fallbackStr || "-";
               }
-
-              let taskEndIso = "";
-              if (t.send_date) {
-                taskEndIso = normalizeDateToIso(t.send_date);
-              } else if (t.sendDateStr && t.sendDateStr !== "-") {
-                taskEndIso = normalizeDateToIso(t.sendDateStr);
+              const parts = isoStr.split("-");
+              if (parts.length === 3) {
+                const thYear = String(Number(parts[0]) + 543).slice(-2);
+                return `${parts[2]}/${parts[1]}/${thYear}`;
               }
+              return fallbackStr || isoStr;
+            };
 
-              if (!taskStartIso && taskEndIso) {
-                taskStartIso = taskEndIso;
-              } else if (taskStartIso && !taskEndIso) {
-                if (t.days && t.days > 1) {
-                  const [sy, sm, sd] = taskStartIso.split("-").map(Number);
-                  const endD = new Date(Date.UTC(sy, sm - 1, sd + (t.days - 1)));
-                  taskEndIso = `${endD.getUTCFullYear()}-${String(endD.getUTCMonth() + 1).padStart(2, "0")}-${String(endD.getUTCDate()).padStart(2, "0")}`;
-                } else {
-                  taskEndIso = taskStartIso;
-                }
-              }
+            const startDisplay = formatShortDisplay(taskStartIso, t.dateStr || day0.displayDmy);
+            const endDisplay = taskEndIso && taskEndIso !== taskStartIso
+              ? formatShortDisplay(taskEndIso, t.sendDateStr)
+              : (t.sendDateStr && t.sendDateStr !== "-" ? formatShortDisplay("", t.sendDateStr) : "");
 
-              // 2. Task Duration in Days
-              let durationDays = t.days || 1;
-              if (taskStartIso && taskEndIso) {
-                const startMs = new Date(taskStartIso).getTime();
-                const endMs = new Date(taskEndIso).getTime();
-                const diff = Math.round((endMs - startMs) / 86400000) + 1;
-                if (diff > 0) durationDays = diff;
-              }
+            const displayDate = endDisplay ? `${startDisplay}\n${endDisplay}` : startDisplay;
 
-              // 3. Format Display Dates for "เริ่ม/เสร็จ"
-              const formatShortDisplay = (isoStr: string, fallbackStr?: string) => {
-                if (!isoStr) {
-                  if (fallbackStr && fallbackStr.includes("/2026")) {
-                    return fallbackStr.replace("/2026", "/69");
-                  }
-                  return fallbackStr || "-";
-                }
-                const parts = isoStr.split("-");
-                if (parts.length === 3) {
-                  const thYear = String(Number(parts[0]) + 543).slice(-2);
-                  return `${parts[2]}/${parts[1]}/${thYear}`;
-                }
-                return fallbackStr || isoStr;
-              };
+            // 4. Compute Dynamic Timeline Symbols
+            const isDone = t.status === "เสร็จ" || t.status === "สำเร็จ";
+            const isSent = t.status === "ส่งงานแล้ว" || t.status === "ส่งแล้ว" || t.status === "รอตรวจ";
+            const isOverdue = !isDone && Boolean(taskEndIso && taskEndIso < todayIso);
 
-              const startDisplay = formatShortDisplay(taskStartIso, t.dateStr || day0.displayDmy);
-              const endDisplay = taskEndIso && taskEndIso !== taskStartIso
-                ? formatShortDisplay(taskEndIso, t.sendDateStr)
-                : (t.sendDateStr && t.sendDateStr !== "-" ? formatShortDisplay("", t.sendDateStr) : "");
-
-              const displayDate = endDisplay ? `${startDisplay}\n${endDisplay}` : startDisplay;
-
-              // 4. Compute Dynamic Timeline Symbols
-              const isDone = t.status === "เสร็จ" || t.status === "สำเร็จ";
-              const isSent = t.status === "ส่งงานแล้ว" || t.status === "ส่งแล้ว" || t.status === "รอตรวจ";
-              const isOverdue = !isDone && Boolean(taskEndIso && taskEndIso < todayIso);
-
-              const getSymbol = (dayIso: string, isTodayCol: boolean) => {
-                if (!taskStartIso && !taskEndIso) {
-                  return "⬜";
-                }
-                const inRange = dayIso >= taskStartIso && dayIso <= taskEndIso;
-                if (inRange) {
-                  if (isDone) return "🟩";
-                  if (dayIso < todayIso) return "🟥"; // Overdue past work
-                  return "🟦"; // Active / scheduled
-                }
-                // If overdue in the past, flag today column with 🟥
-                if (isTodayCol && isOverdue && dayIso > taskEndIso) {
-                  return "🟥";
-                }
+            const getSymbol = (dayIso: string, isTodayCol: boolean) => {
+              if (!taskStartIso && !taskEndIso) {
                 return "⬜";
-              };
+              }
+              const inRange = dayIso >= taskStartIso && dayIso <= taskEndIso;
+              if (inRange) {
+                if (isDone) return "🟩";
+                if (dayIso < todayIso) return "🟥"; // Overdue past work
+                return "🟦"; // Active / scheduled
+              }
+              // If overdue in the past, flag today column with 🟥
+              if (isTodayCol && isOverdue && dayIso > taskEndIso) {
+                return "🟥";
+              }
+              return "⬜";
+            };
 
-              const symMinus1 = getSymbol(dayMinus1.iso, false);
-              const sym0 = getSymbol(day0.iso, true);
-              const symPlus1 = getSymbol(dayPlus1.iso, false);
-              const symPlus2 = getSymbol(dayPlus2.iso, false);
+            const symMinus1 = getSymbol(dayMinus1.iso, false);
+            const sym0 = getSymbol(day0.iso, true);
+            const symPlus1 = getSymbol(dayPlus1.iso, false);
+            const symPlus2 = getSymbol(dayPlus2.iso, false);
 
-              // Distinct card box per task row for clear separation
-              return {
-                type: "box",
-                layout: "vertical",
-                backgroundColor: index % 2 === 0 ? "#FFFFFF" : "#F8FAFC",
-                borderColor: isOverdue ? "#FECACA" : "#E2E8F0",
-                borderWidth: "1px",
-                cornerRadius: "6px",
-                paddingStart: "4px",
-                paddingEnd: "4px",
-                paddingTop: "6px",
-                paddingBottom: "6px",
-                margin: "xs",
-                contents: [
-                  {
-                    type: "box",
-                    layout: "horizontal",
-                    spacing: "xs",
-                    alignItems: "center",
-                    contents: [
-                      // Column 1: Task Title + Document Thumbnails below
-                      {
+            // Distinct card box per task row for clear separation
+            return {
+              type: "box",
+              layout: "vertical",
+              backgroundColor: index % 2 === 0 ? "#FFFFFF" : "#F8FAFC",
+              borderColor: isOverdue ? "#FECACA" : "#E2E8F0",
+              borderWidth: "1px",
+              cornerRadius: "6px",
+              paddingStart: "4px",
+              paddingEnd: "4px",
+              paddingTop: "6px",
+              paddingBottom: "6px",
+              margin: "xs",
+              contents: [
+                {
+                  type: "box",
+                  layout: "horizontal",
+                  spacing: "xs",
+                  alignItems: "center",
+                  contents: [
+                    // Column 1: Task Title + Document Thumbnails below
+                    {
+                      type: "box",
+                      layout: "vertical",
+                      flex: 6,
+                      spacing: "xs",
+                      contents: [
+                        {
+                          type: "text",
+                          text: `[#${taskIdStr}] ${taskTitle}`,
+                          size: "xs",
+                          color: "#1F2937",
+                          wrap: true,
+                          weight: "bold"
+                        },
+                        ...(projectStr && projectStr !== "-"
+                          ? [
+                            {
+                              type: "text",
+                              text: projectStr,
+                              size: "xxs",
+                              color: "#64748B",
+                              wrap: true
+                            }
+                          ]
+                          : [])
+                      ]
+                    },
+                    { type: "separator" },
+                    {
+                      type: "text",
+                      text: displayDate,
+                      size: "xxs",
+                      color: "#6B7280",
+                      flex: 3,
+                      align: "center",
+                      wrap: true
+                    },
+                    { type: "separator" },
+                    {
+                      type: "text",
+                      text: String(durationDays),
+                      size: "xs",
+                      color: "#374151",
+                      flex: 1,
+                      align: "center"
+                    },
+                    { type: "separator" },
+                    // 4-Day Timeline Grid with Red Today Column Separator
+                    {
+                      type: "box",
+                      layout: "horizontal",
+                      flex: 5,
+                      contents: [
+                        { type: "text", text: symMinus1, size: "xxs", align: "center", flex: 1 },
+                        { type: "separator", color: "#EF4444" },
+                        { type: "text", text: sym0, size: "xxs", align: "center", flex: 1 },
+                        { type: "separator", color: "#EF4444" },
+                        { type: "text", text: symPlus1, size: "xxs", align: "center", flex: 1 },
+                        { type: "separator" },
+                        { type: "text", text: symPlus2, size: "xxs", align: "center", flex: 1 }
+                      ]
+                    },
+                    { type: "separator" },
+                    // Status & Action Column: Send (ส่งงาน) and Close (ปิดงาน)
+                    isDone
+                      ? {
+                        type: "text",
+                        text: "เสร็จ",
+                        size: "xxs",
+                        color: "#16A34A",
+                        flex: 3,
+                        align: "center",
+                        weight: "bold"
+                      }
+                      : {
                         type: "box",
-                        layout: "vertical",
-                        flex: 6,
+                        layout: "horizontal",
+                        flex: 3,
+                        alignItems: "center",
+                        justifyContent: "center",
                         spacing: "xs",
                         contents: [
                           {
-                            type: "text",
-                            text: `[#${taskIdStr}] ${taskTitle}`,
-                            size: "xs",
-                            color: "#1F2937",
-                            wrap: true,
-                            weight: "bold"
-                          },
-                          ...(projectStr && projectStr !== "-"
-                            ? [
+                            type: "box",
+                            layout: "horizontal",
+                            backgroundColor: isSent ? "#F0F9FF" : "#EFF6FF",
+                            borderColor: isSent ? "#BAE6FD" : "#BFDBFE",
+                            borderWidth: "1px",
+                            cornerRadius: "4px",
+                            paddingTop: "6px",
+                            paddingBottom: "6px",
+                            paddingStart: "2px",
+                            paddingEnd: "2px",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            flex: 1,
+                            action: {
+                              type: "message",
+                              label: "ส่ง",
+                              text: `ส่งงาน: ${taskIdStr}`
+                            },
+                            contents: [
                               {
                                 type: "text",
-                                text: projectStr,
+                                text: "ส่ง",
                                 size: "xxs",
-                                color: "#64748B",
-                                wrap: true
+                                color: isSent ? "#0284C7" : "#2563EB",
+                                align: "center",
+                                weight: "bold"
                               }
                             ]
-                            : [])
-                        ]
-                      },
-                      { type: "separator" },
-                      {
-                        type: "text",
-                        text: displayDate,
-                        size: "xxs",
-                        color: "#6B7280",
-                        flex: 3,
-                        align: "center",
-                        wrap: true
-                      },
-                      { type: "separator" },
-                      {
-                        type: "text",
-                        text: String(durationDays),
-                        size: "xs",
-                        color: "#374151",
-                        flex: 1,
-                        align: "center"
-                      },
-                      { type: "separator" },
-                      // 4-Day Timeline Grid with Red Today Column Separator
-                      {
-                        type: "box",
-                        layout: "horizontal",
-                        flex: 5,
-                        contents: [
-                          { type: "text", text: symMinus1, size: "xxs", align: "center", flex: 1 },
-                          { type: "separator", color: "#EF4444" },
-                          { type: "text", text: sym0, size: "xxs", align: "center", flex: 1 },
-                          { type: "separator", color: "#EF4444" },
-                          { type: "text", text: symPlus1, size: "xxs", align: "center", flex: 1 },
-                          { type: "separator" },
-                          { type: "text", text: symPlus2, size: "xxs", align: "center", flex: 1 }
-                        ]
-                      },
-                      { type: "separator" },
-                      // Status & Action Column: Send (ส่งงาน) and Close (ปิดงาน)
-                      isDone
-                        ? {
-                          type: "text",
-                          text: "เสร็จ",
-                          size: "xxs",
-                          color: "#16A34A",
-                          flex: 3,
-                          align: "center",
-                          weight: "bold"
-                        }
-                        : {
-                          type: "box",
-                          layout: "horizontal",
-                          flex: 3,
-                          alignItems: "center",
-                          justifyContent: "center",
-                          spacing: "xs",
-                          contents: [
-                            {
-                              type: "box",
-                              layout: "horizontal",
-                              backgroundColor: isSent ? "#F0F9FF" : "#EFF6FF",
-                              borderColor: isSent ? "#BAE6FD" : "#BFDBFE",
-                              borderWidth: "1px",
-                              cornerRadius: "4px",
-                              paddingTop: "6px",
-                              paddingBottom: "6px",
-                              paddingStart: "2px",
-                              paddingEnd: "2px",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              flex: 1,
-                              action: {
-                                type: "message",
-                                label: "ส่ง",
-                                text: `ส่งงาน: ${taskIdStr}`
-                              },
-                              contents: [
-                                {
-                                  type: "text",
-                                  text: "ส่ง",
-                                  size: "xxs",
-                                  color: isSent ? "#0284C7" : "#2563EB",
-                                  align: "center",
-                                  weight: "bold"
-                                }
-                              ]
+                          },
+                          {
+                            type: "box",
+                            layout: "horizontal",
+                            backgroundColor: "#ECFDF5",
+                            borderColor: "#A7F3D0",
+                            borderWidth: "1px",
+                            cornerRadius: "4px",
+                            paddingTop: "6px",
+                            paddingBottom: "6px",
+                            paddingStart: "2px",
+                            paddingEnd: "2px",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            flex: 1,
+                            action: {
+                              type: "message",
+                              label: "ปิด",
+                              text: `ปิดงาน: ${taskIdStr}`
                             },
-                            {
-                              type: "box",
-                              layout: "horizontal",
-                              backgroundColor: "#ECFDF5",
-                              borderColor: "#A7F3D0",
-                              borderWidth: "1px",
-                              cornerRadius: "4px",
-                              paddingTop: "6px",
-                              paddingBottom: "6px",
-                              paddingStart: "2px",
-                              paddingEnd: "2px",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              flex: 1,
-                              action: {
-                                type: "message",
-                                label: "ปิด",
-                                text: `ปิดงาน: ${taskIdStr}`
-                              },
-                              contents: [
-                                {
-                                  type: "text",
-                                  text: "ปิด",
-                                  size: "xxs",
-                                  color: "#059669",
-                                  align: "center",
-                                  weight: "bold"
-                                }
-                              ]
-                            }
-                          ]
-                        }
+                            contents: [
+                              {
+                                type: "text",
+                                text: "ปิด",
+                                size: "xxs",
+                                color: "#059669",
+                                align: "center",
+                                weight: "bold"
+                              }
+                            ]
+                          }
+                        ]
+                      }
 
-                    ]
-                  }
-                ]
-              };
-            })),
-          // Timeline & Status Legend
-          {
-            type: "box",
-            layout: "vertical",
-            margin: "md",
-            spacing: "xs",
-            contents: [
-              {
-                type: "text",
-                text: "ไทม์ไลน์: ■ กำลังทำ (น้ำเงิน)  ■ เสร็จ (เขียว)  ■ เกินกำหนด (แดง)  □ ไม่มีงาน",
-                size: "xxs",
-                color: "#94A3B8"
-              },
-              {
-                type: "text",
-                text: totalPages > 1
-                  ? `ชุดที่ ${pageIdx + 1}/${totalPages} • สถานะ: ส่ง (ส่งงาน/แนบรูป) • ปิด (ตรวจรับ/ปิดงาน)`
-                  : "สถานะ: ส่ง (ส่งงาน/แนบรูป) • ปิด (ตรวจรับ/ปิดงาน)",
-                size: "xxs",
-                color: "#94A3B8"
-              }
-            ]
-          }
-        ]
-      }
-    };
+                  ]
+                }
+              ]
+            };
+          })),
+        // Timeline & Status Legend
+        {
+          type: "box",
+          layout: "vertical",
+          margin: "md",
+          spacing: "xs",
+          contents: [
+            {
+              type: "text",
+              text: "ไทม์ไลน์: ■ กำลังทำ (น้ำเงิน)  ■ เสร็จ (เขียว)  ■ เกินกำหนด (แดง)  □ ไม่มีงาน",
+              size: "xxs",
+              color: "#94A3B8"
+            },
+            {
+              type: "text",
+              text: "สถานะ: ส่ง (ส่งงาน/แนบรูป) • ปิด (ตรวจรับ/ปิดงาน)",
+              size: "xxs",
+              color: "#94A3B8"
+            }
+          ]
+        }
+      ]
+    }
   };
-
-  if (planTasks.length === 0) {
-    return buildPageBubble([], 0);
-  }
-
-  const bubbles: Record<string, any>[] = [];
-  for (let p = 0; p < totalPages; p++) {
-    const chunk = planTasks.slice(p * ITEMS_PER_PAGE, (p + 1) * ITEMS_PER_PAGE);
-    bubbles.push(buildPageBubble(chunk, p));
-  }
-
-  return bubbles.length === 1
-    ? bubbles[0]
-    : {
-      type: "carousel",
-      contents: bubbles
-    };
 }
 
 // ==========================================
@@ -2976,7 +2925,7 @@ export async function handleTaskCommands(
       .neq("status", "เสร็จ")
       .neq("status", "ปิดงาน")
       .order("id", { ascending: false })
-      .limit(100);
+      .limit(15);
 
     if (!activeTasks || activeTasks.length === 0) {
       await replyTextMessage(replyToken, `ไม่พบรายการงานค้างในขณะนี้`);
@@ -3093,7 +3042,7 @@ export async function handleTaskCommands(
           .select("*")
           .or(assigneeFilter)
           .order("id", { ascending: false })
-          .limit(100);
+          .limit(20);
 
         if (byAssignee && byAssignee.length > 0) {
           tasksList = byAssignee;
@@ -3104,7 +3053,7 @@ export async function handleTaskCommands(
             .select("*")
             .ilike("title", `%${content}%`)
             .order("id", { ascending: false })
-            .limit(100);
+            .limit(20);
           tasksList = byTitle || [];
         }
       } else {
@@ -3112,7 +3061,7 @@ export async function handleTaskCommands(
           .from("tasks")
           .select("*")
           .order("id", { ascending: false })
-          .limit(100);
+          .limit(20);
         tasksList = allTasks || [];
       }
 
@@ -3128,8 +3077,8 @@ export async function handleTaskCommands(
         return st === "สำเร็จ" || st === "เสร็จ" || st === "ปิดงาน" || st.includes("เสร็จ") || st.includes("สำเร็จ");
       });
 
-      // แสดงงานค้างทั้งหมดครบทุกรายการ (ผ่าน Carousel)
-      const displayTasks = activeTasks.length > 0 ? activeTasks : completedTasks.slice(0, 20);
+      // Prioritize active tasks, but include completed tasks up to 10 total
+      const displayTasks = [...activeTasks, ...completedTasks].slice(0, 10);
 
       if (displayTasks.length > 0) {
         const allAttachments = await getAllTaskAttachments();
@@ -3175,7 +3124,7 @@ export async function handleTaskCommands(
           .select("*")
           .or(`team.ilike.%${content}%,contact1.ilike.%${content}%,contact2.ilike.%${content}%,company.ilike.%${content}%,title.ilike.%${content}%`)
           .order("id", { ascending: false })
-          .limit(100);
+          .limit(10);
 
         if (worksList && worksList.length > 0) {
           const allAttachments = await getAllWorkAttachments();
@@ -3421,7 +3370,7 @@ export async function handleTaskCommands(
     } else {
       query = query.neq("status", "สำเร็จ");
     }
-    const { data: tasks } = await query.order("id", { ascending: false }).limit(100);
+    const { data: tasks } = await query.order("id", { ascending: false }).limit(15);
 
     if (!tasks || tasks.length === 0) {
       const noTaskMsg = searchTerm
@@ -3750,7 +3699,7 @@ export async function handleWorkCommands(
       .or(`team.eq.${teamFilter},team.eq.${pmFilter},team.eq.${num}`)
       .not("status", "in", '("เสร็จ","สำเร็จ","ปิดงาน")')
       .order("id", { ascending: false })
-      .limit(100);
+      .limit(20);
 
     const attachmentsMap = await getAllWorkAttachments();
     const flex = createWorkSummaryFlex(teamWorks || [], {
@@ -3781,7 +3730,7 @@ export async function handleWorkCommands(
       .select("*")
       .not("status", "in", '("เสร็จ","สำเร็จ","ปิดงาน")')
       .order("id", { ascending: false })
-      .limit(200);
+      .limit(30);
 
     if (fetchErr) {
       console.error("Error fetching works for pw:", fetchErr);
@@ -3945,7 +3894,7 @@ export async function handleWorkCommands(
     } else {
       query = query.or("team.eq.PW,team.eq.PM,team.is.null,team.eq.''");
     }
-    const { data: latestWorks } = await query.order("id", { ascending: false }).limit(100);
+    const { data: latestWorks } = await query.order("id", { ascending: false }).limit(15);
 
     const updateNotice = `เลื่อนสถานะงาน [PW-${numId}]: ${currentStatus} -> ${nextStatus}`;
     const attachmentsMap = await getAllWorkAttachments();
@@ -4002,7 +3951,7 @@ export async function handleWorkCommands(
       } else {
         query = query.or("team.eq.PW,team.eq.PM,team.is.null,team.eq.''");
       }
-      const { data: latestWorks } = await query.order("id", { ascending: false }).limit(100);
+      const { data: latestWorks } = await query.order("id", { ascending: false }).limit(15);
       const attachmentsMap = await getAllWorkAttachments();
       const flex = createWorkSummaryFlex(latestWorks || [], { teamName: teamFilter, attachmentsMap });
       await replyFlexMessage(replyToken, updateMsg, flex, targetId);
@@ -4058,7 +4007,7 @@ export async function handleWorkCommands(
       } else {
         query = query.or("team.eq.PW,team.eq.PM,team.is.null,team.eq.''");
       }
-      const { data: latestWorks } = await query.order("id", { ascending: false }).limit(100);
+      const { data: latestWorks } = await query.order("id", { ascending: false }).limit(15);
       const attachmentsMap = await getAllWorkAttachments();
       const flex = createWorkSummaryFlex(latestWorks || [], { teamName: teamFilter, attachmentsMap });
       await replyFlexMessage(replyToken, closeMsg, flex, targetId);
