@@ -1,6 +1,6 @@
 "use client";
 
-import { Banknote, Check, LoaderCircle, Pencil, Trash2 } from "lucide-react";
+import { Banknote, Check, LoaderCircle, Pencil, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { normalizeBillStatus } from "@/lib/bills/bill-status";
@@ -86,7 +86,7 @@ export function BillWorkflowActions({
     window.dispatchEvent(new CustomEvent("open-bill-edit-form", { detail: { row, id: sheetRow, sheetRow } }));
   }
 
-  async function updateStatus(nextStatus: "อนุมัติ" | "เบิกแล้ว") {
+  async function updateStatus(nextStatus: "อนุมัติ" | "เบิกแล้ว" | "ไม่อนุมัติ") {
     setBusy("status");
     setError("");
     try {
@@ -145,16 +145,28 @@ export function BillWorkflowActions({
       ) : null}
 
       {pending && canApproveBill ? (
-        <button
-          type="button"
-          disabled={busy !== null}
-          onClick={() => updateStatus("อนุมัติ")}
-          title="อนุมัติบิล"
-          className={`${btnBase} bg-emerald-700 text-white hover:bg-emerald-800 active:bg-emerald-900`}
-        >
-          {busy === "status" ? <LoaderCircle className="animate-spin shrink-0" size={14} /> : <Check size={14} className="shrink-0" />}
-          {compact ? null : <span>อนุมัติ</span>}
-        </button>
+        <>
+          <button
+            type="button"
+            disabled={busy !== null}
+            onClick={() => updateStatus("อนุมัติ")}
+            title="อนุมัติสร้างบิล"
+            className={`${btnBase} bg-emerald-700 text-white hover:bg-emerald-800 active:bg-emerald-900`}
+          >
+            {busy === "status" ? <LoaderCircle className="animate-spin shrink-0" size={14} /> : <Check size={14} className="shrink-0" />}
+            {compact ? null : <span>อนุมัติ</span>}
+          </button>
+          <button
+            type="button"
+            disabled={busy !== null}
+            onClick={() => updateStatus("ไม่อนุมัติ")}
+            title="ไม่อนุมัติ"
+            className={`${btnBase} bg-rose-50 text-rose-700 border border-rose-300 hover:bg-rose-100 active:bg-rose-200`}
+          >
+            <X size={14} className="shrink-0 text-rose-600" />
+            {compact ? null : <span>ไม่อนุมัติ</span>}
+          </button>
+        </>
       ) : null}
 
       {approved && canMarkPaid ? (

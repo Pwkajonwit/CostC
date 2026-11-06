@@ -41,16 +41,22 @@ import {
   Check,
   AlertTriangle,
   Play,
-  Trash2
+  Trash2,
+  FileArchive,
+  Image as ImageIcon,
 } from "lucide-react";
+import JSZip from "jszip";
+import { extractAllAttachmentUrls } from "@/lib/utils/backup-helpers";
 import { showToast } from "@/components/shared/ToastProvider";
 import type { BackupConfig, BackupSnapshotSummary } from "@/lib/backup-service";
 import { DEFAULT_BACKUP_CONFIG } from "@/lib/backup-service";
+import type { ImportHistoryItem } from "@/lib/import-history-service";
 import {
   BackupScheduleModal,
   BackupRestoreConfirmModal,
   BackupDeleteConfirmModal,
 } from "./BackupModals";
+import { ImportHistoryView } from "./ImportHistoryView";
 
 export type TableConfig = {
   id: string;
@@ -379,7 +385,7 @@ const DAY_NAMES = ["วันอาทิตย์", "วันจันทร�
 
 export function DataHubClient() {
   // Navigation View Tab
-  const [activeMainTab, setActiveMainTab] = useState<"standard_backup" | "table_csv">("standard_backup");
+  const [activeMainTab, setActiveMainTab] = useState<"standard_backup" | "table_csv" | "import_history">("table_csv");
 
   // Backup Engine States
   const [backupConfig, setBackupConfig] = useState<BackupConfig>(DEFAULT_BACKUP_CONFIG);
@@ -389,6 +395,10 @@ export function DataHubClient() {
   const [selectedRestoreSnapshot, setSelectedRestoreSnapshot] = useState<BackupSnapshotSummary | null>(null);
   const [selectedDeleteSnapshot, setSelectedDeleteSnapshot] = useState<BackupSnapshotSummary | null>(null);
   const [downloadingSnapshotId, setDownloadingSnapshotId] = useState<string | null>(null);
+
+  // Import History States
+  const [importHistory, setImportHistory] = useState<ImportHistoryItem[]>([]);
+  const [loadingImportHistory, setLoadingImportHistory] = useState<boolean>(true);
 
   // Table row counts
   const [counts, setCounts] = useState<Record<string, number>>({});
@@ -403,8 +413,79 @@ export function DataHubClient() {
   const [exportingAll, setExportingAll] = useState<boolean>(false);
   const [importingAll, setImportingAll] = useState<boolean>(false);
   const [backingUpFull, setBackingUpFull] = useState<boolean>(false);
+  const [backingUpZip, setBackingUpZip] = useState<boolean>(false);
   const [restoringFull, setRestoringFull] = useState<boolean>(false);
   const [importSummary, setImportSummary] = useState<ImportSummaryData | null>(null);
+
+  function getAuthUserName(): string {
+    if (typeof document === "undefined") return "web";
+    const match = document.cookie.match(/auth_name=([^;]+)/);
+    if (match && match[1]) {
+      try {
+        return decodeURIComponent(match[1]);
+      } catch {
+        return match[1];
+      }
+    }
+    return "web";
+  }
+
+  // Load Import History from API
+  async function loadImportHistory() {
+    setLoadingImportHistory(true);
+    try {
+      const res = await fetch("/api/import-history");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.history) setImportHistory(data.history);
+      }
+    } catch (e) {
+      console.warn("Failed to fetch import history:", e);
+    } finally {
+      setLoadingImportHistory(false);
+    }
+  }
+
+  // Record an import history entry
+  async function recordImportEntry(
+    entry: Omit<ImportHistoryItem, "id" | "createdAt" | "actor"> & { actor?: string }
+  ) {
+    const actor = entry.actor || getAuthUserName();
+    const newEntry: ImportHistoryItem = {
+      ...entry,
+      id: `imp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      createdAt: new Date().toISOString(),
+      actor
+    };
+
+    setImportHistory((prev) => [newEntry, ...prev]);
+
+    try {
+      await fetch("/api/import-history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ item: newEntry })
+      });
+    } catch (e) {
+      console.warn("Failed to record import history:", e);
+    }
+  }
+
+  // Delete a single import history entry
+  async function handleDeleteImportEntry(id: string) {
+    setImportHistory((prev) => prev.filter((item) => item.id !== id));
+    await fetch(`/api/import-history?id=${encodeURIComponent(id)}`, {
+      method: "DELETE"
+    });
+  }
+
+  // Clear all import history
+  async function handleClearAllImportHistory() {
+    setImportHistory([]);
+    await fetch("/api/import-history?all=true", {
+      method: "DELETE"
+    });
+  }
 
   // Load Backup Config & History from API
   async function loadBackupMetadata() {
@@ -449,6 +530,7 @@ export function DataHubClient() {
   useEffect(() => {
     loadBackupMetadata();
     loadTableCounts();
+    loadImportHistory();
   }, []);
 
   const totalRowCount = useMemo(() => {
@@ -480,7 +562,7 @@ export function DataHubClient() {
     }
   }
 
-  // 🌟 2. Single-File Full System Backup Download
+  // 🌟 2. Single-File Full System Backup Download (.json)
   async function handleDownloadFullBackup() {
     setBackingUpFull(true);
     try {
@@ -511,81 +593,337 @@ export function DataHubClient() {
     }
   }
 
-  // 🌟 3. Single-File Full System Restore Upload
-  function handleRestoreFullBackup(event: React.ChangeEvent<HTMLInputElement>) {
+  // 🌟 2.1 Complete Full System Archive (.zip) with All Attached Images
+  async function handleDownloadZipBackup() {
+    setBackingUpZip(true);
+    setImportProgress({
+      current: 0,
+      total: 100,
+      message: "กำลังรวบรวมข้อมูลทุกตารางและสร้างฐานข้อมูล...",
+      subMessage: "กำลังเชื่อมต่อ API เพื่อดึงข้อมูลทั้ง 12 ตาราง"
+    });
+
+    try {
+      // 1. Fetch full database payload
+      const res = await fetch("/api/backup");
+      if (!res.ok) throw new Error("ไม่สามารถดึงข้อมูลสำรองจากเซิร์ฟเวอร์ได้");
+      const backupData = await res.json();
+
+      // 2. Extract all attachment URLs
+      const attachments = extractAllAttachmentUrls(backupData.tables || {});
+      const totalImages = attachments.length;
+
+      setImportProgress({
+        current: 5,
+        total: 100,
+        message: `พบรูปภาพแนบทั้งหมด ${totalImages.toLocaleString()} รูป`,
+        subMessage: "กำลังเตรียมบีบอัดเป็นไฟล์ ZIP..."
+      });
+
+      const zip = new JSZip();
+
+      // 3. Add database.json
+      zip.file("database.json", JSON.stringify(backupData, null, 2));
+
+      // 4. Download images in parallel batches (concurrency = 6)
+      const attachmentsFolder = zip.folder("attachments");
+      let downloadedCount = 0;
+      let failedCount = 0;
+      const failedList: string[] = [];
+      const manifest: any[] = [];
+
+      const batchSize = 6;
+      for (let i = 0; i < totalImages; i += batchSize) {
+        const batch = attachments.slice(i, i + batchSize);
+        await Promise.all(
+          batch.map(async (item) => {
+            try {
+              let blob: Blob | null = null;
+              // Try direct fetch first
+              try {
+                const imgRes = await fetch(item.url);
+                if (imgRes.ok) {
+                  blob = await imgRes.blob();
+                }
+              } catch {
+                blob = null;
+              }
+
+              // If direct fetch fails (e.g. CORS), fallback to proxy
+              if (!blob) {
+                const proxyRes = await fetch(`/api/backup?type=proxy-image&url=${encodeURIComponent(item.url)}`);
+                if (proxyRes.ok) {
+                  blob = await proxyRes.blob();
+                }
+              }
+
+              if (blob) {
+                attachmentsFolder?.file(item.cleanFilename, blob);
+                manifest.push({
+                  originalUrl: item.url,
+                  filePath: `attachments/${item.cleanFilename}`,
+                  filename: item.cleanFilename,
+                  tableName: item.tableName,
+                  rowId: item.rowId,
+                  field: item.field
+                });
+              } else {
+                failedCount++;
+                failedList.push(item.url);
+              }
+            } catch (e) {
+              failedCount++;
+              failedList.push(item.url);
+            } finally {
+              downloadedCount++;
+            }
+          })
+        );
+
+        const percent = Math.min(85, Math.round(5 + (downloadedCount / Math.max(1, totalImages)) * 80));
+        setImportProgress({
+          current: percent,
+          total: 100,
+          message: `กำลังดาวน์โหลดรูปภาพบิล (${downloadedCount}/${totalImages} รูป)...`,
+          subMessage: failedCount > 0 ? `ดาวน์โหลดไม่สำเร็จ ${failedCount} รูป (จะบันทึกลง log)` : "ระบบกำลังรวบรวมไฟล์รูปภาพต้นฉบับ"
+        });
+      }
+
+      // 5. Add manifest and README
+      zip.file("attachments_manifest.json", JSON.stringify(manifest, null, 2));
+      const readmeContent = `COSTLAB ENTERPRISE SYSTEM BACKUP ARCHIVE\n` +
+        `========================================\n` +
+        `Backup Date: ${new Date().toISOString()}\n` +
+        `Total Tables: ${backupData.summary?.totalTables || 12}\n` +
+        `Total Rows: ${backupData.summary?.totalRows || 0}\n` +
+        `Total Attachments: ${manifest.length} saved (${failedCount} failed)\n\n` +
+        `Files in this archive:\n` +
+        `- database.json: Complete PostgreSQL records for all 12 tables + system options\n` +
+        `- attachments/: Folder containing all attached receipt/bill photos\n` +
+        `- attachments_manifest.json: Mapping of original URLs to local attachments\n`;
+      zip.file("README.txt", readmeContent);
+
+      if (failedList.length > 0) {
+        zip.file("failed_attachments.log", failedList.join("\n"));
+      }
+
+      // 6. Generate ZIP file
+      setImportProgress({
+        current: 90,
+        total: 100,
+        message: "กำลังบีบอัดและสร้างไฟล์ .ZIP...",
+        subMessage: "ขั้นตอนนี้อาจใช้เวลาสักครู่ขึ้นอยู่กับขนาดของรูปภาพ"
+      });
+
+      const zipBlob = await zip.generateAsync(
+        {
+          type: "blob",
+          compression: "DEFLATE",
+          compressionOptions: { level: 6 }
+        },
+        (metadata) => {
+          const zipPercent = Math.min(99, Math.round(90 + (metadata.percent / 100) * 9));
+          setImportProgress({
+            current: zipPercent,
+            total: 100,
+            message: `กำลังบีบอัดไฟล์ ZIP (${Math.round(metadata.percent)}%)...`,
+            subMessage: "กรุณารอสักครู่ ระบบกำลังจัดเตรียมไฟล์ดาวน์โหลด"
+          });
+        }
+      );
+
+      // Trigger download
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const url = URL.createObjectURL(zipBlob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `CostLab_Backup_Full_With_Images_${dateStr}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      const totalRows = backupData.summary?.totalRows || 0;
+      showToast(
+        "success",
+        `สำรองข้อมูลสมบูรณ์ (.ZIP) สำเร็จ! รวม ${totalRows.toLocaleString()} แถว และรูปภาพ ${manifest.length} รูป`
+      );
+    } catch (err: any) {
+      showToast("error", err instanceof Error ? err.message : "สำรองข้อมูล .ZIP ไม่สำเร็จ");
+    } finally {
+      setImportProgress(null);
+      setBackingUpZip(false);
+    }
+  }
+
+  // 🌟 3. Single-File Full System Restore Upload (.json or .zip)
+  async function handleRestoreFullBackup(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
 
     setRestoringFull(true);
+    const isZip = file.name.toLowerCase().endsWith(".zip") || file.type.includes("zip");
+
     setImportProgress({
-      current: 0,
+      current: 10,
       total: 100,
-      message: "กำลังอ่านและตรวจสอบไฟล์สำรอง .json...",
+      message: isZip ? "กำลังอ่านและเปิดโครงสร้างไฟล์สำรอง .zip..." : "กำลังอ่านและตรวจสอบไฟล์สำรอง .json...",
       subMessage: file.name
     });
 
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      try {
-        const text = e.target?.result as string;
-        if (!text) throw new Error("ไฟล์สำรองไม่มีข้อมูล");
+    try {
+      let parsedJson: any = null;
+      let zipInstance: JSZip | null = null;
+      let attachmentFiles: { name: string; file: JSZip.JSZipObject }[] = [];
 
-        const parsedJson = JSON.parse(text);
-        if (!parsedJson || typeof parsedJson !== "object") {
-          throw new Error("โครงสร้างไฟล์ JSON ไม่ถูกต้อง");
+      if (isZip) {
+        zipInstance = await JSZip.loadAsync(file);
+
+        // Find database.json or any .json in root
+        let jsonFile = zipInstance.file("database.json");
+        if (!jsonFile) {
+          const jsonCandidates = Object.keys(zipInstance.files).filter(f => !f.includes("/") && f.endsWith(".json"));
+          if (jsonCandidates.length > 0) {
+            jsonFile = zipInstance.file(jsonCandidates[0]);
+          }
         }
 
-        setImportProgress({
-          current: 50,
-          total: 100,
-          message: "กำลังกู้คืนข้อมูลทั้ง 12 ตารางและตัวเลือกระบบลง Supabase...",
-          subMessage: "ระบบกำลังตรวจสอบข้อมูลซ้ำและบันทึกอัตโนมัติ"
-        });
+        if (!jsonFile) {
+          throw new Error("ไม่พบไฟล์ database.json ภายในไฟล์สำรอง .zip");
+        }
 
-        const res = await fetch("/api/backup", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(parsedJson)
-        });
+        const jsonText = await jsonFile.async("text");
+        parsedJson = JSON.parse(jsonText);
 
-        const result = await res.json();
-        if (!res.ok) throw new Error(result.error || "กู้คืนข้อมูลไม่สำเร็จ");
-
-        setImportProgress({
-          current: 100,
-          total: 100,
-          message: "กู้คืนข้อมูลทั้งระบบเสร็จสมบูรณ์!",
-          subMessage: `รวม ${result.totalRestored?.toLocaleString() || 0} รายการ`
-        });
-
-        const details = (result.details || []).map((d: any) => ({
-          filename: file.name,
-          tableName: d.tableName,
-          count: d.count || 0,
-          success: d.success,
-          error: d.error
-        }));
-
-        setImportSummary({
-          title: "ผลการกู้คืนข้อมูลทั้งระบบ (Full System Restore)",
-          totalFiles: 1,
-          successFiles: 1,
-          totalRows: result.totalRestored || 0,
-          details
-        });
-
-        showToast("success", `กู้คืนข้อมูลทั้งระบบสำเร็จ ${result.totalRestored?.toLocaleString() || 0} รายการ`);
-        await loadTableCounts();
-        await loadBackupMetadata();
-      } catch (err: any) {
-        showToast("error", err instanceof Error ? err.message : "กู้คืนข้อมูลไม่สำเร็จ");
-      } finally {
-        setImportProgress(null);
-        setRestoringFull(false);
-        event.target.value = "";
+        // Find attachment files in attachments/
+        attachmentFiles = Object.entries(zipInstance.files)
+          .filter(([path, obj]) => !obj.dir && (path.startsWith("attachments/") || path.startsWith("repairs/")))
+          .map(([path, fileObj]) => ({
+            name: path.split("/").pop() || path,
+            file: fileObj
+          }));
+      } else {
+        const text = await readFileText(file);
+        parsedJson = JSON.parse(text);
       }
-    };
-    reader.readAsText(file, "UTF-8");
+
+      if (!parsedJson || typeof parsedJson !== "object") {
+        throw new Error("โครงสร้างไฟล์สำรองไม่ถูกต้อง");
+      }
+
+      // 1. Restore Database tables
+      setImportProgress({
+        current: isZip && attachmentFiles.length > 0 ? 30 : 50,
+        total: 100,
+        message: "กำลังกู้คืนข้อมูลทั้ง 12 ตารางและตัวเลือกระบบลง Supabase...",
+        subMessage: "ระบบกำลังตรวจสอบข้อมูลซ้ำและบันทึกอัตโนมัติ"
+      });
+
+      const res = await fetch("/api/backup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsedJson)
+      });
+
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || "กู้คืนข้อมูลไม่สำเร็จ");
+
+      // 2. If ZIP has attachments, restore images to Supabase Storage
+      let restoredImagesCount = 0;
+      if (isZip && attachmentFiles.length > 0) {
+        const totalImages = attachmentFiles.length;
+        const batchSize = 5;
+
+        for (let i = 0; i < totalImages; i += batchSize) {
+          const batch = attachmentFiles.slice(i, i + batchSize);
+          await Promise.all(
+            batch.map(async (att) => {
+              try {
+                const base64 = await att.file.async("base64");
+                const uploadRes = await fetch("/api/backup", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    action: "upload-attachment",
+                    filename: att.name,
+                    base64
+                  })
+                });
+                if (uploadRes.ok) restoredImagesCount++;
+              } catch (e) {
+                // ignore single image upload error
+              }
+            })
+          );
+
+          const percent = Math.min(95, Math.round(30 + ((i + batch.length) / totalImages) * 65));
+          setImportProgress({
+            current: percent,
+            total: 100,
+            message: `กำลังกู้คืนรูปภาพแนบเข้า Supabase Storage (${restoredImagesCount}/${totalImages} รูป)...`,
+            subMessage: "กำลังบันทึกรูปภาพต้นฉบับกลับสู่ระบบ"
+          });
+        }
+      }
+
+      setImportProgress({
+        current: 100,
+        total: 100,
+        message: "กู้คืนข้อมูลทั้งระบบเสร็จสมบูรณ์!",
+        subMessage: isZip
+          ? `รวม ${result.totalRestored?.toLocaleString() || 0} รายการ และรูปภาพ ${restoredImagesCount} รูป`
+          : `รวม ${result.totalRestored?.toLocaleString() || 0} รายการ`
+      });
+
+      const details = (result.details || []).map((d: any) => ({
+        filename: file.name,
+        tableName: d.tableName,
+        count: d.count || 0,
+        success: d.success,
+        error: d.error
+      }));
+
+      setImportSummary({
+        title: isZip
+          ? "ผลการกู้คืนข้อมูลและรูปภาพทั้งระบบ (.ZIP Archive)"
+          : "ผลการกู้คืนข้อมูลทั้งระบบ (Full System Restore)",
+        totalFiles: 1,
+        successFiles: 1,
+        totalRows: result.totalRestored || 0,
+        details
+      });
+
+      showToast(
+        "success",
+        isZip
+          ? `กู้คืนระบบสำเร็จ ${result.totalRestored?.toLocaleString() || 0} รายการ พร้อมรูปภาพ ${restoredImagesCount} รูป`
+          : `กู้คืนข้อมูลทั้งระบบสำเร็จ ${result.totalRestored?.toLocaleString() || 0} รายการ`
+      );
+
+      // Record in import history
+      await recordImportEntry({
+        importType: isZip ? "restore_zip" : "restore_json",
+        title: isZip
+          ? `กู้คืนระบบแบบสมบูรณ์ (.ZIP รวมรูปภาพ ${restoredImagesCount} รูป)`
+          : "กู้คืนข้อมูลทั้งระบบ (.JSON 12 ตาราง)",
+        fileName: file.name,
+        totalRows: result.totalRestored || 0,
+        successCount: result.totalRestored || 0,
+        failedCount: 0,
+        status: "success",
+        details
+      });
+
+      await loadTableCounts();
+      await loadBackupMetadata();
+      await loadImportHistory();
+    } catch (err: any) {
+      showToast("error", err instanceof Error ? err.message : "กู้คืนข้อมูลไม่สำเร็จ");
+    } finally {
+      setImportProgress(null);
+      setRestoringFull(false);
+      event.target.value = "";
+    }
   }
 
   // 🌟 4. Execute 1-Click Restore Point from Snapshot History
@@ -618,7 +956,26 @@ export function DataHubClient() {
       if (json.history) setBackupHistory(json.history);
 
       showToast("success", `กู้คืนข้อมูลจากจุดสำรองสำเร็จ รวม ${json.totalRestored?.toLocaleString() || 0} รายการ`);
+
+      // Record in import history
+      await recordImportEntry({
+        importType: "restore_point",
+        title: `กู้คืนข้อมูลจากจุดสำรอง (${snapshot.id})`,
+        fileName: snapshot.filename || snapshot.id,
+        totalRows: json.totalRestored || snapshot.totalRows,
+        successCount: json.totalRestored || snapshot.totalRows,
+        failedCount: 0,
+        status: "success",
+        details: (json.details || []).map((d: any) => ({
+          filename: snapshot.filename || snapshot.id,
+          tableName: d.tableName,
+          count: d.count || 0,
+          success: d.success
+        }))
+      });
+
       await loadTableCounts();
+      await loadImportHistory();
     } catch (err: any) {
       showToast("error", err instanceof Error ? err.message : "กู้คืนข้อมูลไม่สำเร็จ");
     } finally {
@@ -851,7 +1208,30 @@ export function DataHubClient() {
         });
 
         showToast("success", `นำเข้าข้อมูล ${table.name} สำเร็จ ${successCount} รายการ`);
+
+        // Record in import history
+        await recordImportEntry({
+          importType: "single_csv",
+          title: `นำเข้าไฟล์ CSV ${table.name}`,
+          tableName: table.name,
+          targetTableId: table.id,
+          fileName: file.name,
+          totalRows: parsedRows.length,
+          successCount: successCount,
+          failedCount: Math.max(0, parsedRows.length - successCount),
+          status: successCount >= parsedRows.length ? "success" : successCount > 0 ? "partial" : "failed",
+          details: [
+            {
+              filename: file.name,
+              tableName: table.name,
+              count: successCount,
+              success: true
+            }
+          ]
+        });
+
         await loadTableCounts();
+        await loadImportHistory();
       } catch (err: any) {
         showToast("error", err instanceof Error ? err.message : "นำเข้าไฟล์ CSV ไม่สำเร็จ");
       } finally {
@@ -965,7 +1345,21 @@ export function DataHubClient() {
       `นำเข้าหลายไฟล์เสร็จสิ้น: สำเร็จ ${successCount}/${fileList.length} ไฟล์ (${totalRowsImported.toLocaleString()} รายการ)`
     );
 
+    // Record in import history
+    const failedFilesCount = fileList.length - successCount;
+    await recordImportEntry({
+      importType: "multi_csv",
+      title: `นำเข้าหลายไฟล์ CSV (${fileList.length} ไฟล์)`,
+      fileName: `${fileList.length} ไฟล์ CSV (${fileList.map((f) => f.name).slice(0, 3).join(", ")}${fileList.length > 3 ? "..." : ""})`,
+      totalRows: totalRowsImported,
+      successCount: totalRowsImported,
+      failedCount: failedFilesCount,
+      status: failedFilesCount === 0 ? "success" : successCount > 0 ? "partial" : "failed",
+      details: results
+    });
+
     await loadTableCounts();
+    await loadImportHistory();
   }
 
   function detectDelimiter(firstLine: string): string {
@@ -1084,50 +1478,44 @@ export function DataHubClient() {
       {/* ========================================================================= */}
       {/* 1. TOP COMMAND RIBBON & HEADER                                             */}
       {/* ========================================================================= */}
-      <section className="bg-white rounded-xl px-3.5 py-3 sm:px-4 sm:py-3.5 border border-slate-200/90 shadow-2xs">
+      <section className="bg-white rounded-xl px-4 py-3 border border-slate-200/90 shadow-2xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          {/* Title & Badges */}
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-[#0b3531] text-[#34d399] flex items-center justify-center shrink-0 shadow-2xs border border-emerald-700/50">
-              <HardDrive className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-[#0b3531] text-[#34d399] flex items-center justify-center shrink-0 shadow-2xs border border-emerald-700/50">
+              <HardDrive className="w-4 h-4" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-xs sm:text-sm font-black text-slate-900 tracking-tight uppercase flex items-center gap-1.5">
-                  ศูนย์จัดการข้อมูล & ระบบสำรองข้อมูลมาตรฐาน
-                  <span className="text-[11px] font-bold text-slate-400 tracking-normal hidden sm:inline">
-                    / DATA HUB & ENTERPRISE BACKUP
-                  </span>
+                <h1 className="text-sm font-bold text-slate-900 tracking-tight">
+                  ศูนย์นำเข้า ส่งออก และสำรองข้อมูล
                 </h1>
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-[#0b3531] text-[#d4f54e] border border-[#144d47] shrink-0 shadow-2xs">
-                  <Database className="w-3 h-3 text-[#d4f54e]" />
-                  <span>12 ตารางระบบ</span>
+                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#0b3531] text-[#d4f54e] border border-[#144d47] shrink-0">
+                  12 ตารางระบบ
                 </span>
-                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 shrink-0">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>พร้อมใช้งาน</span>
+                <span className="text-xs text-slate-400 font-mono hidden sm:inline">
+                  ({loadingCounts ? "..." : `${totalRowCount.toLocaleString()} แถว`})
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 font-medium mt-0.5 truncate">
-                ตั้งเวลาสำรองข้อมูลอัตโนมัติประจำสัปดาห์ บันทึกประวัติ Snapshots กู้คืนระบบแบบ 1-คลิก และนำเข้า/ส่งออกไฟล์ CSV
+              <p className="text-xs text-slate-500 mt-0.5 truncate">
+                จัดการไฟล์ CSV แยกตาราง และสำรอง/กู้คืนฐานข้อมูลทั้งระบบ
               </p>
             </div>
           </div>
 
-          {/* Global Action Toolbar */}
-          <div className="flex items-center gap-2 flex-wrap shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={() => {
                 loadTableCounts();
                 loadBackupMetadata();
+                loadImportHistory();
               }}
-              disabled={loadingCounts || loadingBackupMeta}
-              className="px-3.5 py-1.5 sm:px-4 sm:py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs disabled:opacity-50"
+              disabled={loadingCounts || loadingBackupMeta || loadingImportHistory}
+              className="px-3 py-1.5 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-medium flex items-center gap-1.5 transition cursor-pointer shadow-2xs disabled:opacity-50"
               title="รีเฟรชข้อมูล"
             >
-              <RefreshCw size={13} className={loadingCounts ? "animate-spin text-emerald-600" : "text-slate-500"} />
-              <span>{loadingCounts ? "กำลังนับ..." : "รีเฟรชข้อมูล"}</span>
+              <RefreshCw size={13} className={loadingCounts || loadingImportHistory ? "animate-spin text-emerald-600" : "text-slate-500"} />
+              <span>{loadingCounts || loadingImportHistory ? "กำลังโหลด..." : "รีเฟรช"}</span>
             </button>
           </div>
         </div>
@@ -1136,23 +1524,7 @@ export function DataHubClient() {
       {/* ========================================================================= */}
       {/* 2. TOP-LEVEL SUB-TABS NAVIGATION PILLS                                    */}
       {/* ========================================================================= */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1">
-        <button
-          type="button"
-          onClick={() => setActiveMainTab("standard_backup")}
-          className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer shadow-2xs whitespace-nowrap ${
-            activeMainTab === "standard_backup"
-              ? "bg-[#0b3531] text-white border border-[#144d47]"
-              : "bg-white text-slate-700 hover:text-slate-900 border border-slate-200/90 hover:bg-slate-50"
-          }`}
-        >
-          <Shield className="w-4 h-4 text-[#d4f54e]" />
-          <span>ระบบสำรองข้อมูลมาตรฐาน (Standard Backup & Recovery)</span>
-          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 font-mono font-bold">
-            {backupHistory.length}
-          </span>
-        </button>
-
+      <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
         <button
           type="button"
           onClick={() => setActiveMainTab("table_csv")}
@@ -1162,328 +1534,52 @@ export function DataHubClient() {
               : "bg-white text-slate-700 hover:text-slate-900 border border-slate-200/90 hover:bg-slate-50"
           }`}
         >
-          <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-          <span>นำเข้าและส่งออก CSV แยกตาราง (12 Tables)</span>
+          <FileSpreadsheet className="w-4 h-4 text-[#d4f54e]" />
+          <span>นำเข้า & ส่งออก CSV (12 ตาราง)</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveMainTab("standard_backup")}
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer shadow-2xs whitespace-nowrap ${
+            activeMainTab === "standard_backup"
+              ? "bg-[#0b3531] text-white border border-[#144d47]"
+              : "bg-white text-slate-700 hover:text-slate-900 border border-slate-200/90 hover:bg-slate-50"
+          }`}
+        >
+          <Shield className="w-4 h-4 text-emerald-600" />
+          <span>สำรอง & กู้คืนทั้งระบบ</span>
+          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-500/20 text-emerald-700 font-mono font-bold">
+            {backupHistory.length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveMainTab("import_history")}
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer shadow-2xs whitespace-nowrap ${
+            activeMainTab === "import_history"
+              ? "bg-[#0b3531] text-white border border-[#144d47]"
+              : "bg-white text-slate-700 hover:text-slate-900 border border-slate-200/90 hover:bg-slate-50"
+          }`}
+        >
+          <History className="w-4 h-4 text-indigo-600" />
+          <span>ประวัติการนำเข้า</span>
+          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-indigo-500/20 text-indigo-700 font-mono font-bold">
+            {importHistory.length}
+          </span>
         </button>
       </div>
 
       {/* ========================================================================= */}
-      {/* TAB 1: STANDARD BACKUP & RECOVERY SYSTEM                                  */}
-      {/* ========================================================================= */}
-      {activeMainTab === "standard_backup" && (
-        <div className="space-y-4">
-          {/* 🌟 1. HERO BACKUP STATUS CARD */}
-          <div
-            style={{ backgroundColor: "#0b3531", borderColor: "#1b5e56" }}
-            className="text-white rounded-2xl p-5 sm:p-6 shadow-md border relative overflow-hidden"
-          >
-            <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-              {/* Status Details */}
-              <div className="space-y-3 max-w-2xl">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <span
-                    style={{ backgroundColor: "#d4f54e", color: "#0b3531" }}
-                    className="p-2 rounded-xl flex items-center justify-center font-bold shadow-sm"
-                  >
-                    <Database size={20} />
-                  </span>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h2 className="text-base font-bold text-white tracking-tight">
-                        ระบบสำรองและกู้คืนข้อมูลมาตรฐานทั้งระบบ
-                      </h2>
-                      {backupConfig.enabled ? (
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                          เปิดทำงานอัตโนมัติ
-                        </span>
-                      ) : (
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-700 text-slate-300">
-                          ปิดอยู่
-                        </span>
-                      )}
-                    </div>
-                    <p style={{ color: "#b8d9d4" }} className="text-xs mt-0.5">
-                      สำรองครบทั้ง 12 ตารางฐานข้อมูล ({totalRowCount.toLocaleString()} แถว) และการตั้งค่าระบบลง Supabase Cloud Storage
-                    </p>
-                  </div>
-                </div>
-
-                {/* Schedule Info Box */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                  <div className="p-3 rounded-xl bg-black/20 border border-white/10 flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-300">
-                      <Calendar className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-slate-400">รอบเวลาสำรองอัตโนมัติ</div>
-                      <div className="text-xs font-semibold text-white mt-0.5">{scheduleDescription}</div>
-                    </div>
-                  </div>
-
-                  <div className="p-3 rounded-xl bg-black/20 border border-white/10 flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-blue-500/10 text-blue-300">
-                      <Clock className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-slate-400">สำรองล่าสุด (Last Backup)</div>
-                      <div className="text-xs font-semibold text-white mt-0.5">
-                        {backupConfig.lastBackupAt
-                          ? new Date(backupConfig.lastBackupAt).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" })
-                          : "ยังไม่มีประวัติ"}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Action Buttons Toolbar */}
-              <div className="flex flex-col sm:flex-row lg:flex-col gap-2.5 shrink-0 justify-center">
-                {/* 1. Trigger Backup Now */}
-                <button
-                  type="button"
-                  onClick={handleTriggerBackupNow}
-                  disabled={backingUpFull || restoringFull}
-                  style={{ backgroundColor: "#d4f54e", color: "#0b3531" }}
-                  className="px-4 py-2.5 hover:opacity-90 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition shadow-sm cursor-pointer disabled:opacity-50"
-                >
-                  {backingUpFull ? (
-                    <Loader2 size={15} className="animate-spin text-[#0b3531]" />
-                  ) : (
-                    <Play size={15} className="text-[#0b3531] fill-[#0b3531]" />
-                  )}
-                  <span>{backingUpFull ? "กำลังสำรองข้อมูล..." : "สำรองข้อมูลทันที (Backup Now)"}</span>
-                </button>
-
-                {/* 2. Schedule Settings Modal Button */}
-                <button
-                  type="button"
-                  onClick={() => setIsScheduleModalOpen(true)}
-                  className="px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer"
-                >
-                  <Settings size={15} className="text-emerald-300" />
-                  <span>ตั้งค่าตารางเวลาสำรอง (Schedule)</span>
-                </button>
-
-                {/* 3. Download Full JSON file */}
-                <button
-                  type="button"
-                  onClick={handleDownloadFullBackup}
-                  disabled={backingUpFull || restoringFull}
-                  className="px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer"
-                >
-                  <HardDriveDownload size={15} className="text-emerald-400" />
-                  <span>ดาวน์โหลดไฟล์ .json ลงเครื่อง</span>
-                </button>
-
-                {/* 4. Restore from JSON file upload */}
-                <label className="px-4 py-2 bg-slate-900/60 hover:bg-slate-900 border border-slate-700/60 text-slate-300 hover:text-white rounded-xl text-xs font-medium flex items-center justify-center gap-2 transition cursor-pointer">
-                  <FolderUp size={14} className="text-amber-400" />
-                  <span>กู้คืนจากไฟล์ JSON นอกระบบ</span>
-                  <input
-                    type="file"
-                    accept=".json"
-                    className="hidden"
-                    onChange={handleRestoreFullBackup}
-                    disabled={backingUpFull || restoringFull}
-                  />
-                </label>
-              </div>
-            </div>
-          </div>
-
-          {/* 🌟 2. BACKUP SNAPSHOTS HISTORY TABLE */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-xl bg-slate-100 text-slate-700">
-                  <History className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">ประวัติและจุดสำรองข้อมูล (Backup Snapshots History)</h3>
-                  <p className="text-xs text-slate-500">
-                    เก็บประวัติสำรองข้อมูลล่าสุด {backupHistory.length} จุด (สามารถดาวน์โหลด หรือกู้คืนข้อมูลได้ใน 1 คลิก)
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-400 font-mono">
-                  หมุนเวียนเก็บสูงสุด {backupConfig.retentionSnapshots || 12} จุด
-                </span>
-              </div>
-            </div>
-
-            {backupHistory.length === 0 ? (
-              <div className="py-12 text-center space-y-3">
-                <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
-                  <Database className="w-6 h-6" />
-                </div>
-                <div className="space-y-1">
-                  <h4 className="text-sm font-semibold text-slate-800">ยังไม่มีประวัติการสำรองข้อมูลในระบบ</h4>
-                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                    กดปุ่ม <b>"สำรองข้อมูลทันที"</b> ด้านบน เพื่อสร้างจุดสำรองข้อมูลแรกของระบบ
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleTriggerBackupNow}
-                  disabled={backingUpFull}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl transition inline-flex items-center gap-2 shadow-sm"
-                >
-                  <Play className="w-3.5 h-3.5 fill-white" />
-                  <span>สร้างจุดสำรองข้อมูลตอนนี้</span>
-                </button>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-slate-500 font-semibold bg-slate-50/50">
-                      <th className="py-2.5 px-3 rounded-l-lg">วันที่ & เวลาสำรอง</th>
-                      <th className="py-2.5 px-3">ประเภท</th>
-                      <th className="py-2.5 px-3">จำนวนตาราง & แถว</th>
-                      <th className="py-2.5 px-3">ขนาดไฟล์</th>
-                      <th className="py-2.5 px-3">สถานะ</th>
-                      <th className="py-2.5 px-3 text-right rounded-r-lg">การจัดการ</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {backupHistory.map((snap) => {
-                      const dateFormatted = new Date(snap.createdAt).toLocaleString("th-TH", {
-                        timeZone: "Asia/Bangkok"
-                      });
-                      const typeBadge =
-                        snap.type === "weekly_auto"
-                          ? { label: "อัตโนมัติประจำสัปดาห์", color: "bg-blue-50 text-blue-700 border-blue-200" }
-                          : snap.type === "daily_auto"
-                          ? { label: "อัตโนมัติประจำวัน", color: "bg-cyan-50 text-cyan-700 border-cyan-200" }
-                          : { label: "สำรองด้วยตนเอง", color: "bg-purple-50 text-purple-700 border-purple-200" };
-
-                      const sizeKb = (snap.sizeBytes / 1024).toFixed(1);
-
-                      return (
-                        <tr key={snap.id} className="hover:bg-slate-50/80 transition-colors">
-                          <td className="py-3 px-3">
-                            <div className="font-semibold text-slate-900">{dateFormatted}</div>
-                            <div className="text-[10px] text-slate-400 font-mono">{snap.id}</div>
-                          </td>
-                          <td className="py-3 px-3">
-                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-medium border ${typeBadge.color}`}>
-                              {typeBadge.label}
-                            </span>
-                          </td>
-                          <td className="py-3 px-3 font-mono">
-                            <span className="font-semibold text-emerald-700">
-                              {snap.totalRows.toLocaleString()} รายการ
-                            </span>
-                            <span className="text-slate-400 text-[10px] ml-1">
-                              ({snap.totalTables || 12} ตาราง)
-                            </span>
-                          </td>
-                          <td className="py-3 px-3 font-mono text-slate-600">{sizeKb} KB</td>
-                          <td className="py-3 px-3">
-                            <span className="inline-flex items-center gap-1 text-emerald-600 font-medium">
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              <span>สมบูรณ์</span>
-                            </span>
-                          </td>
-                          <td className="py-3 px-3 text-right">
-                            <div className="inline-flex items-center gap-1.5 justify-end">
-                              {/* 1. Download Snapshot File */}
-                              <button
-                                type="button"
-                                onClick={() => handleDownloadSnapshot(snap)}
-                                disabled={downloadingSnapshotId === snap.id}
-                                className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 active:scale-95 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-semibold flex items-center gap-1 transition cursor-pointer disabled:opacity-50"
-                                title="ดาวน์โหลดไฟล์สำรอง .json นี้ลงเครื่อง"
-                              >
-                                {downloadingSnapshotId === snap.id ? (
-                                  <Loader2 className="w-3 h-3 animate-spin text-emerald-700" />
-                                ) : (
-                                  <Download className="w-3 h-3 text-emerald-700" />
-                                )}
-                                <span>โหลดไฟล์</span>
-                              </button>
-
-                              {/* 2. Restore Button */}
-                              <button
-                                type="button"
-                                onClick={() => setSelectedRestoreSnapshot(snap)}
-                                className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 active:scale-95 text-amber-800 border border-amber-200 rounded-lg text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
-                                title="กู้คืนข้อมูลระบบจากจุดสำรองนี้"
-                              >
-                                <RotateCcw className="w-3 h-3 text-amber-700" />
-                                <span>กู้คืน</span>
-                              </button>
-
-                              {/* 3. Delete Button */}
-                              <button
-                                type="button"
-                                onClick={() => setSelectedDeleteSnapshot(snap)}
-                                className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 active:scale-95 text-rose-700 border border-rose-200 rounded-lg text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
-                                title="ลบจุดสำรองข้อมูลและไฟล์นี้ออกจากระบบ"
-                              >
-                                <Trash2 className="w-3 h-3 text-rose-600" />
-                                <span>ลบ</span>
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* TAB 2: TABLE CSV IMPORT & EXPORT CENTER                                   */}
+      {/* TAB 1: TABLE CSV IMPORT & EXPORT CENTER                                   */}
       {/* ========================================================================= */}
       {activeMainTab === "table_csv" && (
-        <div className="space-y-4">
-          {/* STATS & QUICK FILTER BAR */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="bg-white border border-slate-200 p-3 rounded-xl shadow-2xs flex items-center justify-between">
-              <div className="space-y-0.5">
-                <span className="text-xs text-slate-500">ตารางข้อมูลทั้งหมด</span>
-                <div className="text-sm font-semibold text-slate-900">12 ตาราง</div>
-              </div>
-              <div className="w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center">
-                <HardDrive size={16} />
-              </div>
-            </div>
-
-            <div className="bg-white border border-slate-200 p-3 rounded-xl shadow-2xs flex items-center justify-between">
-              <div className="space-y-0.5">
-                <span className="text-xs text-slate-500">จำนวนข้อมูลรวมทั้งระบบ</span>
-                <div className="text-sm font-semibold text-emerald-700 font-mono">
-                  {loadingCounts ? "กำลังโหลด..." : `${totalRowCount.toLocaleString()} แถว`}
-                </div>
-              </div>
-              <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center">
-                <CheckCircle2 size={16} />
-              </div>
-            </div>
-
-            <div className="bg-white border border-slate-200 p-3 rounded-xl shadow-2xs flex items-center justify-between">
-              <div className="space-y-0.5">
-                <span className="text-xs text-slate-500">ระบบป้องกันข้อมูลซ้ำ</span>
-                <div className="text-sm font-semibold text-indigo-700">เปิดใช้งาน (Active)</div>
-              </div>
-              <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-700 flex items-center justify-center">
-                <FileCheck size={16} />
-              </div>
-            </div>
-          </div>
-
-          {/* SEARCH & CATEGORY FILTER TABS + MULTI-CSV ACTIONS */}
-          <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="space-y-3">
+          {/* SEARCH & CATEGORY FILTER TABS + ACTIONS */}
+          <div className="bg-white border border-slate-200/90 rounded-xl p-3 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
             {/* Category Tabs */}
-            <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-lg shrink-0">
+            <div className="flex items-center gap-1 p-0.5 bg-slate-100 rounded-lg shrink-0">
               <button
                 type="button"
                 onClick={() => setSelectedCategory("all")}
@@ -1504,7 +1600,7 @@ export function DataHubClient() {
                     : "text-slate-600 hover:text-slate-900"
                 }`}
               >
-                📁 ข้อมูลหลัก (8)
+                ข้อมูลหลัก (8)
               </button>
               <button
                 type="button"
@@ -1515,7 +1611,7 @@ export function DataHubClient() {
                     : "text-slate-600 hover:text-slate-900"
                 }`}
               >
-                💼 โครงการ & บิล (4)
+                โครงการ & บิล (4)
               </button>
             </div>
 
@@ -1542,7 +1638,7 @@ export function DataHubClient() {
               {/* Multi-CSV Batch Import Button */}
               <label className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-xs font-medium flex items-center gap-1.5 transition cursor-pointer shrink-0" title="เลือกไฟล์ CSV หลายๆ ไฟล์พร้อมกัน">
                 <Upload size={13} className="text-slate-600" />
-                <span>นำเข้าหลายไฟล์ CSV</span>
+                <span>นำเข้าหลายไฟล์</span>
                 <input
                   type="file"
                   accept=".csv"
@@ -1566,122 +1662,335 @@ export function DataHubClient() {
                 ) : (
                   <Download size={13} className="text-slate-600" />
                 )}
-                <span>ส่งออกทุก CSV</span>
+                <span>ส่งออกทั้งหมด</span>
               </button>
             </div>
           </div>
 
-          {/* TABLE CARDS GRID */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
-            {filteredTables.map((table) => {
-              const IconComp = getIconComponent(table.iconName);
-              const rowCount = counts[table.id] ?? 0;
-              const isExporting = exportingTableId === table.id;
+          {/* STREAMLINED TABLES LIST */}
+          <div className="bg-white border border-slate-200/90 rounded-xl overflow-hidden shadow-2xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500 font-semibold bg-slate-50/70">
+                    <th className="py-2.5 px-3.5">ตารางข้อมูล</th>
+                    <th className="py-2.5 px-3">หมวดหมู่</th>
+                    <th className="py-2.5 px-3">จำนวนข้อมูล</th>
+                    <th className="py-2.5 px-3 text-right">การจัดการ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredTables.map((table) => {
+                    const IconComp = getIconComponent(table.iconName);
+                    const rowCount = counts[table.id] ?? 0;
+                    const isExporting = exportingTableId === table.id;
 
-              return (
-                <div
-                  key={table.id}
-                  className="bg-white rounded-xl border border-slate-200 hover:border-slate-300 shadow-xs hover:shadow-sm transition-all duration-200 flex flex-col justify-between overflow-hidden group"
-                >
-                  {/* Card Header */}
-                  <div className="p-3.5 space-y-2.5">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2.5">
-                        <div
-                          className={`w-8 h-8 rounded-lg bg-gradient-to-br ${table.color} text-white flex items-center justify-center shadow-xs shrink-0`}
-                        >
-                          <IconComp size={16} />
-                        </div>
-                        <div>
-                          <h3 className="font-semibold text-slate-900 text-xs tracking-tight group-hover:text-emerald-700 transition">
-                            {table.name}
-                          </h3>
-                          <span className="text-[10px] font-mono text-slate-400">table: {table.tableName}</span>
-                        </div>
-                      </div>
+                    return (
+                      <tr key={table.id} className="hover:bg-slate-50/80 transition-colors group">
+                        <td className="py-2.5 px-3.5">
+                          <div className="flex items-center gap-2.5">
+                            <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${table.color} text-white flex items-center justify-center shrink-0 shadow-2xs`}>
+                              <IconComp size={14} />
+                            </div>
+                            <div>
+                              <div className="font-semibold text-slate-900 group-hover:text-emerald-700 transition">
+                                {table.name}
+                              </div>
+                              <div className="text-[10px] text-slate-400 font-mono">
+                                ตาราง: {table.tableName}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
 
-                      <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-medium bg-slate-100 text-slate-700 border border-slate-200 shrink-0">
-                        {loadingCounts ? "..." : `${rowCount.toLocaleString()} แถว`}
-                      </span>
-                    </div>
+                        <td className="py-2.5 px-3">
+                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-medium border ${
+                            table.category === "master"
+                              ? "bg-slate-50 text-slate-600 border-slate-200"
+                              : "bg-indigo-50 text-indigo-700 border-indigo-200"
+                          }`}>
+                            {table.category === "master" ? "ข้อมูลหลัก" : "โครงการ & บิล"}
+                          </span>
+                        </td>
 
-                    <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed min-h-[32px]">
-                      {table.description}
-                    </p>
+                        <td className="py-2.5 px-3 font-mono">
+                          <span className="font-semibold text-slate-800">
+                            {loadingCounts ? "..." : `${rowCount.toLocaleString()} แถว`}
+                          </span>
+                        </td>
 
-                    {/* Column Badges preview */}
-                    <div className="flex items-center gap-1 flex-wrap pt-1">
-                      <span className="text-[10px] text-slate-400 font-medium mr-1">คอลัมน์:</span>
-                      {table.columns.slice(0, 4).map((col) => (
-                        <span
-                          key={col}
-                          className="px-1.5 py-0.5 rounded bg-slate-50 text-slate-600 text-[10px] border border-slate-200/60 font-mono truncate max-w-[100px]"
-                        >
-                          {col}
-                        </span>
-                      ))}
-                      {table.columns.length > 4 && (
-                        <span className="text-[10px] text-slate-400 font-mono">
-                          +{table.columns.length - 4}
-                        </span>
-                      )}
-                    </div>
-                  </div>
+                        <td className="py-2.5 px-3 text-right">
+                          <div className="inline-flex items-center gap-1.5 justify-end">
+                            <button
+                              type="button"
+                              onClick={() => downloadTemplateCSV(table)}
+                              className="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 rounded-lg text-xs font-medium flex items-center gap-1 transition cursor-pointer"
+                              title="ดาวน์โหลดตัวอย่างเทมเพลต CSV"
+                            >
+                              <Download size={11} className="text-slate-400" />
+                              <span>เทมเพลต</span>
+                            </button>
 
-                  {/* Card Action Buttons Toolbar */}
-                  <div className="p-2.5 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-1.5">
-                    {/* 1. Download Template */}
-                    <button
-                      type="button"
-                      onClick={() => downloadTemplateCSV(table)}
-                      className="flex-1 py-1 px-2 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-md text-[11px] font-medium flex items-center justify-center gap-1 transition cursor-pointer"
-                      title="ดาวน์โหลดตัวอย่างเทมเพลต CSV"
-                    >
-                      <Download size={12} className="text-slate-500 shrink-0" />
-                      <span>เทมเพลต</span>
-                    </button>
+                            <button
+                              type="button"
+                              onClick={() => exportTableCSV(table)}
+                              disabled={isExporting}
+                              className="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-xs font-medium flex items-center gap-1 transition cursor-pointer disabled:opacity-50"
+                              title="ส่งออกข้อมูลจริงเป็นไฟล์ CSV"
+                            >
+                              {isExporting ? (
+                                <Loader2 size={11} className="animate-spin text-emerald-600" />
+                              ) : (
+                                <HardDriveDownload size={11} className="text-emerald-600" />
+                              )}
+                              <span>ส่งออก</span>
+                            </button>
 
-                    {/* 2. Export Actual Data */}
-                    <button
-                      type="button"
-                      onClick={() => exportTableCSV(table)}
-                      disabled={isExporting}
-                      className="flex-1 py-1 px-2 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-md text-[11px] font-medium flex items-center justify-center gap-1 transition cursor-pointer disabled:opacity-50"
-                      title="ส่งออกข้อมูลจริงเป็นไฟล์ CSV"
-                    >
-                      {isExporting ? (
-                        <Loader2 size={12} className="animate-spin text-emerald-600 shrink-0" />
-                      ) : (
-                        <HardDriveDownload size={12} className="text-emerald-600 shrink-0" />
-                      )}
-                      <span>ส่งออก</span>
-                    </button>
+                            <label className="px-2.5 py-1 bg-[#0b3531] hover:bg-[#072724] text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition shadow-2xs cursor-pointer">
+                              <Upload size={11} className="text-[#d4f54e]" />
+                              <span>นำเข้า</span>
+                              <input
+                                type="file"
+                                accept=".csv"
+                                className="hidden"
+                                onChange={(e) => handleImportCSV(table, e)}
+                              />
+                            </label>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
 
-                    {/* 3. Import CSV */}
-                    <label className="flex-1 py-1 px-2 bg-[#0b3531] hover:bg-[#072724] text-white rounded-md text-[11px] font-medium flex items-center justify-center gap-1 transition shadow-2xs cursor-pointer">
-                      <Upload size={12} className="text-[#d4f54e] shrink-0" />
-                      <span>นำเข้า</span>
-                      <input
-                        type="file"
-                        accept=".csv"
-                        className="hidden"
-                        onChange={(e) => handleImportCSV(table, e)}
-                      />
-                    </label>
-                  </div>
-                </div>
-              );
-            })}
+            {filteredTables.length === 0 && (
+              <div className="p-8 text-center space-y-1">
+                <p className="text-xs font-medium text-slate-700">ไม่พบตารางที่ตรงกับคำค้นหา</p>
+                <p className="text-[11px] text-slate-400">ลองเปลี่ยนคำค้นหา หรือเลือกหมวดหมู่ "ทั้งหมด"</p>
+              </div>
+            )}
           </div>
 
-          {filteredTables.length === 0 && (
-            <div className="bg-white rounded-xl border border-slate-200 p-8 text-center space-y-2">
-              <AlertCircle size={28} className="mx-auto text-slate-400" />
-              <h3 className="text-sm font-medium text-slate-700">ไม่พบตารางที่ตรงกับคำค้นหา</h3>
-              <p className="text-xs text-slate-400">ลองเปลี่ยนคำค้นหา หรือเลือกหมวดหมู่ "ทั้งหมด"</p>
+          {/* Subtle Link to Import History */}
+          {importHistory.length > 0 && (
+            <div className="p-2.5 px-3.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between text-xs text-slate-600">
+              <div className="flex items-center gap-2">
+                <History size={13} className="text-emerald-600 shrink-0" />
+                <span>มีประวัติการนำเข้าทั้งหมด <b>{importHistory.length}</b> รายการ</span>
+                <span className="text-[11px] text-slate-400 hidden sm:inline font-mono">
+                  (นำเข้าล่าสุด: {new Date(importHistory[0].createdAt).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" })})
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveMainTab("import_history")}
+                className="text-emerald-700 hover:text-emerald-800 font-semibold flex items-center gap-1 cursor-pointer"
+              >
+                <span>ดูประวัติทั้งหมด</span>
+                <span>→</span>
+              </button>
             </div>
           )}
         </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 2: STANDARD BACKUP & RECOVERY SYSTEM                                  */}
+      {/* ========================================================================= */}
+      {activeMainTab === "standard_backup" && (
+        <div className="space-y-4">
+          {/* STREAMLINED BACKUP BANNER */}
+          <div className="bg-[#0b3531] border border-emerald-800/60 rounded-xl p-4 sm:p-5 text-white shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-sm font-bold text-white">
+                    สำรองและกู้คืนฐานข้อมูลทั้งระบบ
+                  </h2>
+                  {backupConfig.enabled ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      อัตโนมัติ: {scheduleDescription}
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-700 text-slate-300">
+                      ปิดสำรองอัตโนมัติ
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-emerald-200/80">
+                  ครอบคลุมครบ 12 ตารางฐานข้อมูล ({totalRowCount.toLocaleString()} แถว) และไฟล์รูปภาพแนบทั้งหมด
+                </p>
+              </div>
+
+              {/* Clean Action Buttons */}
+              <div className="flex items-center gap-2 flex-wrap shrink-0">
+                {/* 1. Download Full System Archive (.ZIP with all images) */}
+                <button
+                  type="button"
+                  onClick={handleDownloadZipBackup}
+                  disabled={backingUpZip || backingUpFull || restoringFull}
+                  style={{ backgroundColor: "#d4f54e", color: "#0b3531" }}
+                  className="px-3.5 py-2 hover:opacity-90 active:scale-98 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition shadow-sm cursor-pointer disabled:opacity-50"
+                  title="ดาวน์โหลดทั้ง 12 ตารางฐานข้อมูลพร้อมไฟล์รูปถ่ายบิลต้นฉบับทั้งหมด (.ZIP)"
+                >
+                  {backingUpZip ? (
+                    <Loader2 size={14} className="animate-spin text-[#0b3531]" />
+                  ) : (
+                    <FileArchive size={14} className="text-[#0b3531]" />
+                  )}
+                  <span>{backingUpZip ? "กำลังสร้างไฟล์..." : "สำรองข้อมูล (.ZIP รวมรูป)"}</span>
+                </button>
+
+                {/* 2. Restore file upload */}
+                <label className="px-3.5 py-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer shadow-sm">
+                  <FolderUp size={14} className="text-amber-300" />
+                  <span>กู้คืนจากไฟล์</span>
+                  <input
+                    type="file"
+                    accept=".json,.zip,application/zip,application/x-zip-compressed"
+                    className="hidden"
+                    onChange={handleRestoreFullBackup}
+                    disabled={backingUpZip || backingUpFull || restoringFull}
+                  />
+                </label>
+
+                {/* 3. Snapshot Trigger */}
+                <button
+                  type="button"
+                  onClick={handleTriggerBackupNow}
+                  disabled={backingUpZip || backingUpFull || restoringFull}
+                  className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                  title="บันทึกจุดสำรองในระบบทันที"
+                >
+                  {backingUpFull ? (
+                    <Loader2 size={13} className="animate-spin text-emerald-300" />
+                  ) : (
+                    <Play size={13} className="text-emerald-400 fill-emerald-400" />
+                  )}
+                  <span>บันทึกจุดสำรอง</span>
+                </button>
+
+                {/* 4. Schedule Settings */}
+                <button
+                  type="button"
+                  onClick={() => setIsScheduleModalOpen(true)}
+                  className="p-2 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 hover:text-white rounded-lg transition cursor-pointer"
+                  title="ตั้งเวลาสำรองอัตโนมัติ"
+                >
+                  <Settings size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* BACKUP SNAPSHOTS HISTORY TABLE */}
+          <div className="bg-white border border-slate-200/90 rounded-xl p-4 shadow-2xs space-y-3">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center">
+                  <History className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-slate-900">ประวัติและจุดสำรองข้อมูล (Backup Snapshots)</h3>
+                  <p className="text-[11px] text-slate-400">
+                    จุดสำรองข้อมูลในระบบ {backupHistory.length} จุด (สามารถดาวน์โหลดหรือกู้คืนได้ทันที)
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {backupHistory.length === 0 ? (
+              <div className="py-8 text-center space-y-1">
+                <p className="text-xs font-medium text-slate-700">ยังไม่มีจุดสำรองข้อมูลในระบบ</p>
+                <p className="text-[11px] text-slate-400">กดปุ่ม "บันทึกจุดสำรอง" ด้านบน เพื่อสร้างจุดสำรองแรก</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-500 font-semibold bg-slate-50/70">
+                      <th className="py-2.5 px-3">วันที่ & เวลา</th>
+                      <th className="py-2.5 px-3">ประเภท</th>
+                      <th className="py-2.5 px-3">จำนวนข้อมูล</th>
+                      <th className="py-2.5 px-3">ขนาด</th>
+                      <th className="py-2.5 px-3 text-right">การจัดการ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {backupHistory.map((snap) => {
+                      const dateFormatted = new Date(snap.createdAt).toLocaleString("th-TH", {
+                        timeZone: "Asia/Bangkok"
+                      });
+                      return (
+                        <tr key={snap.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-2.5 px-3">
+                            <div className="font-semibold text-slate-900">{dateFormatted}</div>
+                            <div className="text-[10px] text-slate-400 font-mono">{snap.id}</div>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                              {snap.type === "weekly_auto" ? "อัตโนมัติประจำสัปดาห์" : snap.type === "daily_auto" ? "อัตโนมัติประจำวัน" : "สำรองด้วยตนเอง"}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 font-mono font-semibold text-emerald-700">
+                            {snap.totalRows.toLocaleString()} รายการ
+                          </td>
+                          <td className="py-2.5 px-3 font-mono text-slate-600">
+                            {(snap.sizeBytes / 1024).toFixed(1)} KB
+                          </td>
+                          <td className="py-2.5 px-3 text-right">
+                            <div className="inline-flex items-center gap-1.5 justify-end">
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadSnapshot(snap)}
+                                disabled={downloadingSnapshotId === snap.id}
+                                className="px-2 py-1 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-[11px] font-medium flex items-center gap-1 transition cursor-pointer"
+                              >
+                                <Download className="w-3 h-3 text-emerald-700" />
+                                <span>โหลด</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedRestoreSnapshot(snap)}
+                                className="px-2 py-1 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 rounded-lg text-[11px] font-medium flex items-center gap-1 transition cursor-pointer"
+                              >
+                                <RotateCcw className="w-3 h-3 text-amber-700" />
+                                <span>กู้คืน</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedDeleteSnapshot(snap)}
+                                className="p-1 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-md transition cursor-pointer"
+                              >
+                                <Trash2 className="w-3 h-3 text-rose-600" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 3: IMPORT HISTORY FULL DASHBOARD & TABLE                              */}
+      {/* ========================================================================= */}
+      {activeMainTab === "import_history" && (
+        <ImportHistoryView
+          history={importHistory}
+          loading={loadingImportHistory}
+          onRefresh={loadImportHistory}
+          onDeleteEntry={handleDeleteImportEntry}
+          onClearAll={handleClearAllImportHistory}
+          onNavigateToImport={() => setActiveMainTab("table_csv")}
+        />
       )}
 
       {/* ========================================================================= */}

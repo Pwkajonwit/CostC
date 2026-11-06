@@ -25,7 +25,7 @@ type RootContentProps = {
 };
 
 // Routes that should be rendered standalone without AppShell (sidebars/navbars) or login screen
-const STANDALONE_ROUTES = ["/quick-work", "/quick-task", "/task-upload"];
+const STANDALONE_ROUTES = ["/quick-work", "/quick-task", "/task-upload", "/wage-request"];
 
 export function RootContent({
   currentUser,

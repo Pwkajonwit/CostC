@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Package,
@@ -23,15 +24,17 @@ import {
   Filter,
   Sparkles,
   ExternalLink,
-  X
+  X,
+  Clock
 } from "lucide-react";
 import { DataTable } from "@/components/tables/DataTable";
 import { ProjectDetailEditor } from "@/components/forms/ProjectDetailEditor";
 import { ProjectBudgetAllocationManager } from "@/components/dashboards/ProjectBudgetAllocationManager";
+import { LaborWageApprovalModal } from "@/components/forms/LaborWageApprovalModal";
 import { getProjectColorInfo } from "@/components/dashboards/WorkStatusDashboardClient";
 import { money, toNumber } from "@/lib/utils/numbers";
 import { formatDateDisplay } from "@/lib/utils/dates";
-import { isPaidBill } from "@/lib/bills/bill-status";
+import { isPaidBill, normalizeBillStatus } from "@/lib/bills/bill-status";
 import { BillStatusBadge } from "@/components/bills/BillStatusBadge";
 import { getCostCodeBadgeStyle } from "@/lib/cost-codes";
 import type { SheetRow } from "@/lib/types";
@@ -67,6 +70,8 @@ type ProjectDetailClientProps = {
   detailFields: string[];
   relatedColumns: string[];
   initialTab?: string;
+  contractRows?: SheetRow[];
+  contractorRows?: SheetRow[];
 };
 
 export function ProjectDetailClient({
@@ -85,6 +90,8 @@ export function ProjectDetailClient({
   detailFields,
   relatedColumns,
   initialTab,
+  contractRows = [],
+  contractorRows = [],
 }: ProjectDetailClientProps) {
   const validInitialTab: "bills" | "budget-control" | "allocation" | "edit" =
     initialTab === "allocation" || initialTab === "budget-control" || initialTab === "edit" || initialTab === "bills"
@@ -98,6 +105,33 @@ export function ProjectDetailClient({
   const [selectedCategory, setSelectedCategory] = useState<string>("");
   const [autoEditMode, setAutoEditMode] = useState(false);
   const [autoEditAllocation, setAutoEditAllocation] = useState(false);
+  const [isWageApprovalOpen, setIsWageApprovalOpen] = useState(false);
+  const [wageModalInitialTab, setWageModalInitialTab] = useState<"form" | "history">("form");
+
+  const router = useRouter();
+
+  // Count pending wage requests for this project
+  const pendingWageBillsCount = useMemo(() => {
+    return summaryRows.filter((r) => {
+      const st = normalizeBillStatus(r["สถานะ"] || r.status);
+      const isWage = String(r["ร้านค้า/ผู้รับเหมา"] || "").includes("ผู้รับเหมา") ||
+                     String(r["ประเภท"] || "").includes("201") ||
+                     toNumber(r["ค่าแรง"]) > 0;
+      return (st === "รออนุมัติ" || st === "ตั้งเบิก" || st === "รอตั้งเบิก") && isWage;
+    }).length;
+  }, [summaryRows]);
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      router.refresh();
+    };
+    window.addEventListener("bills-data-updated", handleUpdate);
+    window.addEventListener("data-updated", handleUpdate);
+    return () => {
+      window.removeEventListener("bills-data-updated", handleUpdate);
+      window.removeEventListener("data-updated", handleUpdate);
+    };
+  }, [router]);
 
   // Group accordion toggle state - default all open
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
@@ -213,6 +247,35 @@ export function ProjectDetailClient({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Primary Action 1: Create Wage Request (Opens Form Tab) */}
+          <button
+            type="button"
+            onClick={() => {
+              setWageModalInitialTab("form");
+              setIsWageApprovalOpen(true);
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-2xs transition cursor-pointer"
+          >
+            <Hammer size={13} />
+            <span>ขออนุมัติค่าแรง</span>
+          </button>
+
+          {/* Primary Action 2: Direct Pending Approval & History Button (Opens History Tab) */}
+          {pendingWageBillsCount > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setWageModalInitialTab("history");
+                setIsWageApprovalOpen(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold shadow-2xs transition cursor-pointer animate-in fade-in"
+              title="มีคำขอเบิกค่าแรงรออนุมัติสร้างบิล"
+            >
+              <Clock size={13} className="animate-pulse" />
+              <span>รออนุมัติ ({pendingWageBillsCount})</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={handleOpenAllocatorEdit}
@@ -600,9 +663,19 @@ export function ProjectDetailClient({
               )}
             </div>
 
-            {/* Filter Result Counter */}
-            <div className="text-xs text-slate-500 whitespace-nowrap font-medium">
-              แสดง <strong>{displayedSummaryRows.length}</strong> จาก <strong>{summaryRows.length}</strong> รายการ
+            {/* Filter Result Counter & Quick Labor Approval Button */}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setIsWageApprovalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs font-semibold transition cursor-pointer"
+              >
+                <Hammer size={12} />
+                <span>+ ขออนุมัติค่าแรง</span>
+              </button>
+              <div className="text-xs text-slate-500 whitespace-nowrap font-medium">
+                แสดง <strong>{displayedSummaryRows.length}</strong> จาก <strong>{summaryRows.length}</strong> รายการ
+              </div>
             </div>
           </div>
 
@@ -1110,6 +1183,19 @@ export function ProjectDetailClient({
           />
         </div>
       )}
+
+      {/* 6. LABOR WAGE APPROVAL MODAL */}
+      <LaborWageApprovalModal
+        isOpen={isWageApprovalOpen}
+        onClose={() => setIsWageApprovalOpen(false)}
+        projectId={projectId}
+        projectName={projectName}
+        contractRows={contractRows}
+        contractorRows={contractorRows}
+        existingBills={summaryRows}
+        onBillCreated={() => router.refresh()}
+        initialTab={wageModalInitialTab}
+      />
     </div>
   );
 }

@@ -28,11 +28,11 @@ import {
   PieChart,
   ReceiptText,
   Search,
-  ShieldCheck,
   Sliders,
   Store,
   Users,
   WalletCards,
+  X,
 } from "lucide-react";
 import { PRIMARY_VIEWS } from "@/lib/config";
 import { UserSwitcher } from "@/components/auth/UserSwitcher";
@@ -72,6 +72,25 @@ const ICONS: Record<string, any> = {
   settings: Database,
   "settings-general": Building2,
 };
+
+const CORE_FINANCE_IDS = new Set([
+  "dashboard-main",
+  "bill-entry",
+  "withdraw-request",
+  "contract-open",
+  "petty-cash",
+]);
+
+const OPERATIONS_DOCS_IDS = new Set([
+  "bill-follow",
+  "work-status",
+  "documents",
+]);
+
+const EXECUTIVE_REPORTS_IDS = new Set([
+  "reports",
+  "project-analytics",
+]);
 
 function hrefFor(viewId: string) {
   if (viewId === "dashboard-main") return "/";
@@ -151,7 +170,9 @@ export function DualSidebar({ collapsed, onToggleCollapse, currentUser }: DualSi
     return "main";
   };
 
-  const [activeCategory, setActiveCategory] = useState<"all" | "main" | "task" | "master" | "system">(() => getInitialCategory(pathname));
+  const [activeCategory, setActiveCategory] = useState<"all" | "main" | "task" | "master" | "system">(() =>
+    getInitialCategory(pathname)
+  );
 
   useEffect(() => {
     setActiveCategory(getInitialCategory(pathname));
@@ -166,6 +187,10 @@ export function DualSidebar({ collapsed, onToggleCollapse, currentUser }: DualSi
   const filteredMainViews = mainViews.filter((v) => !filterText || v.name.toLowerCase().includes(filterText));
   const filteredTaskViews = taskViews.filter((v) => !filterText || v.name.toLowerCase().includes(filterText));
   const filteredMasterViews = masterViews.filter((v) => !filterText || v.name.toLowerCase().includes(filterText));
+
+  const coreFinanceViews = filteredMainViews.filter((v) => CORE_FINANCE_IDS.has(v.id));
+  const operationsDocsViews = filteredMainViews.filter((v) => OPERATIONS_DOCS_IDS.has(v.id));
+  const executiveReportsViews = filteredMainViews.filter((v) => EXECUTIVE_REPORTS_IDS.has(v.id));
 
   const isSettingsActive = pathname.startsWith("/settings");
   const isGeneralSettingsActive = pathname === "/settings/general";
@@ -183,32 +208,79 @@ export function DualSidebar({ collapsed, onToggleCollapse, currentUser }: DualSi
 
   const currentTab = filterText ? "all" : activeCategory;
 
+  const isMainRailActive =
+    currentTab === "main" || (currentTab === "all" && !isSettingsActive && !pathname.startsWith("/views/"));
+  const isTaskRailActive = currentTab === "task" || (currentTab === "all" && isTaskPath);
+  const isMasterRailActive = currentTab === "master" || (currentTab === "all" && isMasterPath);
+  const isSystemRailActive = isSettingsActive || currentTab === "system";
+
+  const renderEnterpriseNavItem = (view: { id: string; name: string }) => {
+    const href = hrefFor(view.id);
+    const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
+    const Icon = ICONS[view.id] || Gauge;
+
+    return (
+      <Link
+        key={view.id}
+        href={href}
+        className={`group relative flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs transition-all duration-150 ${
+          active
+            ? "bg-[#16564f] text-white font-semibold border border-[#2c7d73] shadow-[0_2px_8px_rgba(0,0,0,0.25)]"
+            : "text-[#cde5e0] hover:text-white hover:bg-[#11403b] font-medium border border-transparent"
+        }`}
+      >
+        {active && (
+          <span className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-r-full bg-[#d4f54e]" />
+        )}
+        <span
+          className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 transition-colors ${
+            active
+              ? "bg-[#d4f54e] text-[#052320] shadow-2xs"
+              : "bg-[#0d3632] text-[#89c9be] border border-[#19524b] group-hover:border-[#287067] group-hover:text-white"
+          }`}
+        >
+          <Icon size={14} strokeWidth={active ? 2.3 : 1.9} />
+        </span>
+        <span className="truncate">{view.name}</span>
+      </Link>
+    );
+  };
+
   return (
-    <aside className={`hidden md:flex fixed top-0 bottom-0 left-0 h-screen select-none bg-[#0b3531] text-slate-100 border-r border-[#062e2b] z-30 font-sans font-normal transition-all duration-300 ${collapsed ? "w-[60px]" : "w-[300px]"}`}>
-      {/* 1. LEFT SLIM RAIL (60px) */}
-      <div className="w-[60px] flex-shrink-0 h-full border-r border-[#0d3f3a] flex flex-col items-center justify-between py-3.5 bg-[#062e2b]">
-        {/* Top Brand Logo Box */}
-        <div className="flex flex-col items-center gap-3.5">
+    <aside
+      className={`dual-sidebar-nav hidden md:flex fixed top-0 bottom-0 left-0 h-screen select-none z-30 font-sans transition-all duration-300 border-r border-[#041a17] shadow-[4px_0_16px_rgba(5,25,23,0.18)] ${
+        collapsed ? "w-[60px]" : "w-[300px]"
+      }`}
+    >
+      {/* =====================================================================
+          1. LEFT PRIMARY RAIL (60px) — Deep Obsidian Teal (#041a17)
+             Stepped darker layer to separate primary modules from sub-menus
+         ===================================================================== */}
+      <div className="w-[60px] flex-shrink-0 h-full bg-[#041a17] border-r border-[#164a43] shadow-[3px_0_10px_rgba(0,0,0,0.28)] flex flex-col items-center justify-between py-3.5 z-20">
+        <div className="flex flex-col items-center gap-3.5 w-full">
+          {/* Brand Logo */}
           <Link
             href="/"
             onClick={() => {
               if (collapsed) onToggleCollapse();
             }}
-            className="w-9 h-9 flex items-center justify-center hover:opacity-85 transition shrink-0"
-            title={companySettings.companyName || "CostLab Application"}
+            className="w-9 h-9 flex items-center justify-center hover:opacity-90 transition shrink-0"
+            title={companySettings.companyName || "CostLab Executive"}
           >
             {companySettings.logoUrl ? (
               <img src={companySettings.logoUrl} alt="Logo" className="w-full h-full object-contain" />
             ) : (
-              <div className="w-9 h-9 rounded-md bg-[#072825] border border-[#144d47] flex items-center justify-center text-[#d4f54e] shadow-2xs hover:border-[#d4f54e]/50 transition">
-                <Building2 size={20} />
+              <div className="w-9 h-9 rounded-lg bg-[#0b3531] border border-[#22665d] flex items-center justify-center text-[#d4f54e] shadow-sm">
+                <Building2 size={19} />
               </div>
             )}
           </Link>
 
-          {/* Rail Mode Switchers */}
-          <nav className="flex flex-col items-center gap-2 mt-1">
-            {/* Mode 1: Main Menus */}
+          <div className="w-6 h-px bg-[#164a43]" />
+
+          {/* Module Switchers */}
+          <nav className="flex flex-col items-center gap-2 w-full px-2">
+            {/* Module 1: Workplace */}
             <button
               type="button"
               onClick={() => {
@@ -216,17 +288,20 @@ export function DualSidebar({ collapsed, onToggleCollapse, currentUser }: DualSi
                 setFilterSearch("");
                 if (collapsed) onToggleCollapse();
               }}
-              className={`w-9 h-9 rounded-md flex items-center justify-center transition-all cursor-pointer ${
-                currentTab === "main" || (currentTab === "all" && !isSettingsActive && !pathname.startsWith("/views/"))
-                  ? "bg-[#d4f54e] text-[#0b3531] font-bold shadow-xs"
-                  : "text-[#a5dad0] hover:text-white hover:bg-white/10"
+              className={`relative w-10 h-10 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
+                isMainRailActive
+                  ? "bg-[#124943] text-[#d4f54e] ring-1 ring-[#2c7d73] shadow-sm"
+                  : "text-[#7fb5ac] hover:text-white hover:bg-[#0b3531]"
               }`}
-              title="เมนูหลัก (WORKPLACE)"
+              title="ระบบงานหลัก (Workplace)"
             >
-              <LayoutGrid size={17} />
+              {isMainRailActive && (
+                <span className="absolute -left-2 top-2 bottom-2 w-[3px] rounded-r-full bg-[#d4f54e]" />
+              )}
+              <LayoutGrid size={18} strokeWidth={isMainRailActive ? 2.2 : 1.8} />
             </button>
 
-            {/* Mode 2: Tasks & PW Group */}
+            {/* Module 2: Tasks & PW */}
             <button
               type="button"
               onClick={() => {
@@ -234,17 +309,20 @@ export function DualSidebar({ collapsed, onToggleCollapse, currentUser }: DualSi
                 setFilterSearch("");
                 if (collapsed) onToggleCollapse();
               }}
-              className={`w-9 h-9 rounded-md flex items-center justify-center transition-all cursor-pointer ${
-                currentTab === "task" || (currentTab === "all" && isTaskPath)
-                  ? "bg-[#d4f54e] text-[#0b3531] font-bold shadow-xs"
-                  : "text-[#a5dad0] hover:text-white hover:bg-white/10"
+              className={`relative w-10 h-10 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
+                isTaskRailActive
+                  ? "bg-[#124943] text-[#d4f54e] ring-1 ring-[#2c7d73] shadow-sm"
+                  : "text-[#7fb5ac] hover:text-white hover:bg-[#0b3531]"
               }`}
-              title="จัดการงาน & PW (TASKS & PW)"
+              title="บริหารงาน & PW (Tasks & Operations)"
             >
-              <CheckSquare size={17} />
+              {isTaskRailActive && (
+                <span className="absolute -left-2 top-2 bottom-2 w-[3px] rounded-r-full bg-[#d4f54e]" />
+              )}
+              <CheckSquare size={18} strokeWidth={isTaskRailActive ? 2.2 : 1.8} />
             </button>
 
-            {/* Mode 3: Master Submenus */}
+            {/* Module 3: Master Data */}
             <button
               type="button"
               onClick={() => {
@@ -252,19 +330,22 @@ export function DualSidebar({ collapsed, onToggleCollapse, currentUser }: DualSi
                 setFilterSearch("");
                 if (collapsed) onToggleCollapse();
               }}
-              className={`w-9 h-9 rounded-md flex items-center justify-center transition-all cursor-pointer ${
-                currentTab === "master" || (currentTab === "all" && isMasterPath)
-                  ? "bg-[#d4f54e] text-[#0b3531] font-bold shadow-xs"
-                  : "text-[#a5dad0] hover:text-white hover:bg-white/10"
+              className={`relative w-10 h-10 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
+                isMasterRailActive
+                  ? "bg-[#124943] text-[#d4f54e] ring-1 ring-[#2c7d73] shadow-sm"
+                  : "text-[#7fb5ac] hover:text-white hover:bg-[#0b3531]"
               }`}
-              title="ข้อมูลมาสเตอร์ (MASTER DATA)"
+              title="ทะเบียนข้อมูลหลัก (Master Data)"
             >
-              <Layers size={17} />
+              {isMasterRailActive && (
+                <span className="absolute -left-2 top-2 bottom-2 w-[3px] rounded-r-full bg-[#d4f54e]" />
+              )}
+              <Layers size={18} strokeWidth={isMasterRailActive ? 2.2 : 1.8} />
             </button>
 
-            <div className="w-5 h-px bg-[#13443e] my-0.5" />
+            <div className="w-6 h-px bg-[#164a43] my-0.5" />
 
-            {/* Mode 4: System & Settings */}
+            {/* Module 4: System Settings */}
             <button
               type="button"
               onClick={() => {
@@ -272,313 +353,252 @@ export function DualSidebar({ collapsed, onToggleCollapse, currentUser }: DualSi
                 setFilterSearch("");
                 if (collapsed) onToggleCollapse();
               }}
-              className={`w-9 h-9 rounded-md flex items-center justify-center transition-all cursor-pointer ${
-                isSettingsActive || currentTab === "system"
-                  ? "bg-[#d4f54e] text-[#0b3531] font-bold shadow-xs"
-                  : "text-[#a5dad0] hover:text-white hover:bg-white/10"
+              className={`relative w-10 h-10 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
+                isSystemRailActive
+                  ? "bg-[#124943] text-[#d4f54e] ring-1 ring-[#2c7d73] shadow-sm"
+                  : "text-[#7fb5ac] hover:text-white hover:bg-[#0b3531]"
               }`}
-              title="ตั้งค่าระบบ (SYSTEM)"
+              title="ตั้งค่าระบบ (System Configuration)"
             >
-              <Database size={17} />
+              {isSystemRailActive && (
+                <span className="absolute -left-2 top-2 bottom-2 w-[3px] rounded-r-full bg-[#d4f54e]" />
+              )}
+              <Database size={18} strokeWidth={isSystemRailActive ? 2.2 : 1.8} />
             </button>
           </nav>
         </div>
 
-        {/* Bottom Rail Dock Tools */}
+        {/* Bottom Dock */}
         <div className="flex flex-col items-center gap-2">
-          {/* User Profile Avatar */}
           {collapsed && (
             <UserSwitcher currentUser={currentUser} compact isCollapsed theme="dark" />
           )}
 
-          {/* Toggle Expand/Collapse */}
           <button
             type="button"
             onClick={onToggleCollapse}
-            className="w-8 h-8 rounded-md border border-[#144d47] bg-[#0b3531] text-[#b4e3dc] hover:text-white hover:bg-[#13443e] flex items-center justify-center transition cursor-pointer"
-            title={collapsed ? "ขยายแถบข้าง" : "ย่อแถบข้าง"}
+            className="w-8 h-8 rounded-lg border border-[#19524b] bg-[#0b3531] text-[#9ad4ca] hover:text-white hover:bg-[#144d47] flex items-center justify-center transition cursor-pointer"
+            title={collapsed ? "ขยายแถบเมนู" : "ย่อแถบเมนู"}
           >
             {collapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
           </button>
         </div>
       </div>
 
-      {/* 2. RIGHT SECONDARY DRAWER PANEL (240px) */}
+      {/* =====================================================================
+          2. RIGHT SECONDARY PANEL (240px) — Executive Forest Teal (#0b3531)
+             Layered with Darker Control Decks (#072421) & Recessed Group Cards
+         ===================================================================== */}
       {!collapsed && (
-        <div className="w-[240px] flex-shrink-0 flex flex-col h-full bg-[#0b3531] text-slate-100 overflow-hidden border-r border-[#062e2b] font-sans font-normal">
-          {/* Top Brand & Search Overlay Panel */}
-          <div className="p-3 border-b border-[#12443e] bg-[#0b3531] sticky top-0 z-10 space-y-2">
-            {/* Expanded Company Brand Header */}
-            <div className="px-0.5 py-0.5">
-              <div className="text-xs text-white leading-snug break-words font-sans font-semibold">
+        <div className="w-[240px] flex-shrink-0 flex flex-col h-full bg-[#0b3531] text-white overflow-hidden">
+          {/* Layer A: Recessed Top Control Deck (#072421) */}
+          <div className="p-3 bg-[#072421] border-b border-[#164a43] sticky top-0 z-10 space-y-2.5 shadow-xs">
+            <div className="px-0.5">
+              <div className="text-xs font-bold text-white leading-snug tracking-wide truncate">
                 {companySettings.companyName || "CostLab Executive"}
               </div>
               {companySettings.companySubTitle && (
-                <div className="text-xs text-[#a2ccc3] font-medium leading-tight mt-0.5 truncate font-sans">
+                <div className="text-[11px] text-[#84bfb4] font-medium leading-tight mt-0.5 truncate">
                   {companySettings.companySubTitle}
                 </div>
               )}
             </div>
 
-            {/* Search Input Bar */}
+            {/* Recessed Search Input */}
             <div className="relative flex items-center">
-              <Search size={14} className="absolute left-2.5 text-[#9ac5be] pointer-events-none" />
+              <Search size={13} className="absolute left-2.5 text-[#6daaa0] pointer-events-none" />
               <input
                 type="text"
                 placeholder="ค้นหาเมนู..."
                 value={filterSearch}
                 onChange={(e) => setFilterSearch(e.target.value)}
                 autoComplete="off"
-                className="w-full bg-[#062e2b] text-white text-xs pl-8 pr-2.5 py-1.5 rounded-md border border-[#164e48] focus:border-[#d4f54e] focus:outline-none placeholder:text-[#8cb8b0] font-sans font-medium transition"
+                className="w-full bg-[#041816] text-white text-xs pl-8 pr-7 py-1.5 rounded-lg border border-[#174d46] focus:border-[#d4f54e]/70 focus:outline-none placeholder:text-[#639c93] font-medium transition shadow-inner"
               />
+              {filterSearch && (
+                <button
+                  type="button"
+                  onClick={() => setFilterSearch("")}
+                  className="absolute right-2 text-[#7fb5ac] hover:text-white cursor-pointer"
+                >
+                  <X size={13} />
+                </button>
+              )}
             </div>
 
-            {/* Year Filter Selector */}
-            <div className="pt-0.5">
+            {/* Year Filter */}
+            <div>
               <YearSelector theme="dark" className="w-full" />
             </div>
           </div>
 
-          {/* Menu Items Container */}
-          <div className="flex-1 overflow-y-auto p-2.5 space-y-4 text-xs font-sans font-normal">
-            {/* SECTION 1: เมนูหลัก (WORKPLACE) */}
+          {/* Layer B: Segmented Navigation Body */}
+          <div className="flex-1 overflow-y-auto p-2.5 space-y-3 text-xs">
+            {/* SECTION 1: WORKPLACE */}
             {(currentTab === "all" || currentTab === "main") && (
-              <div className="space-y-1.5">
-                <div className="px-1.5 pb-1 flex items-center justify-between text-xs text-[#86cfc2] uppercase font-sans font-semibold tracking-wider">
-                  <span>เมนูหลัก (WORKPLACE)</span>
-                  <span className="text-xs bg-[#072825] text-[#d4f54e] px-2 py-0.5 rounded-full border border-[#144d47] font-normal">
-                    {filteredMainViews.length}
-                  </span>
-                </div>
-                <div className="space-y-1">
-                  {filteredMainViews.map((view) => {
-                    const href = hrefFor(view.id);
-                    const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
-                    const Icon = ICONS[view.id] || Gauge;
-                    return (
-                      <Link
-                        key={view.id}
-                        href={href}
-                        className={`group flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition-all duration-150 text-xs font-sans ${
-                          active
-                            ? "bg-[#d4f54e] text-[#0b3531] font-semibold shadow-xs"
-                            : "text-[#d6eee9] hover:text-white hover:bg-[#124d45] font-medium"
-                        }`}
-                      >
-                        <span
-                          className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 transition-colors ${
-                            active
-                              ? "bg-[#0b3531] text-[#d4f54e]"
-                              : "bg-[#083a34] text-[#a5dad0] border border-[#144d45] group-hover:bg-[#195a52] group-hover:text-white"
-                          }`}
-                        >
-                          <Icon size={14} />
-                        </span>
-                        <span className="truncate">{view.name}</span>
-                      </Link>
-                    );
-                  })}
-                </div>
+              <div className="space-y-3">
+                {coreFinanceViews.length > 0 && (
+                  <div className="rounded-xl bg-[#072623]/90 border border-[#154842] p-1.5 space-y-1 shadow-inner">
+                    <div className="px-2 py-1 flex items-center justify-between border-b border-[#123f3a] mb-1">
+                      <span className="text-[10px] font-bold text-[#8fd1c6] uppercase tracking-wider">
+                        การเงินและเบิกจ่าย
+                      </span>
+                      <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-[#0f3b36] text-[#9ad4ca] border border-[#1b564f]">
+                        {coreFinanceViews.length}
+                      </span>
+                    </div>
+                    <div className="space-y-0.5">
+                      {coreFinanceViews.map((view) => renderEnterpriseNavItem(view))}
+                    </div>
+                  </div>
+                )}
+
+                {operationsDocsViews.length > 0 && (
+                  <div className="rounded-xl bg-[#072623]/90 border border-[#154842] p-1.5 space-y-1 shadow-inner">
+                    <div className="px-2 py-1 flex items-center justify-between border-b border-[#123f3a] mb-1">
+                      <span className="text-[10px] font-bold text-[#8fd1c6] uppercase tracking-wider">
+                        ติดตามโครงการและเอกสาร
+                      </span>
+                      <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-[#0f3b36] text-[#9ad4ca] border border-[#1b564f]">
+                        {operationsDocsViews.length}
+                      </span>
+                    </div>
+                    <div className="space-y-0.5">
+                      {operationsDocsViews.map((view) => renderEnterpriseNavItem(view))}
+                    </div>
+                  </div>
+                )}
+
+                {executiveReportsViews.length > 0 && (
+                  <div className="rounded-xl bg-[#072623]/90 border border-[#154842] p-1.5 space-y-1 shadow-inner">
+                    <div className="px-2 py-1 flex items-center justify-between border-b border-[#123f3a] mb-1">
+                      <span className="text-[10px] font-bold text-[#8fd1c6] uppercase tracking-wider">
+                        รายงานและวิเคราะห์งบ
+                      </span>
+                      <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-[#0f3b36] text-[#9ad4ca] border border-[#1b564f]">
+                        {executiveReportsViews.length}
+                      </span>
+                    </div>
+                    <div className="space-y-0.5">
+                      {executiveReportsViews.map((view) => renderEnterpriseNavItem(view))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
-            {/* SECTION 2: จัดการงาน & PW (TASKS & PW) */}
+            {/* SECTION 2: TASKS & PW */}
             {(currentTab === "all" || currentTab === "task") && (
-              <div className="space-y-1.5">
-                <div className="px-1.5 pb-1 flex items-center justify-between text-xs text-[#86cfc2] uppercase font-sans font-semibold tracking-wider">
-                  <span>จัดการงาน & PW (TASKS & PW)</span>
-                  <span className="text-xs bg-[#072825] text-[#d4f54e] px-2 py-0.5 rounded-full border border-[#144d47] font-normal">
+              <div className="rounded-xl bg-[#072623]/90 border border-[#154842] p-1.5 space-y-1 shadow-inner">
+                <div className="px-2 py-1 flex items-center justify-between border-b border-[#123f3a] mb-1">
+                  <span className="text-[10px] font-bold text-[#8fd1c6] uppercase tracking-wider">
+                    บริหารงาน & ทีม PW
+                  </span>
+                  <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-[#0f3b36] text-[#9ad4ca] border border-[#1b564f]">
                     {filteredTaskViews.length}
                   </span>
                 </div>
-                <div className="space-y-1">
-                  {filteredTaskViews.map((view) => {
-                    const href = hrefFor(view.id);
-                    const active = pathname.startsWith(href);
-                    const Icon = ICONS[view.id] || ClipboardList;
-                    return (
-                      <Link
-                        key={view.id}
-                        href={href}
-                        className={`group flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition-all duration-150 text-xs font-sans ${
-                          active
-                            ? "bg-[#d4f54e] text-[#0b3531] font-semibold shadow-xs"
-                            : "text-[#d6eee9] hover:text-white hover:bg-[#124d45] font-medium"
-                        }`}
-                      >
-                        <span
-                          className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 transition-colors ${
-                            active
-                              ? "bg-[#0b3531] text-[#d4f54e]"
-                              : "bg-[#083a34] text-[#a5dad0] border border-[#144d45] group-hover:bg-[#195a52] group-hover:text-white"
-                          }`}
-                        >
-                          <Icon size={14} />
-                        </span>
-                        <span className="truncate">{view.name}</span>
-                      </Link>
-                    );
-                  })}
+                <div className="space-y-0.5">
+                  {filteredTaskViews.map((view) => renderEnterpriseNavItem(view))}
                 </div>
               </div>
             )}
 
-            {/* SECTION 3: ข้อมูลมาสเตอร์ (MASTER DATA) */}
+            {/* SECTION 3: MASTER DATA */}
             {(currentTab === "all" || currentTab === "master") && (
-              <div className="space-y-1.5">
-                <div className="px-1.5 pb-1 flex items-center justify-between text-xs text-[#86cfc2] uppercase font-sans font-semibold tracking-wider">
-                  <span>ข้อมูลมาสเตอร์ (MASTER DATA)</span>
-                  <span className="text-xs bg-[#072825] text-[#d4f54e] px-2 py-0.5 rounded-full border border-[#144d47] font-normal">
+              <div className="rounded-xl bg-[#072623]/90 border border-[#154842] p-1.5 space-y-1 shadow-inner">
+                <div className="px-2 py-1 flex items-center justify-between border-b border-[#123f3a] mb-1">
+                  <span className="text-[10px] font-bold text-[#8fd1c6] uppercase tracking-wider">
+                    ทะเบียนข้อมูลมาสเตอร์
+                  </span>
+                  <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-[#0f3b36] text-[#9ad4ca] border border-[#1b564f]">
                     {filteredMasterViews.length}
                   </span>
                 </div>
-                <div className="space-y-1">
-                  {filteredMasterViews.map((view) => {
-                    const href = hrefFor(view.id);
-                    const active = pathname.startsWith(href);
-                    const Icon = ICONS[view.id] || Layers;
-                    return (
-                      <Link
-                        key={view.id}
-                        href={href}
-                        className={`group flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition-all duration-150 text-xs font-sans ${
-                          active
-                            ? "bg-[#d4f54e] text-[#0b3531] font-semibold shadow-xs"
-                            : "text-[#d6eee9] hover:text-white hover:bg-[#124d45] font-medium"
-                        }`}
-                      >
-                        <span
-                          className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 transition-colors ${
-                            active
-                              ? "bg-[#0b3531] text-[#d4f54e]"
-                              : "bg-[#083a34] text-[#a5dad0] border border-[#144d45] group-hover:bg-[#195a52] group-hover:text-white"
-                          }`}
-                        >
-                          <Icon size={14} />
-                        </span>
-                        <span className="truncate">{view.name}</span>
-                      </Link>
-                    );
-                  })}
+                <div className="space-y-0.5">
+                  {filteredMasterViews.map((view) => renderEnterpriseNavItem(view))}
                 </div>
               </div>
             )}
 
-            {/* SECTION 3: ตั้งค่าระบบ (SYSTEM & ACCOUNT) */}
+            {/* SECTION 4: SYSTEM & ACCOUNT */}
             {(currentTab === "all" || currentTab === "system") && (
-              <div className="space-y-1.5">
-                <div className="px-1.5 pb-1 text-xs text-[#86cfc2] uppercase font-sans font-semibold tracking-wider">
-                  ตั้งค่าระบบ (SYSTEM & ACCOUNT)
+              <div className="rounded-xl bg-[#072623]/90 border border-[#154842] p-1.5 space-y-1 shadow-inner">
+                <div className="px-2 py-1 flex items-center justify-between border-b border-[#123f3a] mb-1">
+                  <span className="text-[10px] font-bold text-[#8fd1c6] uppercase tracking-wider">
+                    ตั้งค่าระบบ (System)
+                  </span>
                 </div>
-                <div className="space-y-1">
-                  <Link
-                    href="/settings/general"
-                    prefetch={false}
-                    className={`group flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition-all duration-150 text-xs font-sans ${
-                      isGeneralSettingsActive
-                        ? "bg-[#d4f54e] text-[#0b3531] font-semibold shadow-xs"
-                        : "text-[#d6eee9] hover:text-white hover:bg-[#124d45] font-medium"
-                    }`}
-                  >
-                    <span
-                      className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 transition-colors ${
-                        isGeneralSettingsActive
-                          ? "bg-[#0b3531] text-[#d4f54e]"
-                          : "bg-[#083a34] text-[#a5dad0] border border-[#144d45] group-hover:bg-[#195a52] group-hover:text-white"
-                      }`}
-                    >
-                      <Building2 size={14} />
-                    </span>
-                    <span className="truncate">ตั้งค่าทั่วไป & โลโก้</span>
-                  </Link>
-
-                  <Link
-                    href="/settings"
-                    className={`group flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition-all duration-150 text-xs font-sans ${
-                      pathname === "/settings"
-                        ? "bg-[#d4f54e] text-[#0b3531] font-semibold shadow-xs"
-                        : "text-[#d6eee9] hover:text-white hover:bg-[#124d45] font-medium"
-                    }`}
-                  >
-                    <span
-                      className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 transition-colors ${
-                        pathname === "/settings"
-                          ? "bg-[#0b3531] text-[#d4f54e]"
-                          : "bg-[#083a34] text-[#a5dad0] border border-[#144d45] group-hover:bg-[#195a52] group-hover:text-white"
-                      }`}
-                    >
-                      <Database size={14} />
-                    </span>
-                    <span className="truncate">สถานะ Supabase</span>
-                  </Link>
-
-
-                  <Link
-                    href="/settings/options"
-                    className={`group flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition-all duration-150 text-xs font-sans ${
-                      pathname.startsWith("/settings/options")
-                        ? "bg-[#d4f54e] text-[#0b3531] font-semibold shadow-xs"
-                        : "text-[#d6eee9] hover:text-white hover:bg-[#124d45] font-medium"
-                    }`}
-                  >
-                    <span
-                      className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 transition-colors ${
-                        pathname.startsWith("/settings/options")
-                          ? "bg-[#0b3531] text-[#d4f54e]"
-                          : "bg-[#083a34] text-[#a5dad0] border border-[#144d45] group-hover:bg-[#195a52] group-hover:text-white"
-                      }`}
-                    >
-                      <Sliders size={14} />
-                    </span>
-                    <span className="truncate">ตั้งค่าตัวเลือกระบบ</span>
-                  </Link>
-
-                  <Link
-                    href="/settings/line-system"
-                    className={`group flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition-all duration-150 text-xs font-sans ${
-                      pathname.startsWith("/settings/line-system") || pathname.startsWith("/line-system")
-                        ? "bg-[#d4f54e] text-[#0b3531] font-semibold shadow-xs"
-                        : "text-[#d6eee9] hover:text-white hover:bg-[#124d45] font-medium"
-                    }`}
-                  >
-                    <span
-                      className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 transition-colors ${
-                        pathname.startsWith("/settings/line-system") || pathname.startsWith("/line-system")
-                          ? "bg-[#0b3531] text-[#d4f54e]"
-                          : "bg-[#083a34] text-[#a5dad0] border border-[#144d45] group-hover:bg-[#195a52] group-hover:text-white"
-                      }`}
-                    >
-                      <MessageSquare size={14} />
-                    </span>
-                    <span className="truncate">ระบบ LINE Bot</span>
-                  </Link>
-
-                  <Link
-                    href="/settings/import-export"
-                    className={`group flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition-all duration-150 text-xs font-sans ${
-                      pathname.startsWith("/settings/import-export")
-                        ? "bg-[#d4f54e] text-[#0b3531] font-semibold shadow-xs"
-                        : "text-[#d6eee9] hover:text-white hover:bg-[#124d45] font-medium"
-                    }`}
-                  >
-                    <span
-                      className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 transition-colors ${
-                        pathname.startsWith("/settings/import-export")
-                          ? "bg-[#0b3531] text-[#d4f54e]"
-                          : "bg-[#083a34] text-[#a5dad0] border border-[#144d45] group-hover:bg-[#195a52] group-hover:text-white"
-                      }`}
-                    >
-                      <ArrowDownUp size={14} />
-                    </span>
-                    <span className="truncate">นำเข้า / ส่งออกข้อมูล</span>
-                  </Link>
+                <div className="space-y-0.5">
+                  {[
+                    {
+                      href: "/settings/general",
+                      label: "ตั้งค่าทั่วไป & โลโก้",
+                      icon: Building2,
+                      active: isGeneralSettingsActive,
+                    },
+                    {
+                      href: "/settings",
+                      label: "สถานะฐานข้อมูล Supabase",
+                      icon: Database,
+                      active: pathname === "/settings",
+                    },
+                    {
+                      href: "/settings/options",
+                      label: "ตั้งค่าตัวเลือกระบบ",
+                      icon: Sliders,
+                      active: pathname.startsWith("/settings/options"),
+                    },
+                    {
+                      href: "/settings/line-system",
+                      label: "ระบบเชื่อมต่อ LINE Bot",
+                      icon: MessageSquare,
+                      active:
+                        pathname.startsWith("/settings/line-system") ||
+                        pathname.startsWith("/line-system"),
+                    },
+                    {
+                      href: "/settings/import-export",
+                      label: "สำรอง / นำเข้า-ส่งออกข้อมูล",
+                      icon: ArrowDownUp,
+                      active: pathname.startsWith("/settings/import-export"),
+                    },
+                  ].map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        prefetch={false}
+                        className={`group relative flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs transition-all duration-150 ${
+                          item.active
+                            ? "bg-[#16564f] text-white font-semibold border border-[#2c7d73] shadow-[0_2px_8px_rgba(0,0,0,0.25)]"
+                            : "text-[#cde5e0] hover:text-white hover:bg-[#11403b] font-medium border border-transparent"
+                        }`}
+                      >
+                        {item.active && (
+                          <span className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-r-full bg-[#d4f54e]" />
+                        )}
+                        <span
+                          className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 transition-colors ${
+                            item.active
+                              ? "bg-[#d4f54e] text-[#052320] shadow-2xs"
+                              : "bg-[#0d3632] text-[#89c9be] border border-[#19524b] group-hover:border-[#287067] group-hover:text-white"
+                          }`}
+                        >
+                          <Icon size={14} strokeWidth={item.active ? 2.3 : 1.9} />
+                        </span>
+                        <span className="truncate">{item.label}</span>
+                      </Link>
+                    );
+                  })}
                 </div>
               </div>
             )}
           </div>
 
-          {/* Right Panel Footer (User Switcher) */}
-          <div className="p-2.5 border-t border-[#12443e] bg-[#062e2b]">
+          {/* Layer C: Recessed Bottom User Profile Bar (#072421) */}
+          <div className="p-2.5 border-t border-[#164a43] bg-[#072421]">
             <UserSwitcher currentUser={currentUser} compact theme="dark" />
           </div>
         </div>
