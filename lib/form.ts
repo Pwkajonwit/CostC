@@ -179,20 +179,6 @@ async function getFormSchemaWithSheetOptions(tableName: string): Promise<FieldSc
       }
     }
 
-    if (field.name === "สินค้า") {
-      const coreProducts = ["101 น้ำมัน", "102 ค่าขนส่ง", "103 เครื่องจักร", "104 ซ่อมรถ", "105 เครื่องมือ", "200 ดำเนินการ(อื่นๆ)"];
-      for (const cp of coreProducts) {
-        if (!fieldValues.some(v => v === cp || v.includes(cp.split(" ")[1]) || v.startsWith(cp.split(" ")[0]))) {
-          const nonIdx = fieldValues.indexOf("non");
-          if (nonIdx >= 0) {
-            fieldValues.splice(nonIdx, 0, cp);
-          } else {
-            fieldValues.push(cp);
-          }
-        }
-      }
-    }
-
     if (field.dynamicValues === "billTypeOptions") {
       const customOptions = systemOptions[field.name] || systemOptions["ประเภท"] || systemOptions["ประเภทค่าใช้จ่าย"];
       const baseValues = customOptions && customOptions.length > 0 ? customOptions : fieldValues;
