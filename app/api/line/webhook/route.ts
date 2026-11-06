@@ -97,22 +97,34 @@ export async function POST(req: NextRequest) {
           recordDiscoveredLineGroup(groupId).catch(() => undefined);
         }
 
-        // Handle Text Message Commands (ตอบกลับเฉพาะคำสั่งที่กำหนดไว้เท่านั้น หากไม่ใช่คำสั่งให้ข้ามไปเงียบๆ)
+        // Handle Text Message Commands
         if (event.type === "message" && event.message?.type === "text") {
           const text = String(event.message.text || "")
             .replace(/[\u200B-\u200D\uFEFF\u00A0\u200E\u200F]/g, "")
             .trim();
 
-          if (text) {
-            await handleLineCommand(text, replyToken, targetId, userId);
+          // Delegate to centralized line-commands processor
+          const handled = await handleLineCommand(text, replyToken, targetId, userId);
+
+          if (!handled && replyToken && !replyToken.startsWith("00000000")) {
+            // Default Auto Reply
+            await replyTextMessage(
+              replyToken,
+              `ได้รับคำสั่ง "${text}" เรียบร้อยแล้วครับ พิมพ์ "ช่วยเหลือ" หรือ "เมนู" เพื่อดูคำสั่งทั้งหมดที่สามารถใช้งานได้ครับ`
+            );
           }
         }
 
-        // Handle Postback Event Actions (from Flex Buttons - ตอบกลับเฉพาะคำสั่งที่กำหนดไว้เท่านั้น)
+        // Handle Postback Event Actions (from Flex Buttons)
         if (event.type === "postback" && event.postback?.data) {
           const text = String(event.postback.data || "").trim();
-          if (text) {
-            await handleLineCommand(text, replyToken, targetId, userId);
+          const handled = await handleLineCommand(text, replyToken, targetId, userId);
+
+          if (!handled && replyToken && !replyToken.startsWith("00000000")) {
+            await replyTextMessage(
+              replyToken,
+              `ดำเนินการตามคำสั่ง "${text}" เรียบร้อยแล้วครับ`
+            );
           }
         }
 
