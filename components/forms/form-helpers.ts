@@ -528,15 +528,9 @@ export function getRowStringValues(form: FormPayload, row: SheetRow): Record<str
       } else if (field.name === "statusค่าแรง") {
         rawVal = firstNonEmpty(row["statusค่าแรง"], row.labor_status);
       } else if (["ค่าของ", "ค่าแรง", "พนักงาน", "น้ำมัน", "ซ่อมรถ", "เครื่องจักร", "เครื่องมือ", "อื่นๆ"].includes(field.name)) {
-        const rowType = String(row["ประเภท"] || row.category || "").trim();
+        const rowType = String(row["ประเภท"] || row.category || "").toLowerCase();
         const rowAmount = firstNonEmpty(row[field.name], row["ยอดเงิน"], row.amount);
-        const expectedField =
-          vendorType === "ผู้รับเหมา"
-            ? "ค่าแรง"
-            : vendorType === "พนักงาน"
-            ? "พนักงาน"
-            : getExpenseFieldForCategory(rowType || String(row["สินค้า"] || row.product || ""));
-        if (!hasValue(rawVal) && hasValue(rowAmount) && (expectedField === field.name || rowType.toLowerCase().includes(field.name.toLowerCase()))) {
+        if (!hasValue(rawVal) && hasValue(rowAmount) && rowType.includes(field.name.toLowerCase())) {
           rawVal = String(rowAmount);
         }
       }
@@ -660,11 +654,7 @@ export function filterRefOptions(field: FieldSchema, options: RefOption[], value
 export const ALL_EXPENSE_FIELDS = ["ค่าของ", "ค่าแรง", "พนักงาน", "น้ำมัน", "ซ่อมรถ", "เครื่องจักร", "เครื่องมือ", "อื่นๆ"];
 
 export function transferAmountToCategory(values: Record<string, string>, targetCategory: string) {
-  const vType = values["ร้านค้า/ผู้รับเหมา"];
-  const effectiveCategory =
-    targetCategory ||
-    (vType === "ผู้รับเหมา" ? "201 เตรียมงาน" : vType === "พนักงาน" ? "301 พนักงาน" : "101 เตรียมงาน");
-  const targetField = getExpenseFieldForCategory(effectiveCategory);
+  const targetField = getExpenseFieldForCategory(targetCategory);
   if (!targetField) return;
 
   if (hasValue(values[targetField])) return;
@@ -673,8 +663,6 @@ export function transferAmountToCategory(values: Record<string, string>, targetC
   if (sourceField) {
     values[targetField] = values[sourceField];
     values[sourceField] = "";
-  } else if (values["_is_multi_item"] !== "true" && toNumber(values["ยอดเงิน"]) > 0) {
-    values[targetField] = String(toNumber(values["ยอดเงิน"]));
   }
 }
 
@@ -824,30 +812,11 @@ export function isVatActive(vatValue: unknown): boolean {
 
 export function applyBillDeductAmount(values: Record<string, string>) {
   const expenseFields = ["ค่าของ", "ค่าแรง", "พนักงาน", "น้ำมัน", "ซ่อมรถ", "เครื่องจักร", "เครื่องมือ", "อื่นๆ"];
-  let totalExpense = expenseFields.reduce((sum, field) => sum + toNumber(values[field]), 0);
-  if (totalExpense === 0 && values["_is_multi_item"] !== "true" && toNumber(values["ยอดเงิน"]) > 0) {
-    const vType = values["ร้านค้า/ผู้รับเหมา"];
-    const effectiveCat =
-      values["ประเภท"] ||
-      values["สินค้า"] ||
-      (vType === "ผู้รับเหมา" ? "201 เตรียมงาน" : vType === "พนักงาน" ? "301 พนักงาน" : "101 เตรียมงาน");
-    const targetField =
-      vType === "ผู้รับเหมา"
-        ? "ค่าแรง"
-        : vType === "พนักงาน"
-        ? "พนักงาน"
-        : getExpenseFieldForCategory(effectiveCat);
-    if (targetField) {
-      values[targetField] = String(toNumber(values["ยอดเงิน"]));
-      totalExpense = toNumber(values[targetField]);
-    }
-  }
+  const totalExpense = expenseFields.reduce((sum, field) => sum + toNumber(values[field]), 0);
   const baseAmount = totalExpense > 0 ? totalExpense : toNumber(values["ยอดเงิน"]);
 
   if (baseAmount > 0) {
     values["ยอดเงิน"] = String(baseAmount);
-  } else {
-    values["ยอดเงิน"] = "";
   }
 
   const deductValue = values["หัก"];
@@ -979,7 +948,7 @@ export function normalizeDependentValues(values: Record<string, string>, changed
         values["สินค้า"] = "";
       }
       values["ประเภท"] = values["สินค้า"] || "";
-      transferAmountToCategory(values, values["ประเภท"] || "201 เตรียมงาน");
+      transferAmountToCategory(values, values["ประเภท"]);
       values["วันจ่าย"] = "";
       values["เครดิต"] = "";
     }
@@ -1095,9 +1064,6 @@ export function normalizeDependentValues(values: Record<string, string>, changed
       values["vat"] = "";
       values["วันได้บิล"] = "";
     }
-    if (values["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา") {
-      transferAmountToCategory(values, values["ประเภท"] || "201 เตรียมงาน");
-    }
     applyBillDeductAmount(values);
   }
 
@@ -1107,10 +1073,6 @@ export function normalizeDependentValues(values: Record<string, string>, changed
     } else {
       values["วันได้บิล"] = "";
     }
-    if (values["ร้านค้า/ผู้รับเหมา"] === "ผู้รับเหมา") {
-      transferAmountToCategory(values, values["ประเภท"] || "201 เตรียมงาน");
-    }
-    applyBillDeductAmount(values);
   }
 
   if (changedField === "เครดิต") {

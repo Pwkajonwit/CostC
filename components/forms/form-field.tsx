@@ -608,7 +608,7 @@ function VendorExpenseSelector({
             <button
               type="button"
               disabled={readOnly}
-              onClick={() => { if (current !== "ร้านค้า") onChange("ร้านค้า"); }}
+              onClick={() => onChange("ร้านค้า")}
               className={`w-full h-9 sm:h-9.5 rounded-lg px-2 text-xs sm:text-sm font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5 select-none active:scale-[0.98] ${
                 current === "ร้านค้า"
                   ? "bg-white text-emerald-950 font-semibold shadow-2xs border border-emerald-600/30 ring-1 ring-emerald-600/20"
@@ -638,7 +638,7 @@ function VendorExpenseSelector({
             <button
               type="button"
               disabled={readOnly}
-              onClick={() => { if (current !== "ผู้รับเหมา") onChange("ผู้รับเหมา"); }}
+              onClick={() => onChange("ผู้รับเหมา")}
               className={`h-9 sm:h-9.5 rounded-lg px-2 text-xs sm:text-sm font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5 select-none active:scale-[0.98] ${
                 current === "ผู้รับเหมา"
                   ? "bg-white text-sky-950 font-semibold shadow-2xs border border-sky-600/30 ring-1 ring-sky-600/20"
@@ -652,7 +652,7 @@ function VendorExpenseSelector({
             <button
               type="button"
               disabled={readOnly}
-              onClick={() => { if (current !== "พนักงาน") onChange("พนักงาน"); }}
+              onClick={() => onChange("พนักงาน")}
               className={`h-9 sm:h-9.5 rounded-lg px-2 text-xs sm:text-sm font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5 select-none active:scale-[0.98] ${
                 current === "พนักงาน"
                   ? "bg-white text-sky-950 font-semibold shadow-2xs border border-sky-600/30 ring-1 ring-sky-600/20"
@@ -1650,7 +1650,6 @@ const MemoizedFormField = memo(function MemoizedFormField({
 }, (prev, next) => {
   return (
     prev.field === next.field &&
-    prev.activeForm === next.activeForm &&
     prev.value === next.value &&
     prev.isEditing === next.isEditing &&
     prev.className === next.className &&
@@ -1664,7 +1663,6 @@ const MemoizedFormField = memo(function MemoizedFormField({
       isFieldRequired(next.field, next.currentValues, next.activeForm?.tableName) &&
     prev.currentValues["ร้านค้า/ผู้รับเหมา"] === next.currentValues["ร้านค้า/ผู้รับเหมา"] &&
     prev.currentValues["statusค่าแรง"] === next.currentValues["statusค่าแรง"] &&
-    prev.currentValues["vat"] === next.currentValues["vat"] &&
     prev.currentValues[prev.field.showIf?.column || ""] === next.currentValues[next.field.showIf?.column || ""] &&
     prev.currentValues[prev.field.filterBy?.column || ""] === next.currentValues[next.field.filterBy?.column || ""]
   );

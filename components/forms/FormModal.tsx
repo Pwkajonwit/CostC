@@ -1688,13 +1688,6 @@ export function FormModal({
     }
     setValues(current => {
       const next = { ...current, [field.name]: value };
-      if (ALL_EXPENSE_FIELDS.includes(field.name)) {
-        const remainingExpense = ALL_EXPENSE_FIELDS.reduce((sum, f) => sum + toNumber(next[f]), 0);
-        if (remainingExpense === 0) {
-          next["ยอดเงิน"] = "";
-          next["ยอดโอน"] = "";
-        }
-      }
       applyRefFill(next, field, activeForm, value);
       normalizeDependentValues(next, field.name, activeForm);
       if (activeForm.tableName === TABLES.DATA && field.name === "จำนวนหัก") return next;
