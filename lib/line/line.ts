@@ -5242,14 +5242,14 @@ export function createMultiBillFlex(
                     size: "xxs",
                     color: "#1E293B",
                     weight: "bold",
-                    wrap: false,
-                    maxLines: 1
+                    wrap: true
                   }
                 ] : []),
                 {
                   type: "box",
                   layout: "horizontal",
                   alignItems: "center",
+                  spacing: "xs",
                   contents: [
                     {
                       type: "text",
@@ -5257,7 +5257,8 @@ export function createMultiBillFlex(
                       size: "xs",
                       color: "#059669",
                       weight: "bold",
-                      flex: 7
+                      flex: 1,
+                      wrap: true
                     },
                     {
                       type: "text",
@@ -5265,9 +5266,7 @@ export function createMultiBillFlex(
                       size: "xxs",
                       color: "#475569",
                       align: "end",
-                      flex: 5,
-                      wrap: false,
-                      maxLines: 1
+                      flex: 0
                     }
                   ]
                 }
@@ -5606,6 +5605,7 @@ export function createMultiBillFlex(
                 layout: "horizontal",
                 margin: "xs",
                 alignItems: "center",
+                spacing: "xs",
                 contents: [
                   {
                     type: "text",
@@ -5613,7 +5613,8 @@ export function createMultiBillFlex(
                     size: "xs",
                     color: reqBank.accountNo ? "#047857" : "#DC2626",
                     weight: "bold",
-                    flex: 7
+                    flex: 1,
+                    wrap: true
                   },
                   {
                     type: "text",
@@ -5621,9 +5622,7 @@ export function createMultiBillFlex(
                     size: "xxs",
                     color: "#78350F",
                     align: "end",
-                    flex: 5,
-                    wrap: false,
-                    maxLines: 1
+                    flex: 0
                   }
                 ]
               },
@@ -6382,6 +6381,7 @@ export function createDailyTransferSummaryFlex(
                 layout: "horizontal",
                 margin: "xs",
                 alignItems: "center",
+                spacing: "xs",
                 contents: [
                   {
                     type: "text",
@@ -6389,7 +6389,8 @@ export function createDailyTransferSummaryFlex(
                     color: g.accountNo ? (isSub ? "#047857" : "#0284C7") : "#DC2626",
                     size: "xs",
                     weight: "bold",
-                    flex: 7
+                    flex: 1,
+                    wrap: true
                   },
                   {
                     type: "text",
@@ -6397,7 +6398,7 @@ export function createDailyTransferSummaryFlex(
                     color: isSub ? "#78350F" : "#475569",
                     size: "xxs",
                     align: "end",
-                    flex: 5
+                    flex: 0
                   }
                 ]
               },
@@ -6683,6 +6684,7 @@ export function createDailyApprovalSummaryFlex(
             layout: "horizontal",
             margin: "xs",
             alignItems: "center",
+            spacing: "xs",
             contents: [
               {
                 type: "text",
@@ -6690,7 +6692,8 @@ export function createDailyApprovalSummaryFlex(
                 color: g.accountNo ? (isSub ? "#047857" : "#0284C7") : "#DC2626",
                 size: "xs",
                 weight: "bold",
-                flex: 7
+                flex: 1,
+                wrap: true
               },
               {
                 type: "text",
@@ -6698,7 +6701,7 @@ export function createDailyApprovalSummaryFlex(
                 color: isSub ? "#78350F" : "#475569",
                 size: "xxs",
                 align: "end",
-                flex: 5
+                flex: 0
               }
             ]
           },
