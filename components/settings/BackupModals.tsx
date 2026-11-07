@@ -339,7 +339,7 @@ export function BackupScheduleModal({ isOpen, onClose, config, onSave }: BackupS
             </div>
             <div>
               <h2 className="text-base font-semibold text-slate-900">ตั้งเวลาสำรองข้อมูลอัตโนมัติ</h2>
-              <p className="text-xs text-slate-500">กำหนดรอบเวลาสำรองข้อมูลทั้ง 12 ตารางลงระบบ</p>
+              <p className="text-xs text-slate-500">กำหนดรอบเวลาสำรองข้อมูลทั้ง 14 ตารางลงระบบ</p>
             </div>
           </div>
           <button

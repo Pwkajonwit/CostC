@@ -344,6 +344,88 @@ const TABLES_REGISTRY: TableConfig[] = [
       จำนวนเงิน: "5000",
       วันที่: "2026-08-22"
     }
+  },
+  {
+    id: "tasks",
+    name: "จัดการงาน (Tasks)",
+    tableName: "Tasks",
+    viewName: "11. จัดการงาน (Tasks)",
+    category: "transaction",
+    description: "รายการมอบหมายงาน ติดตามสถานะงาน กำหนดส่ง และรูปภาพ/ไฟล์แนบส่งงาน",
+    iconName: "CheckCircle2",
+    color: "from-sky-600 to-indigo-700",
+    columns: [
+      "ลำดับ",
+      "รายการ",
+      "ดู/ทำ",
+      "ส่งงาน",
+      "รหัสพนักงาน",
+      "ผู้รับมอบหมาย",
+      "ประเภท",
+      "สถานะ",
+      "โครงการ",
+      "หมายเหตุ",
+      "เอกสาร"
+    ],
+    sampleRow: {
+      ลำดับ: "1",
+      รายการ: "เตรียมเอกสารเบิกงวด",
+      "ดู/ทำ": "22/08/2026",
+      ส่งงาน: "23/08/2026",
+      รหัสพนักงาน: "U101",
+      ผู้รับมอบหมาย: "แอดมิน",
+      ประเภท: "1. เอกสาร",
+      สถานะ: "ดำเนินการ",
+      โครงการ: "#529 Renovation EVE",
+      หมายเหตุ: "",
+      เอกสาร: ""
+    }
+  },
+  {
+    id: "works",
+    name: "งานรับเหมา & PW (Works)",
+    tableName: "Works",
+    viewName: "12. งานรับเหมา & PW",
+    category: "transaction",
+    description: "รายการงานดูหน้างาน นัดเสนอราคา ใบขอซื้อ (PR) และเอกสารแนบงาน PW",
+    iconName: "Briefcase",
+    color: "from-teal-600 to-cyan-800",
+    columns: [
+      "ลำดับ",
+      "ทีม",
+      "กิจกรรม",
+      "เรื่อง",
+      "PR",
+      "สถานที่",
+      "นัดดู",
+      "นัดเสนอ",
+      "ติดต่อ1",
+      "เบอร์1",
+      "ติดต่อ2",
+      "เบอร์2",
+      "บริษัท",
+      "สถานะ",
+      "หมายเหตุ",
+      "เอกสาร"
+    ],
+    sampleRow: {
+      ลำดับ: "1",
+      ทีม: "PW",
+      กิจกรรม: "เสนอราคา",
+      เรื่อง: "ปรับปรุงทางเข้าอาคาร",
+      PR: "-",
+      สถานที่: "อาคาร 2",
+      นัดดู: "22/08/2026",
+      นัดเสนอ: "25/08/2026",
+      ติดต่อ1: "คุณสมชาย",
+      เบอร์1: "081-234-5678",
+      ติดต่อ2: "-",
+      เบอร์2: "-",
+      บริษัท: "ON105",
+      สถานะ: "รอดูงาน",
+      หมายเหตุ: "",
+      เอกสาร: ""
+    }
   }
 ];
 
@@ -361,6 +443,7 @@ function getIconComponent(name: string) {
     case "FileCheck": return FileCheck;
     case "Receipt": return Receipt;
     case "DollarSign": return DollarSign;
+    case "CheckCircle2": return CheckCircle2;
     default: return FileSpreadsheet;
   }
 }
@@ -541,7 +624,7 @@ export function DataHubClient() {
   async function handleTriggerBackupNow() {
     setBackingUpFull(true);
     try {
-      showToast("info", "กำลังรวบรวมข้อมูลทั้ง 12 ตาราง และบันทึกจุดสำรองข้อมูล...");
+      showToast("info", "กำลังรวบรวมข้อมูลทั้ง 14 ตาราง และบันทึกจุดสำรองข้อมูล...");
       const res = await fetch("/api/backup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -585,7 +668,7 @@ export function DataHubClient() {
       URL.revokeObjectURL(url);
 
       const totalRows = backupData.summary?.totalRows || 0;
-      showToast("success", `สำรองข้อมูลทั้งระบบสำเร็จ (1 ไฟล์ ครบทั้ง 12 ตาราง รวม ${totalRows.toLocaleString()} แถว)`);
+      showToast("success", `สำรองข้อมูลทั้งระบบสำเร็จ (1 ไฟล์ ครบทั้ง 14 ตาราง รวม ${totalRows.toLocaleString()} แถว)`);
     } catch (err: any) {
       showToast("error", err instanceof Error ? err.message : "สำรองข้อมูลไม่สำเร็จ");
     } finally {
@@ -600,7 +683,7 @@ export function DataHubClient() {
       current: 0,
       total: 100,
       message: "กำลังรวบรวมข้อมูลทุกตารางและสร้างฐานข้อมูล...",
-      subMessage: "กำลังเชื่อมต่อ API เพื่อดึงข้อมูลทั้ง 12 ตาราง"
+      subMessage: "กำลังเชื่อมต่อ API เพื่อดึงข้อมูลทั้ง 14 ตาราง (รวม Tasks & Works)"
     });
 
     try {
@@ -609,8 +692,8 @@ export function DataHubClient() {
       if (!res.ok) throw new Error("ไม่สามารถดึงข้อมูลสำรองจากเซิร์ฟเวอร์ได้");
       const backupData = await res.json();
 
-      // 2. Extract all attachment URLs
-      const attachments = extractAllAttachmentUrls(backupData.tables || {});
+      // 2. Extract all attachment URLs (including Tasks & Works attachments in system_options)
+      const attachments = extractAllAttachmentUrls(backupData.tables || {}, backupData.system_options);
       const totalImages = attachments.length;
 
       setImportProgress({
@@ -694,12 +777,12 @@ export function DataHubClient() {
       const readmeContent = `COSTLAB ENTERPRISE SYSTEM BACKUP ARCHIVE\n` +
         `========================================\n` +
         `Backup Date: ${new Date().toISOString()}\n` +
-        `Total Tables: ${backupData.summary?.totalTables || 12}\n` +
+        `Total Tables: ${backupData.summary?.totalTables || 14}\n` +
         `Total Rows: ${backupData.summary?.totalRows || 0}\n` +
         `Total Attachments: ${manifest.length} saved (${failedCount} failed)\n\n` +
         `Files in this archive:\n` +
-        `- database.json: Complete PostgreSQL records for all 12 tables + system options\n` +
-        `- attachments/: Folder containing all attached receipt/bill photos\n` +
+        `- database.json: Complete PostgreSQL records for all 14 tables (including Tasks & Works) + system options\n` +
+        `- attachments/: Folder containing all attached receipt/bill/task/work photos & files\n` +
         `- attachments_manifest.json: Mapping of original URLs to local attachments\n`;
       zip.file("README.txt", readmeContent);
 
@@ -815,7 +898,7 @@ export function DataHubClient() {
       setImportProgress({
         current: isZip && attachmentFiles.length > 0 ? 30 : 50,
         total: 100,
-        message: "กำลังกู้คืนข้อมูลทั้ง 12 ตารางและตัวเลือกระบบลง Supabase...",
+        message: "กำลังกู้คืนข้อมูลทั้ง 14 ตารางและตัวเลือกระบบลง Supabase...",
         subMessage: "ระบบกำลังตรวจสอบข้อมูลซ้ำและบันทึกอัตโนมัติ"
       });
 
@@ -905,7 +988,7 @@ export function DataHubClient() {
         importType: isZip ? "restore_zip" : "restore_json",
         title: isZip
           ? `กู้คืนระบบแบบสมบูรณ์ (.ZIP รวมรูปภาพ ${restoredImagesCount} รูป)`
-          : "กู้คืนข้อมูลทั้งระบบ (.JSON 12 ตาราง)",
+          : "กู้คืนข้อมูลทั้งระบบ (.JSON 14 ตาราง)",
         fileName: file.name,
         totalRows: result.totalRestored || 0,
         successCount: result.totalRestored || 0,
@@ -1114,7 +1197,7 @@ export function DataHubClient() {
         await exportTableCSV(table);
         totalExported++;
         await new Promise((r) => setTimeout(r, 400));
-      } catch (e) {}
+      } catch (e) { }
     }
 
     setExportingAll(false);
@@ -1137,6 +1220,8 @@ export function DataHubClient() {
     if (cleanName.includes("project") || cleanName.includes("โครงการ")) return TABLES_REGISTRY.find(t => t.id === "projects") || null;
     if (cleanName.includes("bill") || cleanName.includes("data") || cleanName.includes("บิล") || cleanName.includes("เบิกเงิน")) return TABLES_REGISTRY.find(t => t.id === "bills") || null;
     if (cleanName.includes("loan") || cleanName.includes("ยืมเงิน")) return TABLES_REGISTRY.find(t => t.id === "loans") || null;
+    if (cleanName.includes("task") || cleanName.includes("จัดการงาน")) return TABLES_REGISTRY.find(t => t.id === "tasks") || null;
+    if (cleanName.includes("works") || cleanName.includes("pw") || cleanName.includes("งานpw")) return TABLES_REGISTRY.find(t => t.id === "works") || null;
 
     // Match by header columns
     const lowerHeader = firstLine.toLowerCase();
@@ -1145,7 +1230,9 @@ export function DataHubClient() {
     if (lowerHeader.includes("id_contractor") || lowerHeader.includes("จำกัดยอด/ปี")) return TABLES_REGISTRY.find(t => t.id === "contractors") || null;
     if (lowerHeader.includes("id_conwork") || lowerHeader.includes("ยอดเงินจ้าง")) return TABLES_REGISTRY.find(t => t.id === "contract_works") || null;
     if (lowerHeader.includes("id project") && (lowerHeader.includes("งบไม่เกิน") || lowerHeader.includes("ยอดรวม vat"))) return TABLES_REGISTRY.find(t => t.id === "projects") || null;
-    if (lowerHeader.includes("รหัสพนักงาน") || (lowerHeader.includes("สิทธิ์การใช้งาน") && lowerHeader.includes("ชื่อเล่น"))) return TABLES_REGISTRY.find(t => t.id === "people") || null;
+    if (lowerHeader.includes("รหัสพนักงาน") && (lowerHeader.includes("สิทธิ์การใช้งาน") || lowerHeader.includes("ชื่อเล่น"))) return TABLES_REGISTRY.find(t => t.id === "people") || null;
+    if (lowerHeader.includes("ดู/ทำ") && lowerHeader.includes("ส่งงาน")) return TABLES_REGISTRY.find(t => t.id === "tasks") || null;
+    if (lowerHeader.includes("นัดดู") && lowerHeader.includes("นัดเสนอ")) return TABLES_REGISTRY.find(t => t.id === "works") || null;
     if (lowerHeader.includes("id_car") || lowerHeader.includes("หมายเลขทะเบียน")) return TABLES_REGISTRY.find(t => t.id === "cars") || null;
     if (lowerHeader.includes("id_cus") || lowerHeader.includes("ชื่อลูกค้า")) return TABLES_REGISTRY.find(t => t.id === "customers") || null;
     if (lowerHeader.includes("id_company") || lowerHeader.includes("ชื่อบริษัท")) return TABLES_REGISTRY.find(t => t.id === "companies") || null;
@@ -1490,14 +1577,14 @@ export function DataHubClient() {
                   ศูนย์นำเข้า ส่งออก และสำรองข้อมูล
                 </h1>
                 <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#0b3531] text-[#d4f54e] border border-[#144d47] shrink-0">
-                  12 ตารางระบบ
+                  14 ตารางระบบ
                 </span>
                 <span className="text-xs text-slate-400 font-mono hidden sm:inline">
                   ({loadingCounts ? "..." : `${totalRowCount.toLocaleString()} แถว`})
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5 truncate">
-                จัดการไฟล์ CSV แยกตาราง และสำรอง/กู้คืนฐานข้อมูลทั้งระบบ
+                จัดการไฟล์ CSV แยกตาราง และสำรอง/กู้คืนฐานข้อมูลทั้งระบบ (รวม Tasks & Works)
               </p>
             </div>
           </div>
@@ -1528,24 +1615,22 @@ export function DataHubClient() {
         <button
           type="button"
           onClick={() => setActiveMainTab("table_csv")}
-          className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer shadow-2xs whitespace-nowrap ${
-            activeMainTab === "table_csv"
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer shadow-2xs whitespace-nowrap ${activeMainTab === "table_csv"
               ? "bg-[#0b3531] text-white border border-[#144d47]"
               : "bg-white text-slate-700 hover:text-slate-900 border border-slate-200/90 hover:bg-slate-50"
-          }`}
+            }`}
         >
           <FileSpreadsheet className="w-4 h-4 text-[#d4f54e]" />
-          <span>นำเข้า & ส่งออก CSV (12 ตาราง)</span>
+          <span>นำเข้า & ส่งออก CSV (14 ตาราง)</span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveMainTab("standard_backup")}
-          className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer shadow-2xs whitespace-nowrap ${
-            activeMainTab === "standard_backup"
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer shadow-2xs whitespace-nowrap ${activeMainTab === "standard_backup"
               ? "bg-[#0b3531] text-white border border-[#144d47]"
               : "bg-white text-slate-700 hover:text-slate-900 border border-slate-200/90 hover:bg-slate-50"
-          }`}
+            }`}
         >
           <Shield className="w-4 h-4 text-emerald-600" />
           <span>สำรอง & กู้คืนทั้งระบบ</span>
@@ -1557,11 +1642,10 @@ export function DataHubClient() {
         <button
           type="button"
           onClick={() => setActiveMainTab("import_history")}
-          className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer shadow-2xs whitespace-nowrap ${
-            activeMainTab === "import_history"
+          className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer shadow-2xs whitespace-nowrap ${activeMainTab === "import_history"
               ? "bg-[#0b3531] text-white border border-[#144d47]"
               : "bg-white text-slate-700 hover:text-slate-900 border border-slate-200/90 hover:bg-slate-50"
-          }`}
+            }`}
         >
           <History className="w-4 h-4 text-indigo-600" />
           <span>ประวัติการนำเข้า</span>
@@ -1583,35 +1667,32 @@ export function DataHubClient() {
               <button
                 type="button"
                 onClick={() => setSelectedCategory("all")}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer ${
-                  selectedCategory === "all"
+                className={`px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer ${selectedCategory === "all"
                     ? "bg-white text-slate-900 shadow-2xs"
                     : "text-slate-600 hover:text-slate-900"
-                }`}
+                  }`}
               >
-                ทั้งหมด (12)
+                ทั้งหมด (14)
               </button>
               <button
                 type="button"
                 onClick={() => setSelectedCategory("master")}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer ${
-                  selectedCategory === "master"
+                className={`px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer ${selectedCategory === "master"
                     ? "bg-white text-slate-900 shadow-2xs"
                     : "text-slate-600 hover:text-slate-900"
-                }`}
+                  }`}
               >
                 ข้อมูลหลัก (8)
               </button>
               <button
                 type="button"
                 onClick={() => setSelectedCategory("transaction")}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer ${
-                  selectedCategory === "transaction"
+                className={`px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer ${selectedCategory === "transaction"
                     ? "bg-white text-slate-900 shadow-2xs"
                     : "text-slate-600 hover:text-slate-900"
-                }`}
+                  }`}
               >
-                โครงการ & บิล (4)
+                โครงการ & งาน (6)
               </button>
             </div>
 
@@ -1704,11 +1785,10 @@ export function DataHubClient() {
                         </td>
 
                         <td className="py-2.5 px-3">
-                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-medium border ${
-                            table.category === "master"
+                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-medium border ${table.category === "master"
                               ? "bg-slate-50 text-slate-600 border-slate-200"
                               : "bg-indigo-50 text-indigo-700 border-indigo-200"
-                          }`}>
+                            }`}>
                             {table.category === "master" ? "ข้อมูลหลัก" : "โครงการ & บิล"}
                           </span>
                         </td>
@@ -1820,7 +1900,7 @@ export function DataHubClient() {
                   )}
                 </div>
                 <p className="text-xs text-emerald-200/80">
-                  ครอบคลุมครบ 12 ตารางฐานข้อมูล ({totalRowCount.toLocaleString()} แถว) และไฟล์รูปภาพแนบทั้งหมด
+                  ครอบคลุมครบ 14 ตารางฐานข้อมูล ({totalRowCount.toLocaleString()} แถว รวม Tasks & Works) และไฟล์รูปภาพแนบทั้งหมด
                 </p>
               </div>
 
@@ -1833,7 +1913,7 @@ export function DataHubClient() {
                   disabled={backingUpZip || backingUpFull || restoringFull}
                   style={{ backgroundColor: "#d4f54e", color: "#0b3531" }}
                   className="px-3.5 py-2 hover:opacity-90 active:scale-98 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition shadow-sm cursor-pointer disabled:opacity-50"
-                  title="ดาวน์โหลดทั้ง 12 ตารางฐานข้อมูลพร้อมไฟล์รูปถ่ายบิลต้นฉบับทั้งหมด (.ZIP)"
+                  title="ดาวน์โหลดทั้ง 14 ตารางฐานข้อมูลพร้อมไฟล์รูปถ่ายบิล/งานต้นฉบับทั้งหมด (.ZIP)"
                 >
                   {backingUpZip ? (
                     <Loader2 size={14} className="animate-spin text-[#0b3531]" />
@@ -2106,11 +2186,10 @@ export function DataHubClient() {
                   </div>
 
                   <span
-                    className={`px-2 py-0.5 rounded text-[11px] font-mono shrink-0 ${
-                      item.success
+                    className={`px-2 py-0.5 rounded text-[11px] font-mono shrink-0 ${item.success
                         ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
                         : "bg-rose-50 text-rose-700 border border-rose-200"
-                    }`}
+                      }`}
                   >
                     {item.success ? `+${item.count.toLocaleString()} รายการ` : "ล้มเหลว"}
                   </span>
