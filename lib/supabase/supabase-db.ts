@@ -3278,7 +3278,9 @@ export async function bulkInsertRowsToSupabase(tableName: string, rowsData: Reco
         // New record
         if (!rowCopy.id && dbTable !== "bills") {
           maxNum++;
-          rowCopy.id = prefix ? `${prefix}${maxNum}` : `${maxNum}`;
+          rowCopy.id = prefix
+            ? `${prefix}${maxNum}`
+            : (dbTable === "tasks" || dbTable === "works" || dbTable === "plans" ? maxNum : `${maxNum}`);
         }
         const dedupKey = rowCopy.id ? String(rowCopy.id) : (bKey || `temp_${Math.random()}`);
         dedupedMap.set(dedupKey, rowCopy);
@@ -3306,6 +3308,81 @@ export async function bulkInsertRowsToSupabase(tableName: string, rowsData: Reco
       }
       if (Object.keys(bankEntries).length > 0) {
         saveEntityBanksBatch(bankEntries).catch(() => {});
+      }
+    }
+
+    // Preserve task_attachments & work_attachments in system_options during bulk import/restore
+    if (dbTable === "tasks") {
+      try {
+        const allTaskAtt = await getAllTaskAttachments();
+        let hasChanges = false;
+        for (const rawRow of rowsData) {
+          const tid = String(rawRow.id ?? rawRow["ลำดับ"] ?? "").trim();
+          if (!tid) continue;
+          const imgVal = rawRow["เอกสาร"] ?? rawRow["รูปภาพ"] ?? rawRow.image_url ?? rawRow["ไฟล์แนบ"];
+          const projVal = rawRow["โครงการ"] ?? rawRow.project;
+          const noteVal = rawRow["หมายเหตุ"] ?? rawRow.note;
+          const subBy = rawRow["ผู้เปิดงาน"] ?? rawRow["ผู้สร้าง"] ?? rawRow.submittedBy;
+          if (imgVal || projVal || noteVal || subBy) {
+            const existing = allTaskAtt[tid] || { taskId: tid, images: [] };
+            const parsedImgs = imgVal
+              ? String(imgVal).split(/\s*,\s*|\s*;\s*|\n+/).map(s => s.trim()).filter(Boolean)
+              : existing.images || [];
+            allTaskAtt[tid] = {
+              ...existing,
+              taskId: tid,
+              images: parsedImgs.length > 0 ? parsedImgs : (existing.images || []),
+              project: projVal !== undefined ? String(projVal).trim() : existing.project,
+              note: noteVal !== undefined ? String(noteVal).trim() : existing.note,
+              submittedBy: subBy !== undefined ? String(subBy).trim() : existing.submittedBy,
+              submittedAt: existing.submittedAt || new Date().toISOString()
+            };
+            hasChanges = true;
+          }
+        }
+        if (hasChanges) {
+          await supabaseAdmin.from("system_options").upsert({
+            id: "task_attachments",
+            data: allTaskAtt,
+            updated_at: new Date().toISOString()
+          });
+        }
+      } catch (e) {
+        console.warn("Failed to sync task_attachments during bulk insert:", e);
+      }
+    } else if (dbTable === "works") {
+      try {
+        const allWorkAtt = await getAllWorkAttachments();
+        let hasChanges = false;
+        for (const rawRow of rowsData) {
+          const wid = String(rawRow.id ?? rawRow["ลำดับ"] ?? "").trim();
+          if (!wid) continue;
+          const imgVal = rawRow["เอกสาร"] ?? rawRow["รูปภาพ"] ?? rawRow.image_url ?? rawRow["ไฟล์แนบ"];
+          const subBy = rawRow["ผู้เปิดงาน"] ?? rawRow["ผู้สร้าง"] ?? rawRow.submittedBy;
+          if (imgVal || subBy) {
+            const existing = allWorkAtt[wid] || { workId: wid, images: [] };
+            const parsedImgs = imgVal
+              ? String(imgVal).split(/\s*,\s*|\s*;\s*|\n+/).map(s => s.trim()).filter(Boolean)
+              : existing.images || [];
+            allWorkAtt[wid] = {
+              ...existing,
+              workId: wid,
+              images: parsedImgs.length > 0 ? parsedImgs : (existing.images || []),
+              submittedBy: subBy !== undefined ? String(subBy).trim() : existing.submittedBy,
+              submittedAt: existing.submittedAt || new Date().toISOString()
+            };
+            hasChanges = true;
+          }
+        }
+        if (hasChanges) {
+          await supabaseAdmin.from("system_options").upsert({
+            id: "work_attachments",
+            data: allWorkAtt,
+            updated_at: new Date().toISOString()
+          });
+        }
+      } catch (e) {
+        console.warn("Failed to sync work_attachments during bulk insert:", e);
       }
     }
 
@@ -3557,10 +3634,12 @@ export async function cleanupOrphanedStorageImages(bucketName = "repairs", dryRu
     const files = fileList || [];
     const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
 
-    const [{ data: billsData }, { data: tasksData }, { data: worksData }] = await Promise.all([
+    const [{ data: billsData }, { data: tasksData }, { data: worksData }, taskAttachmentsMap, workAttachmentsMap] = await Promise.all([
       supabaseAdmin.from("bills").select("image_url, data"),
       Promise.resolve(supabaseAdmin.from("tasks").select("image_url, data")).catch(() => ({ data: [] as any[] })),
-      Promise.resolve(supabaseAdmin.from("works").select("image_url, data")).catch(() => ({ data: [] as any[] }))
+      Promise.resolve(supabaseAdmin.from("works").select("image_url, data")).catch(() => ({ data: [] as any[] })),
+      getAllTaskAttachments(),
+      getAllWorkAttachments()
     ]);
 
     const activePaths = new Set<string>();
@@ -3609,6 +3688,23 @@ export async function cleanupOrphanedStorageImages(bucketName = "repairs", dryRu
         if (w.data["รูปภาพ"]) extractPath(w.data["รูปภาพ"]);
         if (w.data["image_url"]) extractPath(w.data["image_url"]);
         if (w.data["attachments"]) extractPath(w.data["attachments"]);
+      }
+    }
+
+    for (const att of Object.values(taskAttachmentsMap || {})) {
+      if (Array.isArray(att?.images)) {
+        for (const u of att.images) extractPath(u);
+      }
+      if (Array.isArray((att as any)?.files)) {
+        for (const f of (att as any).files) {
+          if (f?.url) extractPath(f.url);
+        }
+      }
+    }
+
+    for (const att of Object.values(workAttachmentsMap || {})) {
+      if (Array.isArray(att?.images)) {
+        for (const u of att.images) extractPath(u);
       }
     }
 

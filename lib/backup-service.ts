@@ -43,7 +43,9 @@ export const ALL_SYSTEM_TABLES = [
   { id: "projects", tableName: "Project", name: "โครงการ (Projects)" },
   { id: "contract_works", tableName: "งานรับเหมา", name: "งานรับเหมา (Contract Works)" },
   { id: "bills", tableName: "Data", name: "รายการบิล (Bills / Expenses)" },
-  { id: "loans", tableName: "ยืมเงิน", name: "ยืมเงิน (Loans / Advances)" }
+  { id: "loans", tableName: "ยืมเงิน", name: "ยืมเงิน (Loans / Advances)" },
+  { id: "tasks", tableName: "Tasks", name: "จัดการงาน (Tasks)" },
+  { id: "works", tableName: "Works", name: "งานรับเหมา & PW (Works)" }
 ];
 
 export const DEFAULT_BACKUP_CONFIG: BackupConfig = {
